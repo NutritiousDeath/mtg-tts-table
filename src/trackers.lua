@@ -4,8 +4,12 @@
   on a clickable tracker tile in front of each player's playmat.
 
   The tile (facing its player, readable by everyone around the table):
-      (drop)  [-]   ( heart: 40 )   [+]   (crown)(crown)
-                                          (crown)(crown)
+                                          (crown)   <- opponent 1
+      (drop)  [-]   ( heart: 40 )   [+]   (crown)   <- opponent 2
+                                          (crown)   <- opponent 3
+      Crown order per seat (CROWN_ORDER): Blue: White, Red, Green;
+      White: Blue, Green, Red; Red: Blue, Green, White; Green: Blue, White, Red.
+      (a partner commander adds a second crown on its opponent's row)
       - Life number: click +1, right-click -1. -/+: click 1, right-click 5.
       - Green drop: poison, click +1, right-click -1.
       - Crowns: commander damage from each opposing commander, tinted in that
@@ -58,12 +62,32 @@ local function player(color)
   return p
 end
 
--- Every opposing commander a seat can take damage from:
+-- Top-to-bottom order of the commander damage crowns on each seat's tracker
+-- (each crown is the color of the opponent whose commander it tracks).
+local CROWN_ORDER = {
+  Blue = { "White", "Red", "Green" },
+  White = { "Blue", "Green", "Red" },
+  Red = { "Blue", "Green", "White" },
+  Green = { "Blue", "White", "Red" },
+}
+
+-- Opponents of a seat in crown order (seats not in the layout are skipped).
+local function opponentsInOrder(color)
+  local list = {}
+  for _, other in ipairs(CROWN_ORDER[color] or TableSetup.activeSeats()) do
+    if other ~= color and TableSetup.isActive(other) then
+      table.insert(list, other)
+    end
+  end
+  return list
+end
+
+-- Every opposing commander a seat can take damage from, in crown order:
 -- list of { key = "<seat>|<name>", seat, name }.
 local function opposingCommanders(color)
   local list = {}
-  for _, other in ipairs(TableSetup.activeSeats()) do
-    if other ~= color then
+  for _, other in ipairs(opponentsInOrder(color)) do
+    do
       local op = player(other)
       for _, name in ipairs(op and op.commanderNames or {}) do
         table.insert(list, { key = other .. "|" .. name, seat = other, name = name })
@@ -298,11 +322,11 @@ local CLEAR = { 0, 0, 0, 0 }   -- invisible button background (icon shows throug
 local HEART = { x = 0, z = 0, size = 4.2 }
 local MINUS_X, PLUS_X = -3.1, 3.1
 local POISON_SLOT = { x = -5.0, z = 0 }
-local CROWN_SLOTS = {
-  { x = 4.8, z = 0.85 }, { x = 6.25, z = 0.85 }, { x = 4.8, z = -0.85 }, { x = 6.25, z = -0.85 },
-  { x = -6.4, z = 0.85 }, { x = -6.4, z = -0.85 },
-}
-local ICON_SIZE = 1.4
+-- Commander damage crowns: a column beside the heart, one row per opponent
+-- (in turn order); a partner commander goes in a second column on that row.
+local CROWN_COLUMN_X = { 4.7, 6.15 }
+local CROWN_ROW_Z = { 1.45, 0, -1.45 }
+local ICON_SIZE = 1.3
 
 local function decal(name, file, x, z, size)
   return {
@@ -370,8 +394,16 @@ function Trackers.render(color)
     width = 700, height = 700, font_size = 300, color = CLEAR, x = POISON_SLOT.x, z = POISON_SLOT.z - 0.15 })
 
   -- Commander damage: a crown in each opposing seat's color, count on top.
+  -- Row = which opponent, column = which of their commanders.
+  local rowOf, colInRow, rows = {}, {}, 0
   for i, c in ipairs(opposingCommanders(color)) do
-    local slot = CROWN_SLOTS[i]
+    if rowOf[c.seat] == nil then
+      rows = rows + 1
+      rowOf[c.seat] = rows
+    end
+    colInRow[c.seat] = (colInRow[c.seat] or 0) + 1
+    local slot = CROWN_ROW_Z[rowOf[c.seat]] and CROWN_COLUMN_X[colInRow[c.seat]]
+      and { x = CROWN_COLUMN_X[colInRow[c.seat]], z = CROWN_ROW_Z[rowOf[c.seat]] }
     if slot then
       local dmg = p.commanderDamage[c.key] or 0
       table.insert(decals, decal("crown" .. i, "tracker_crown_" .. c.seat .. ".png", slot.x, slot.z, ICON_SIZE))
