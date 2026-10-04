@@ -322,7 +322,9 @@ end
 
 local function button(tile, params)
   params.function_owner = Global
-  params.position = { params.x or 0, BUTTON_Y, params.z or 0 }
+  -- TTS mirrors a button's local x compared to decals on the same object, so
+  -- x is flipped here to keep each button exactly over its icon.
+  params.position = { -(params.x or 0), BUTTON_Y, params.z or 0 }
   params.x, params.z = nil, nil
   params.rotation = { 0, 180, 0 }
   params.font_color = params.font_color or INK

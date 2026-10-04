@@ -51,7 +51,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.22 (crowns always shown)"
+SCRIPT_VERSION = "0.23 (tracker buttons line up with icons)"
 
 function onLoad(saved)
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)
