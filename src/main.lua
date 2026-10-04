@@ -2,6 +2,11 @@
   main.lua
   Global entry point: load/save the game state, build the UI, dev test commands.
 
+  Global.-1.lua only needs one line:
+    require("src/main")
+  This file loads every other module, so adding a module never means
+  editing Global.-1.lua.
+
   Chat commands (type in TTS chat):
     !state       print the current game state
     !testparse   run the deck parser on a built-in sample list
@@ -9,6 +14,13 @@
     !cardinfo    print the image links of the card under your mouse
     !reset       wipe the game state back to a fresh Commander game
 --]]
+
+-- Load order matters: later modules use the earlier ones.
+require("src/gamestate")
+require("src/deckparser")
+require("src/importer")
+require("src/archidekt")
+require("src/ui")
 
 local SAMPLE_DECK = [[
 Commander

@@ -36,6 +36,11 @@ local function usingRelay()
   return RELAY_HOST ~= ""
 end
 
+-- Other modules (Archidekt) use the relay too. Returns "" when there's none.
+function Importer.relayHost()
+  return RELAY_HOST
+end
+
 local function imageHost()
   if usingRelay() then
     return RELAY_HOST
@@ -265,9 +270,62 @@ local function seatSpots(color)
 
   local deckPos = { x = hp.x + dx * 9, y = 2, z = hp.z + dz * 9 }
   local cmdrPos = { x = deckPos.x - rx * 4, y = 2, z = deckPos.z - rz * 4 }
+  -- Label sits on the player's side of the command zone, below the card.
+  local labelPos = { x = cmdrPos.x - dx * 2.6, y = 1.02, z = cmdrPos.z - dz * 2.6 }
   local atan2 = math.atan2 or math.atan
   local yaw = math.deg(atan2(-dx, -dz))
-  return deckPos, cmdrPos, yaw
+  return deckPos, cmdrPos, yaw, labelPos
+end
+
+---------------------------------------------------------------------------
+-- Command zone
+-- One scripting zone per seat, tagged "CommandZone", with a floor label.
+-- Created on first import at that seat and remembered in GameState so it
+-- isn't duplicated. Phase 2 builds the other zones the same way.
+---------------------------------------------------------------------------
+
+local function ensureCommandZone(color, pos, yaw, labelPos)
+  local player = GameState.player(color)
+  if player == nil then
+    return
+  end
+  -- Flat 3D text reads correctly from the seat when turned to face the player.
+  local labelRotation = { 90, yaw + 180, 0 }
+
+  if player.commandZone and getObjectFromGUID(player.commandZone) then
+    -- Zone already exists; keep its label facing the right way.
+    local existing = player.commandZoneLabel and getObjectFromGUID(player.commandZoneLabel)
+    if existing then
+      existing.setRotation(labelRotation)
+    end
+    return
+  end
+
+  spawnObject({
+    type = "ScriptingTrigger",
+    position = { pos.x, 1.5, pos.z },
+    rotation = { 0, yaw, 0 },
+    scale = { 3.4, 2, 4.6 },
+    callback_function = function(zone)
+      zone.setName(color .. " Command Zone")
+      zone.addTag("CommandZone")
+      player.commandZone = zone.getGUID()
+    end,
+  })
+
+  spawnObject({
+    type = "3DText",
+    position = { labelPos.x, labelPos.y, labelPos.z },
+    rotation = labelRotation,
+    callback_function = function(label)
+      label.TextTool.setValue("COMMAND ZONE")
+      label.TextTool.setFontSize(36)
+      label.TextTool.setFontColor({ 0, 0.7, 0.64 })
+      label.setLock(true)
+      label.interactable = false
+      player.commandZoneLabel = label.getGUID()
+    end,
+  })
 end
 
 ---------------------------------------------------------------------------
@@ -577,6 +635,125 @@ local function ensureImages(cards, onDone, onProgress)
 end
 
 ---------------------------------------------------------------------------
+-- Relay card building (fast path)
+-- The relay returns each card as a ready-made JSON template, so Lua never
+-- decodes or encodes card data; it only swaps in IDs and joins strings.
+---------------------------------------------------------------------------
+
+local RELAY_BATCH = 25
+
+-- TTS's Lua engine (MoonSharp) throws "pattern too complex" when patterns
+-- run over very long strings, and each relay line is thousands of characters.
+-- So relay text is handled with plain find/sub only, never patterns.
+
+-- Split s on a literal separator. Keeps empty fields.
+local function splitPlain(s, sep)
+  local out, init = {}, 1
+  while true do
+    local i = string.find(s, sep, init, true)
+    if i == nil then
+      table.insert(out, string.sub(s, init))
+      return out
+    end
+    table.insert(out, string.sub(s, init, i - 1))
+    init = i + #sep
+  end
+end
+
+-- Replace every occurrence of a literal string.
+local function replacePlain(s, find, repl)
+  local parts, init = {}, 1
+  while true do
+    local i = string.find(s, find, init, true)
+    if i == nil then
+      table.insert(parts, string.sub(s, init))
+      break
+    end
+    table.insert(parts, string.sub(s, init, i - 1))
+    table.insert(parts, repl)
+    init = i + #find
+  end
+  return table.concat(parts)
+end
+
+-- Swap the relay's ID placeholders for real IDs.
+local function fillTemplate(tpl, id1, id2)
+  local s = tpl
+  s = replacePlain(s, '"@@CID1@@"', tostring(id1 * 100))
+  s = replacePlain(s, '"@@CID2@@"', tostring(id2 * 100))
+  s = replacePlain(s, "@@ID1@@", tostring(id1))
+  s = replacePlain(s, "@@ID2@@", tostring(id2))
+  return s
+end
+
+-- Read one batch of relay output into results. Lines are
+-- KIND <tab> index <tab> a [<tab> b]; indexes are 0-based within the batch.
+local function parseRelayText(text, first, results)
+  for _, line in ipairs(splitPlain(text, "\n")) do
+    local f = splitPlain(line, "\t")
+    local kind, idx = f[1], tonumber(f[2])
+    if idx then
+      local i = first + idx
+      if kind == "CARD" then
+        results.cards[i] = { card = f[3] or "", entry = f[4] or "" }
+      elseif kind == "MISS" then
+        table.insert(results.missing, f[3] or "?")
+      elseif kind == "FIXED" then
+        table.insert(results.fixed, f[3] or "?")
+      end
+    end
+  end
+end
+
+-- entries: parsed deck entries. onDone(results) or onDone(nil, error).
+-- results = { cards = {[i] = {card=tpl, entry=tpl}}, missing = {names}, fixed = {names} }
+local function fetchViaRelay(entries, onDone, onProgress)
+  local results = { cards = {}, missing = {}, fixed = {} }
+  local url = "https://" .. RELAY_HOST .. "/cards"
+  local done = 0
+
+  local function runBatch(first)
+    if first > #entries then
+      onDone(results)
+      return
+    end
+    local last = math.min(first + RELAY_BATCH - 1, #entries)
+    local items = {}
+    for i = first, last do
+      local e = entries[i]
+      table.insert(items, {
+        name = e.name,
+        set = e.set,
+        cn = e.collectorNumber,
+        commander = e.commander and true or false,
+      })
+    end
+
+    WebRequest.custom(url, "POST", true, JSON.encode({ items = items }), {
+      ["Content-Type"] = "application/json",
+      ["Accept"] = "text/plain",
+    }, function(req)
+      if req.is_error or req.response_code ~= 200 then
+        onDone(nil, "HTTP " .. tostring(req.response_code))
+        return
+      end
+      local ok, err = pcall(parseRelayText, req.text, first, results)
+      if not ok then
+        onDone(nil, "couldn't read relay reply: " .. tostring(err))
+        return
+      end
+      done = last
+      if onProgress then
+        onProgress(done, #entries)
+      end
+      Wait.time(function() runBatch(last + 1) end, 0.1)
+    end)
+  end
+
+  runBatch(1)
+end
+
+---------------------------------------------------------------------------
 -- Public
 ---------------------------------------------------------------------------
 
@@ -652,7 +829,10 @@ function Importer.importDeck(color, text)
       end
     end
 
-    local deckPos, cmdrPos, yaw = seatSpots(color)
+    local deckPos, cmdrPos, yaw, labelPos = seatSpots(color)
+    if #commanderCards > 0 then
+      ensureCommandZone(color, cmdrPos, yaw, labelPos)
+    end
     local player = GameState.player(color)
     if player then
       player.commanders = {}
@@ -730,9 +910,92 @@ function Importer.importDeck(color, text)
     end, progress)
   end
 
-  -- Pass 1: look up by set/number where given. Pass 2: anything that didn't
-  -- come back with the right name is looked up again by name alone.
-  fetchCollection(entries, function(cards)
+  -- Fast path: the relay looks cards up and builds them; Lua only joins text.
+  local function spawnFromTemplates(results)
+    progress("Building deck...")
+    local missing, fixed = results.missing, results.fixed
+    local player = GameState.player(color)
+    local deckPos, cmdrPos, yaw, labelPos = seatSpots(color)
+
+    local commanderJson, mainCards, deckIds, deckEntries = {}, {}, {}, {}
+    for i, e in ipairs(entries) do
+      local t = results.cards[i]
+      if t then
+        local copies = e.commander and 1 or e.count
+        for _ = 1, copies do
+          local id1, id2 = nextDeckId(), nextDeckId()
+          local json = fillTemplate(t.card, id1, id2)
+          if e.commander then
+            table.insert(commanderJson, json)
+          else
+            table.insert(mainCards, json)
+            table.insert(deckIds, tostring(id1 * 100))
+            table.insert(deckEntries, fillTemplate(t.entry, id1, id2))
+          end
+        end
+      end
+    end
+
+    if #commanderJson > 0 then
+      ensureCommandZone(color, cmdrPos, yaw, labelPos)
+    end
+    if player then
+      player.commanders = {}
+    end
+
+    progress("Spawning " .. #mainCards .. " cards...")
+    if #mainCards == 1 then
+      spawnObjectJSON({ json = mainCards[1], position = deckPos, rotation = { 0, yaw, 180 } })
+    elseif #mainCards > 1 then
+      local deckJson = '{"Name":"Deck","Transform":{"posX":0,"posY":0,"posZ":0,"rotX":0,"rotY":180,"rotZ":180,'
+        .. '"scaleX":1,"scaleY":1,"scaleZ":1},"Nickname":"Library",'
+        .. '"DeckIDs":[' .. table.concat(deckIds, ",") .. '],'
+        .. '"CustomDeck":{' .. table.concat(deckEntries, ",") .. '},'
+        .. '"ContainedObjects":[' .. table.concat(mainCards, ",") .. ']}'
+      spawnObjectJSON({
+        json = deckJson,
+        position = deckPos,
+        rotation = { 0, yaw, 180 },
+        callback_function = function(obj)
+          obj.setName(color .. " Library")
+          progress("Deck spawned.")
+          Wait.time(function() obj.shuffle() end, 0.5)
+        end,
+      })
+    end
+
+    for i, json in ipairs(commanderJson) do
+      spawnObjectJSON({
+        json = json,
+        position = { x = cmdrPos.x, y = cmdrPos.y + i, z = cmdrPos.z },
+        rotation = { 0, yaw, 0 },
+        callback_function = function(obj)
+          if player then
+            table.insert(player.commanders, obj.getGUID())
+          end
+        end,
+      })
+    end
+
+    busy = false
+    for _, msg in ipairs(deck.warnings) do
+      broadcastToColor("Deck check: " .. msg, color, { 1, 0.8, 0.3 })
+    end
+    for _, name in ipairs(fixed) do
+      broadcastToColor("Set/number in the list didn't match " .. name .. ", so the default printing was used.", color, { 1, 0.8, 0.3 })
+    end
+    if #missing > 0 then
+      broadcastToColor("Not found on Scryfall: " .. table.concat(missing, ", "), color, { 1, 0.3, 0.3 })
+    end
+    broadcastToAll(color .. "'s deck is ready: " .. #mainCards .. " cards + " .. #commanderJson .. " commander(s).", { 0.6, 1, 0.6 })
+  end
+
+  -- Original path: Lua decodes Scryfall's data itself (slower). Used without
+  -- a relay, or if the relay fails.
+  local function runLocal()
+    -- Pass 1: look up by set/number where given. Pass 2: anything that didn't
+    -- come back with the right name is looked up again by name alone.
+    fetchCollection(entries, function(cards)
     local byName, bySetNum = indexCards(cards)
     local retry, fixed = {}, {}
     for _, e in ipairs(entries) do
@@ -764,4 +1027,26 @@ function Importer.importDeck(color, text)
       build(cards, found)
     end, nameOnlyIdentifier, onFetchProgress)
   end, nil, onFetchProgress)
+  end
+
+  if usingRelay() then
+    fetchViaRelay(entries, function(results, err)
+      if results then
+        Wait.frames(function()
+          -- If anything in the fast path fails, recover with the built-in import
+          -- instead of leaving the importer stuck as "busy".
+          local ok, buildErr = pcall(spawnFromTemplates, results)
+          if not ok then
+            progress("Fast import failed (" .. tostring(buildErr) .. "). Using the slower built-in import.")
+            runLocal()
+          end
+        end, 1)
+      else
+        progress("Relay unavailable (" .. tostring(err) .. "). Using the slower built-in import.")
+        runLocal()
+      end
+    end, onFetchProgress)
+  else
+    runLocal()
+  end
 end

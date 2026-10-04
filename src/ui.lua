@@ -5,7 +5,8 @@
 
   Current controls:
     "Import Deck" button (top left) opens a panel with a paste box.
-    "Import" sends the pasted list to Importer.importDeck for that player.
+    "Import" takes an Archidekt link (fetched via Archidekt) or a pasted
+    list, and hands it to Importer.importDeck for that player.
 --]]
 
 TableUI = {}
@@ -35,7 +36,7 @@ local XML = [[
        allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="16 16 16 16" spacing="10" childForceExpandHeight="false">
     <Text fontSize="22" fontStyle="Bold" alignment="MiddleLeft" preferredHeight="32">Import Commander Deck</Text>
-    <Text fontSize="13" alignment="MiddleLeft" preferredHeight="36" color="#8B98A9">Paste a decklist (plain text, Moxfield or Archidekt export). Put the commander under a "Commander" header or tag it [Commander] / *CMDR*.</Text>
+    <Text fontSize="13" alignment="MiddleLeft" preferredHeight="36" color="#8B98A9">Paste an Archidekt deck link, or a decklist (plain text, Moxfield or Archidekt export). In a pasted list, put the commander under a "Commander" header or tag it [Commander] / *CMDR*.</Text>
     <InputField id="deckInput"
                 onValueChanged="ui_deckText"
                 lineType="MultiLineNewline"
@@ -75,11 +76,36 @@ function ui_deckText(player, value)
 end
 
 function ui_importDeck(player)
-  if player.color == "Grey" or player.color == "Black" then
-    broadcastToColor("Take a seat first, then import.", player.color, { 1, 0.6, 0.2 })
+  local color = player.color
+  if color == "Grey" or color == "Black" then
+    broadcastToColor("Take a seat first, then import.", color, { 1, 0.6, 0.2 })
     return
   end
+  local text = pastedText[color]
+
+  if Archidekt.isMoxfieldLink(text) then
+    broadcastToColor("Moxfield blocks importing by link. In Moxfield: Export > Copy for MTGO, then paste the list here.", color, { 1, 0.6, 0.2 })
+    return
+  end
+
   importOpen = false
   UI.hide("importPanel")
-  Importer.importDeck(player.color, pastedText[player.color])
+
+  local deckId = Archidekt.deckId(text)
+  if deckId then
+    broadcastToColor("Fetching Archidekt deck " .. deckId .. "...", color, { 0.7, 0.85, 1 })
+    Archidekt.fetch(deckId, function(list, nameOrError)
+      if list == nil then
+        broadcastToColor(nameOrError, color, { 1, 0.3, 0.3 })
+        return
+      end
+      if nameOrError then
+        broadcastToColor("Archidekt: " .. nameOrError, color, { 0.7, 0.85, 1 })
+      end
+      Importer.importDeck(color, list)
+    end)
+    return
+  end
+
+  Importer.importDeck(color, text)
 end
