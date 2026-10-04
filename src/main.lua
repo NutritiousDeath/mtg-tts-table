@@ -15,6 +15,8 @@
     !view        point your camera at your seat
     !seats       print the script version and every seat's hand zone
     !moves       toggle printing every card move between areas
+    !where       show which zones the card under your mouse is in
+    !zones       count the cards tracked in each of your areas
     !layout 4    four players, one per side (White, Red, Green, Blue)
     !layout 2    two players facing each other (White, Green)
     !reset       wipe the game state back to a fresh Commander game
@@ -48,7 +50,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.11 (Phase 2a: zones + icons)"
+SCRIPT_VERSION = "0.16 (area tracking by position)"
 
 function onLoad(saved)
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)
@@ -70,12 +72,20 @@ function onLoad(saved)
 end
 
 -- Card movement tracking (zones.lua).
+function onObjectDrop(color, obj)
+  Zones.onDrop(color, obj)
+end
+
 function onObjectEnterZone(zone, obj)
-  Zones.onEnter(zone, obj)
+  Zones.onEnterZone(zone, obj)
 end
 
 function onObjectLeaveContainer(container, obj)
   Zones.onLeaveContainer(container, obj)
+end
+
+function onObjectEnterContainer(container, obj)
+  Zones.onEnterContainer(container, obj)
 end
 
 -- Someone sat down or switched seats: only the layout's seats are allowed;
@@ -155,6 +165,22 @@ function onChat(message, sender)
   if message == "!seats" then
     print("MTG > Version " .. SCRIPT_VERSION .. ", you are " .. tostring(sender.color))
     TableSetup.report()
+    return false
+  end
+
+  if message == "!zones" then
+    Zones.report(sender.color)
+    return false
+  end
+
+  if message == "!where" then
+    local obj = Player[sender.color] and Player[sender.color].getHoverObject()
+    print("MTG > " .. Zones.describeObject(obj))
+    local surface = GameState.data.table and getObjectFromGUID(GameState.data.table.surface or "")
+    if surface then
+      local b = surface.getBounds()
+      print(string.format("MTG > Table surface top is at height %.2f", b.center.y + b.size.y / 2))
+    end
     return false
   end
 

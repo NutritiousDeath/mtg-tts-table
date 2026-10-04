@@ -1,120 +1,66 @@
 --[[
   zones.lua
-  Scripted zones on every playmat area, and tracking of where each card is.
+  Knows which playmat area every card is in, and draws the area icons.
 
-  Each active seat gets an invisible scripting zone over these playmat areas
-  (from table.lua's layout): command, battlefield, lands, library, graveyard,
-  exile. Each seat's TTS hand zone counts as "hand".
+  How locations are worked out:
+    The playmat areas are exact rectangles (table.lua's layout). Whenever a
+    card is dropped, settles, or is merged into a pile, its position is checked
+    against those rectangles. TTS's own scripting zones were tried first but
+    didn't detect cards on this table, so areas are computed instead.
+    Each seat's TTS hand zone counts as "hand" (that event works fine).
 
-  When a card enters one of these areas, its location is updated and, if it
-  came from somewhere else, a "cardMoved" event is fired (see events.lua):
+  Areas tracked per seat: command, battlefield, lands, library, graveyard,
+  exile, plus hand. Anything outside all areas is "table".
+
+  When a card ends up somewhere new, a "cardMoved" event fires (events.lua):
       { card, name, from = {seat, region} or nil, to = {seat, region} }
-  Cards drawn out of a deck that sits in a library zone count as coming from
-  that library.
+  Phase 6 (triggers) listens to this for "dies", "enters the battlefield" etc.
 
-  Icons: each area also gets an icon (decals, loaded from the repo's
-  assets/icons folder on GitHub).
+  Icons: each area gets an icon (decals, from the repo's assets/icons folder).
 
-  Debug: !moves toggles printing every card move to chat.
+  Debug commands: !moves (log every move), !where (card under mouse),
+  !zones (what's tracked at your seat).
 --]]
 
 Zones = {}
 
--- Areas that get a scripting zone (life and tax are display-only spots).
-local ZONE_REGIONS = { "command", "battlefield", "lands", "library", "graveyard", "exile" }
+-- Areas that count as card locations (life and tax are display-only spots).
+local TRACKED_REGIONS = { "command", "battlefield", "lands", "library", "graveyard", "exile" }
 
-local ZONE_HEIGHT = 6
+-- A card counts as inside an area if its center is within this margin of the
+-- area's edge, so a card overhanging an outline slightly still counts.
+local EDGE_MARGIN = 0.6
+
+-- How long to wait after a drop before reading the card's position.
+local SETTLE_DELAY = 0.4
 
 -- Icons are served from the public GitHub repo.
 local ICON_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/icons/"
 local ICON_SIZE = { life = 2.2, command = 2.6, tax = 1.1, battlefield = 3.4, lands = 2.6,
   library = 2.6, graveyard = 2.6, exile = 2.6 }
 
-local zoneInfo = {}  -- zone GUID -> { seat, region }
 local where = {}     -- card GUID -> { seat, region }
 local showMoves = false
 
 ---------------------------------------------------------------------------
--- Building zones
+-- Setup
 ---------------------------------------------------------------------------
 
-local function state()
-  GameState.data.zones = GameState.data.zones or {}
-  return GameState.data.zones
-end
-
-local function allZonesExist(s)
-  if s.layout ~= TableSetup.layout() or s.guids == nil then
-    return false
-  end
-  local count = 0
-  for guid, _ in pairs(s.guids) do
-    if getObjectFromGUID(guid) == nil then
-      return false
-    end
-    count = count + 1
-  end
-  return count == #TableSetup.activeSeats() * #ZONE_REGIONS
-end
-
-local function clearZones(s)
-  for guid, _ in pairs(s.guids or {}) do
-    local obj = getObjectFromGUID(guid)
-    if obj then
-      obj.destruct()
-    end
-  end
-  s.guids = {}
-  zoneInfo = {}
-end
-
--- Create zones for the current layout, or reuse them if they're all there.
+-- Remove the TTS scripting zones earlier versions created (they never
+-- detected cards), then draw the icons.
 function Zones.ensure()
-  local s = state()
-  if allZonesExist(s) then
-    for guid, info in pairs(s.guids) do
-      zoneInfo[guid] = { seat = info.seat, region = info.region }
-    end
-    Zones.drawIcons()
-    return
-  end
-
-  clearZones(s)
-  s.layout = TableSetup.layout()
-  for _, color in ipairs(TableSetup.activeSeats()) do
-    for _, region in ipairs(ZONE_REGIONS) do
-      local r = TableSetup.region(color, region)
-      spawnObject({
-        type = "ScriptingTrigger",
-        position = { r.center.x, TableSetup.SURFACE_TOP + ZONE_HEIGHT / 2, r.center.z },
-        rotation = { 0, r.yaw, 0 },
-        scale = { r.w, ZONE_HEIGHT, r.d },
-        callback_function = function(zone)
-          zone.setName(color .. " " .. region)
-          zone.addTag("MTGZone")
-          local guid = zone.getGUID()
-          s.guids[guid] = { seat = color, region = region }
-          zoneInfo[guid] = { seat = color, region = region }
-        end,
-      })
+  local s = GameState.data.zones
+  if s and s.guids then
+    for guid, _ in pairs(s.guids) do
+      local obj = getObjectFromGUID(guid)
+      if obj then
+        obj.destruct()
+      end
     end
   end
+  GameState.data.zones = nil
   Zones.drawIcons()
 end
-
--- The scripting zone object for a seat's area, or nil.
-function Zones.get(color, region)
-  for guid, info in pairs(zoneInfo) do
-    if info.seat == color and info.region == region then
-      return getObjectFromGUID(guid)
-    end
-  end
-  return nil
-end
-
----------------------------------------------------------------------------
--- Icons
----------------------------------------------------------------------------
 
 function Zones.drawIcons()
   local decals = {}
@@ -137,7 +83,30 @@ function Zones.drawIcons()
 end
 
 ---------------------------------------------------------------------------
--- Tracking cards
+-- Finding the area at a position
+---------------------------------------------------------------------------
+
+-- The area containing a world position: { seat, region }, or a "table"
+-- location if it's outside every area.
+function Zones.regionAt(pos)
+  for _, color in ipairs(TableSetup.activeSeats()) do
+    local s = TableSetup.seat(color)
+    for _, name in ipairs(TRACKED_REGIONS) do
+      local r = TableSetup.region(color, name)
+      local dx, dz = pos.x - r.center.x, pos.z - r.center.z
+      -- Position in the seat's own directions (sideways, toward the middle).
+      local side = dx * s.right.x + dz * s.right.z
+      local depth = dx * s.inward.x + dz * s.inward.z
+      if math.abs(side) <= r.w / 2 + EDGE_MARGIN and math.abs(depth) <= r.d / 2 + EDGE_MARGIN then
+        return { seat = color, region = name }
+      end
+    end
+  end
+  return { seat = nil, region = "table" }
+end
+
+---------------------------------------------------------------------------
+-- Tracking
 ---------------------------------------------------------------------------
 
 local function isCard(obj)
@@ -148,6 +117,9 @@ local function describe(loc)
   if loc == nil then
     return "nowhere"
   end
+  if loc.seat == nil then
+    return loc.region
+  end
   return loc.seat .. " " .. loc.region
 end
 
@@ -155,50 +127,67 @@ local function same(a, b)
   return a ~= nil and b ~= nil and a.seat == b.seat and a.region == b.region
 end
 
-local function moveTo(obj, to)
-  local guid = obj.getGUID()
+local function moveTo(obj, name, guid, to)
   local from = where[guid]
   where[guid] = to
   if same(from, to) then
     return
   end
   if showMoves then
-    print("MTG > " .. obj.getName() .. ": " .. describe(from) .. " -> " .. describe(to))
+    print("MTG > " .. name .. ": " .. describe(from) .. " -> " .. describe(to))
   end
-  Events.emit("cardMoved", { card = obj, name = obj.getName(), from = from, to = to })
+  Events.emit("cardMoved", { card = obj, name = name, from = from, to = to })
 end
 
--- Called from main.lua's onObjectEnterZone.
-function Zones.onEnter(zone, obj)
+-- Re-check a card's area from where it is now (also usable by other modules
+-- after moving a card by script).
+function Zones.refresh(obj)
+  if not isCard(obj) or obj.held_by_color then
+    return
+  end
+  moveTo(obj, obj.getName(), obj.getGUID(), Zones.regionAt(obj.getPosition()))
+end
+
+-- A player let go of something: check where it landed once it settles.
+function Zones.onDrop(color, obj)
   if not isCard(obj) then
     return
   end
-  if zone.type == "Hand" then
-    local ok, color = pcall(function() return zone.getValue() end)
-    if ok and color and TableSetup.isActive(color) then
-      moveTo(obj, { seat = color, region = "hand" })
+  Wait.time(function()
+    -- It may have been merged into a pile or picked up again meanwhile.
+    if obj ~= nil and not obj.isDestroyed() then
+      Zones.refresh(obj)
     end
+  end, SETTLE_DELAY)
+end
+
+-- A card entered a hand zone.
+function Zones.onEnterZone(zone, obj)
+  if not isCard(obj) or zone == nil or zone.type ~= "Hand" then
     return
   end
-  local info = zoneInfo[zone.getGUID()]
-  if info then
-    moveTo(obj, { seat = info.seat, region = info.region })
+  local ok, color = pcall(function() return zone.getValue() end)
+  if ok and color and TableSetup.isActive(color) then
+    moveTo(obj, obj.getName(), obj.getGUID(), { seat = color, region = "hand" })
   end
 end
 
--- Called from main.lua's onObjectLeaveContainer: a card taken out of a deck
--- that sits in a library zone starts out "in" that library.
+-- A card was taken out of a pile (e.g. drawn from the library): it starts out
+-- in whatever area that pile is in.
 function Zones.onLeaveContainer(container, obj)
   if not isCard(obj) or container == nil then
     return
   end
-  for _, z in ipairs(container.getZones and container.getZones() or {}) do
-    local info = zoneInfo[z.getGUID()]
-    if info and info.region == "library" then
-      where[obj.getGUID()] = { seat = info.seat, region = "library" }
-      return
-    end
+  where[obj.getGUID()] = Zones.regionAt(container.getPosition())
+end
+
+-- A card was dropped onto a pile and merged into it (e.g. onto the graveyard):
+-- it moved to whatever area that pile is in.
+function Zones.onEnterContainer(container, obj)
+  if not isCard(obj) or container == nil then
+    return
   end
+  moveTo(obj, obj.getName(), obj.getGUID(), Zones.regionAt(container.getPosition()))
 end
 
 -- Where a card currently is: { seat, region } or nil.
@@ -206,7 +195,36 @@ function Zones.locationOf(obj)
   return obj and where[obj.getGUID()] or nil
 end
 
+---------------------------------------------------------------------------
+-- Debug
+---------------------------------------------------------------------------
+
 function Zones.toggleMoveLog()
   showMoves = not showMoves
   return showMoves
+end
+
+function Zones.describeObject(obj)
+  if obj == nil then
+    return "Hover over a card first."
+  end
+  local p = obj.getPosition()
+  local loc = where[obj.getGUID()]
+  return string.format("%s at (%.1f, %.2f, %.1f) | area there: %s | tracked as: %s",
+    obj.getName(), p.x, p.y, p.z, describe(Zones.regionAt(p)), loc and describe(loc) or "nothing yet")
+end
+
+function Zones.report(color)
+  local counts = {}
+  for _, loc in pairs(where) do
+    if loc.seat == color then
+      counts[loc.region] = (counts[loc.region] or 0) + 1
+    end
+  end
+  local parts = {}
+  for _, name in ipairs({ "hand", "command", "battlefield", "lands", "library", "graveyard", "exile" }) do
+    table.insert(parts, name .. " " .. (counts[name] or 0))
+  end
+  print("MTG > Cards tracked at " .. tostring(color) .. " (loose cards, not ones inside piles): "
+    .. table.concat(parts, ", "))
 end
