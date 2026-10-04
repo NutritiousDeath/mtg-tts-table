@@ -19,12 +19,29 @@
 Importer = {}
 
 local SCRYFALL_COLLECTION = "https://api.scryfall.com/cards/collection"
-local BATCH_SIZE = 75
+-- Small batches keep each decode short, so the game hitches instead of freezing.
+local BATCH_SIZE = 20
 local REQUEST_GAP = 0.15 -- seconds between Scryfall requests
 -- Scryfall blocks TTS's built-in image downloader (since June 2024), so card
--- images come from a community mirror that uses Scryfall's exact file paths.
--- If the mirror ever goes down, change this one line.
+-- images go through another host that uses Scryfall's exact file paths.
+--
+-- RELAY_HOST: your own Cloudflare Worker (relay/worker.js in this repo),
+--   e.g. "mtg-relay.yourname.workers.dev". When set, every image goes through
+--   it and the image checks are skipped (faster imports, art for new cards).
+-- IMAGE_HOST: community mirror, used only when RELAY_HOST is empty.
+local RELAY_HOST = "mtg-relay.nutritiousdeath.workers.dev"
 local IMAGE_HOST = "img.klrmngr.com"
+
+local function usingRelay()
+  return RELAY_HOST ~= ""
+end
+
+local function imageHost()
+  if usingRelay() then
+    return RELAY_HOST
+  end
+  return IMAGE_HOST
+end
 
 -- Magic card back hosted on Steam, which TTS always loads.
 local CARD_BACK = "https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/"
@@ -55,7 +72,7 @@ local function cleanUrl(url)
     return nil
   end
   url = url:gsub("%?.*$", "")
-  url = url:gsub("cards%.scryfall%.io", IMAGE_HOST)
+  url = url:gsub("cards%.scryfall%.io", imageHost())
   return url
 end
 
@@ -68,7 +85,7 @@ end
 
 -- Mirror URL for a Scryfall image ID ("front" or "back" face).
 local function mirrorImage(id, side)
-  return "https://" .. IMAGE_HOST .. "/large/" .. side .. "/" .. id:sub(1, 1) .. "/" .. id:sub(2, 2) .. "/" .. id .. ".jpg"
+  return "https://" .. imageHost() .. "/large/" .. side .. "/" .. id:sub(1, 1) .. "/" .. id:sub(2, 2) .. "/" .. id .. ".jpg"
 end
 
 local function faceImage(card, faceIndex)
@@ -312,7 +329,34 @@ local function nameOnlyIdentifier(entry)
   return { name = entry.name:match("^(.-)%s*//") or entry.name }
 end
 
-local function fetchCollection(entries, onDone, idFn)
+-- Cut fields we never use out of the raw reply before decoding. These are all
+-- flat objects/arrays, so balanced-bracket patterns remove them cleanly and
+-- fast; it roughly halves what TTS's slow JSON decoder has to chew through.
+local UNUSED_OBJECTS = { "legalities", "prices", "purchase_uris", "related_uris", "preview" }
+local UNUSED_ARRAYS = { "all_parts", "multiverse_ids", "games", "finishes", "promo_types",
+  "artist_ids", "frame_effects", "produced_mana", "attraction_lights" }
+local UNUSED_IMAGE_SIZES = { "small", "normal", "png", "art_crop", "border_crop" }
+
+local function slimJSON(text)
+  for _, key in ipairs(UNUSED_OBJECTS) do
+    text = text:gsub('"' .. key .. '":%b{},?', "")
+  end
+  for _, key in ipairs(UNUSED_ARRAYS) do
+    text = text:gsub('"' .. key .. '":%b[],?', "")
+  end
+  for _, key in ipairs(UNUSED_IMAGE_SIZES) do
+    text = text:gsub('"' .. key .. '":"[^"]*",?', "")
+  end
+  -- A removed field at the end of an object leaves ",}" behind.
+  text = text:gsub(",}", "}")
+  return text
+end
+
+local function now()
+  return Time and Time.time or os.time()
+end
+
+local function fetchCollection(entries, onDone, idFn, onProgress)
   idFn = idFn or identifierFor
   local results = {}
   local notFound = {}
@@ -354,7 +398,7 @@ local function fetchCollection(entries, onDone, idFn)
             table.insert(notFound, e.name)
           end
         else
-          local ok, body = pcall(JSON.decode, req.text)
+          local ok, body = pcall(JSON.decode, slimJSON(req.text))
           if ok and body and body.data then
             for _, card in ipairs(body.data) do
               table.insert(results, card)
@@ -362,6 +406,9 @@ local function fetchCollection(entries, onDone, idFn)
           else
             print("MTG > Couldn't read Scryfall's response for batch " .. n)
           end
+        end
+        if onProgress then
+          onProgress(#results, #entries)
         end
         Wait.time(function() runBatch(n + 1) end, REQUEST_GAP)
       end
@@ -444,7 +491,8 @@ local function printsSearchUrl(card)
   else
     q = '!"' .. card.name .. '"'
   end
-  q = q .. " game:paper unique:prints"
+  -- lang:en keeps out printings that only exist in another language.
+  q = q .. " game:paper lang:en unique:prints"
   return "https://api.scryfall.com/cards/search?order=released&dir=desc&q=" .. urlEncode(q)
 end
 
@@ -487,8 +535,9 @@ end
 
 -- cards: list of unique Scryfall cards. onDone(swap, noImage)
 --   swap[cardId] = replacement printing; noImage = names with no image anywhere
-local function ensureImages(cards, onDone)
+local function ensureImages(cards, onDone, onProgress)
   local swap, noImage, missingImage = {}, {}, {}
+  onProgress = onProgress or function() end
 
   forEachLimited(cards, CHECK_PARALLEL, function(card, done)
     imageExists(faceImage(card, 1), function(ok)
@@ -498,6 +547,11 @@ local function ensureImages(cards, onDone)
       done()
     end)
   end, function()
+    if #missingImage > 0 then
+      onProgress("Images missing on the mirror: " .. #missingImage .. ". Finding other printings...")
+    else
+      onProgress("All images found.")
+    end
     -- Printing lookups hit the Scryfall API, so run them one at a time.
     local i = 0
     local function nextMissing()
@@ -507,6 +561,7 @@ local function ensureImages(cards, onDone)
         return
       end
       local card = missingImage[i]
+      onProgress("Other printing for " .. card.name .. " (" .. i .. "/" .. #missingImage .. ")")
       findMirroredPrinting(card, function(imageId)
         if imageId then
           card._imageId = imageId
@@ -553,7 +608,17 @@ function Importer.importDeck(color, text)
   busy = true
   broadcastToAll(color .. " is importing a deck (" .. deck.total .. " cards)...", { 0.7, 0.85, 1 })
 
+  -- Timed progress lines in chat, so a slow step is easy to spot.
+  local started = now()
+  local function progress(msg)
+    printToColor(string.format("[%.1fs] %s", now() - started, msg), color, { 0.6, 0.75, 0.9 })
+  end
+  local function onFetchProgress(done, total)
+    progress("Card data: " .. done .. "/" .. total)
+  end
+
   local function spawnDeck(cards, fixed, swap, noImage)
+    progress("Building deck...")
     local byName, bySetNum = indexCards(cards)
     local missing = {}
     local mainCards = {}
@@ -593,6 +658,8 @@ function Importer.importDeck(color, text)
       player.commanders = {}
     end
 
+    progress("Spawning " .. #mainCards .. " cards...")
+
     if #mainCards == 1 then
       local c = mainCards[1]
       spawnObjectJSON({ json = JSON.encode(c), position = deckPos, rotation = { 0, yaw, 180 } })
@@ -603,6 +670,7 @@ function Importer.importDeck(color, text)
         rotation = { 0, yaw, 180 },
         callback_function = function(obj)
           obj.setName(color .. " Library")
+          progress("Deck spawned.")
           Wait.time(function() obj.shuffle() end, 0.5)
         end,
       })
@@ -650,10 +718,16 @@ function Importer.importDeck(color, text)
         table.insert(unique, card)
       end
     end
-    broadcastToColor("Checking card images (" .. #unique .. " cards)...", color, { 0.7, 0.85, 1 })
+    -- The relay can fetch any card's image, so nothing needs checking.
+    if usingRelay() then
+      Wait.frames(function() spawnDeck(cards, fixed, {}, {}) end, 1)
+      return
+    end
+    progress("Checking card images (" .. #unique .. " unique cards)...")
     ensureImages(unique, function(swap, noImage)
-      spawnDeck(cards, fixed, swap, noImage)
-    end)
+      -- Let a frame pass so the chat updates before the heavy build step.
+      Wait.frames(function() spawnDeck(cards, fixed, swap, noImage) end, 1)
+    end, progress)
   end
 
   -- Pass 1: look up by set/number where given. Pass 2: anything that didn't
@@ -688,6 +762,6 @@ function Importer.importDeck(color, text)
         end
       end
       build(cards, found)
-    end, nameOnlyIdentifier)
-  end)
+    end, nameOnlyIdentifier, onFetchProgress)
+  end, nil, onFetchProgress)
 end
