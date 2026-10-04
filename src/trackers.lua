@@ -20,7 +20,8 @@
 
   Data (GameState players):
     life, poison
-    commanderDamage["<seat>|<commander name>"] = damage taken from that commander
+    commanderDamage["<seat>|<slot>"] = damage taken from that seat's commander
+      (slot 1 = their commander, 2 = a partner)
     commanderNames = names of the seat's own commander(s), set on import
     eliminated, lossFlag (reason waiting to be confirmed),
     lossDismissed (reason the players dismissed, so it isn't re-flagged)
@@ -82,16 +83,31 @@ local function opponentsInOrder(color)
   return list
 end
 
+-- Commander damage is keyed by the opponent's seat and commander slot:
+-- "<seat>|1" for their commander, "<seat>|2" for a partner. That way every
+-- opponent always has a crown, even before they've imported a deck.
+
+-- Display name for a damage key: the commander's name once known.
+local function commanderLabel(key)
+  local seat, slot = key:match("^(%a+)|(%d+)$")
+  if seat == nil then
+    return key
+  end
+  local op = player(seat)
+  local name = op and op.commanderNames[tonumber(slot)]
+  return name or (seat .. "'s commander")
+end
+
 -- Every opposing commander a seat can take damage from, in crown order:
--- list of { key = "<seat>|<name>", seat, name }.
+-- list of { key, seat, name }. One per opponent, two if they have partners.
 local function opposingCommanders(color)
   local list = {}
   for _, other in ipairs(opponentsInOrder(color)) do
-    do
-      local op = player(other)
-      for _, name in ipairs(op and op.commanderNames or {}) do
-        table.insert(list, { key = other .. "|" .. name, seat = other, name = name })
-      end
+    local op = player(other)
+    local count = math.max(1, #(op and op.commanderNames or {}))
+    for slot = 1, count do
+      local key = other .. "|" .. slot
+      table.insert(list, { key = key, seat = other, name = commanderLabel(key) })
     end
   end
   return list
@@ -110,7 +126,7 @@ local function lossReason(p)
   end
   for key, dmg in pairs(p.commanderDamage) do
     if dmg >= COMMANDER_LETHAL then
-      return COMMANDER_LETHAL .. " commander damage from " .. (key:match("|(.+)$") or key)
+      return COMMANDER_LETHAL .. " commander damage from " .. commanderLabel(key)
     end
   end
   return nil
@@ -179,7 +195,7 @@ function Trackers.changeCommanderDamage(color, key, delta, byColor)
   end
   p.commanderDamage[key] = after
   p.life = p.life - applied
-  log(byColor, color .. " commander damage from " .. (key:match("|(.+)$") or key) .. " "
+  log(byColor, color .. " commander damage from " .. commanderLabel(key) .. " "
     .. before .. " -> " .. after .. ", life " .. (p.life + applied) .. " -> " .. p.life)
   checkLoss(color)
   Trackers.render(color)

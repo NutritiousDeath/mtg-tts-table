@@ -28,7 +28,7 @@ local function newPlayer(color, format)
     seated = false,          -- set when a player joins this seat
     life = format.startingLife,
     poison = 0,
-    commanderDamage = {},    -- ["<seat>|<commander name>"] = damage taken from that commander
+    commanderDamage = {},    -- ["<seat>|<slot>"] = damage taken from that seat's commander (slot 2 = partner)
     commanders = {},         -- GUIDs of this player's commander card(s)
     commanderNames = {},     -- names of this player's commander(s), set on import
     mulligans = 0,
