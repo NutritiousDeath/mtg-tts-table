@@ -17,6 +17,7 @@
     !moves       toggle printing every card move between areas
     !where       show which zones the card under your mouse is in
     !zones       count the cards tracked in each of your areas
+    !counters    show the counters stored on the card under your mouse
     !layout 4    four players, one per side (White, Red, Green, Blue)
     !layout 2    two players facing each other (White, Green)
     !reset       wipe the game state back to a fresh Commander game
@@ -27,6 +28,7 @@ require("src/gamestate")
 require("src/events")
 require("src/table")
 require("src/zones")
+require("src/counters")
 require("src/trackers")
 require("src/deckparser")
 require("src/importer")
@@ -51,7 +53,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.23 (tracker buttons line up with icons)"
+SCRIPT_VERSION = "0.27 (two-line counter label)"
 
 function onLoad(saved)
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)
@@ -64,11 +66,23 @@ function onLoad(saved)
   TableSetup.ensure()
   Trackers.ensureTableDisplay()
   TableUI.build()
+  Counters.registerHotkeys()
+  Counters.setupAll()
   -- Give the surface a moment to appear, then face everyone toward their seat.
   Wait.time(function()
     TableSetup.enforceAllSeats()
     for _, color in ipairs(TableSetup.activeSeats()) do
       TableSetup.lookAtSeat(color)
+    end
+  end, 1)
+end
+
+-- A card appeared (drawn, taken from a pile, spawned): give it its
+-- counter menu (counters.lua). Wait a frame so its tags are in place.
+function onObjectSpawn(obj)
+  Wait.frames(function()
+    if obj ~= nil and not obj.isDestroyed() then
+      Counters.setup(obj)
     end
   end, 1)
 end
@@ -167,6 +181,12 @@ function onChat(message, sender)
   if message == "!seats" then
     print("MTG > Version " .. SCRIPT_VERSION .. ", you are " .. tostring(sender.color))
     TableSetup.report()
+    return false
+  end
+
+  if message == "!counters" then
+    local obj = Player[sender.color] and Player[sender.color].getHoverObject()
+    print("MTG > " .. Counters.describe(obj))
     return false
   end
 
