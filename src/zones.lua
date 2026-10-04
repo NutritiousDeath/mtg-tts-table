@@ -36,7 +36,8 @@ local SETTLE_DELAY = 0.4
 
 -- Icons are served from the public GitHub repo.
 local ICON_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/icons/"
-local ICON_SIZE = { life = 2.2, command = 2.6, tax = 1.1, battlefield = 3.4, lands = 2.6,
+-- Areas with an icon (others, like the tracker, have none).
+local ICON_SIZE = { command = 2.6, tax = 1.1, battlefield = 3.4, lands = 2.6,
   library = 2.6, graveyard = 2.6, exile = 2.6 }
 
 local where = {}     -- card GUID -> { seat, region }
@@ -67,8 +68,9 @@ function Zones.drawIcons()
   for _, color in ipairs(TableSetup.activeSeats()) do
     local s = TableSetup.seat(color)
     for _, name in ipairs(TableSetup.REGION_NAMES) do
+      if ICON_SIZE[name] then
       local r = TableSetup.region(color, name)
-      local size = ICON_SIZE[name] or 2.4
+      local size = ICON_SIZE[name]
       table.insert(decals, {
         name = color .. "_" .. name,
         url = ICON_BASE .. name .. ".png",
@@ -77,6 +79,7 @@ function Zones.drawIcons()
         rotation = { 90, s.angle, 0 },
         scale = { size, size, 1 },
       })
+      end
     end
   end
   Global.setDecals(decals)

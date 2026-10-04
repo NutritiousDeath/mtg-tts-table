@@ -17,13 +17,15 @@
   the table center, near = the player's edge):
 
       +--------+  +-------------------------+  +---------+
-      |  Life  |  |                         |  | Library |
-      +--------+  |       Battlefield       |  +---------+
-      |Command |  |                         |  |Graveyard|
-      +--------+  +-------------------------+  +---------+
-       [ Tax ]    |          Lands          |  |  Exile  |
+      |Command |  |                         |  | Library |
+      |        |  |       Battlefield       |  +---------+
+      +--------+  |                         |  |Graveyard|
+       [ Tax ]    +-------------------------+  +---------+
+                  |          Lands          |  |  Exile  |
                   +-------------------------+  +---------+
       ----------------- player's edge / hand -----------------
+  The life / poison / commander damage tracker sits in front of the mat,
+  toward the table center ("tracker" area, see trackers.lua).
 
   Every area is defined here once (REGIONS) and placed for each seat, so the
   importer, Phase 2's zones/markers and the life tracker all use the same spots.
@@ -63,14 +65,16 @@ local REGIONS = {
   graveyard = { side = 20, depth = 16, w = 6, d = 6.5 },
   exile = { side = 20, depth = 8.5, w = 6, d = 6.5 },
   -- left column
-  life = { side = -20, depth = 24.5, w = 6, d = 4.5 },
-  command = { side = -20, depth = 16.5, w = 6, d = 7 },
-  tax = { side = -20, depth = 11, w = 3, d = 2.5 },
+  command = { side = -20, depth = 22.5, w = 6, d = 7 },
+  tax = { side = -20, depth = 16.5, w = 3, d = 2.5 },
   -- middle
   battlefield = { side = 0, depth = 19.5, w = 32, d = 14 },
   lands = { side = -3.5, depth = 6.75, w = 39, d = 5.5 },
+  -- clickable life / poison / commander damage tracker, in front of the
+  -- playmat toward the table center (trackers.lua)
+  tracker = { side = 0, depth = 31, w = 14, d = 4.8 },
 }
-TableSetup.REGION_NAMES = { "life", "command", "tax", "battlefield", "lands", "library", "graveyard", "exile" }
+TableSetup.REGION_NAMES = { "command", "tax", "battlefield", "lands", "library", "graveyard", "exile", "tracker" }
 
 local SURFACE_COLOR = { 0.07, 0.08, 0.10 }
 
@@ -351,7 +355,6 @@ local SEAT_TINT = {
 }
 
 local LABELS = {
-  life = "LIFE",
   command = "COMMANDER",
   tax = "TAX",
   battlefield = "BATTLEFIELD",
@@ -424,6 +427,7 @@ function TableSetup.drawMats()
     local s = TableSetup.seat(color)
     local tint = SEAT_TINT[color] or { 0.7, 0.7, 0.7 }
     for _, name in ipairs(TableSetup.REGION_NAMES) do
+      if LABELS[name] then
       spawnObject({
         type = "3DText",
         position = labelPosition(color, name),
@@ -439,6 +443,7 @@ function TableSetup.drawMats()
           table.insert(state.labels, label.getGUID())
         end,
       })
+      end
     end
   end
 end

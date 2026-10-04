@@ -835,6 +835,11 @@ function Importer.importDeck(color, text)
     local player = GameState.player(color)
     if player then
       player.commanders = {}
+      -- Commander names drive the commander damage counters on the trackers.
+      player.commanderNames = {}
+      for _, e in ipairs(deck.commanders) do
+        table.insert(player.commanderNames, e.name)
+      end
     end
 
     progress("Spawning " .. #mainCards .. " cards...")
@@ -887,6 +892,10 @@ function Importer.importDeck(color, text)
       broadcastToColor("No image available yet (card will be blank): " .. table.concat(noImage, ", "), color, { 1, 0.6, 0.2 })
     end
     broadcastToAll(color .. "'s deck is ready: " .. #mainCards .. " cards + " .. #commanderCards .. " commander(s).", { 0.6, 1, 0.6 })
+    -- New commanders mean new commander damage counters on every tracker.
+    if Trackers then
+      Trackers.renderAll()
+    end
   end
 
   -- Check images for every card actually used, then spawn.
@@ -943,6 +952,11 @@ function Importer.importDeck(color, text)
     end
     if player then
       player.commanders = {}
+      -- Commander names drive the commander damage counters on the trackers.
+      player.commanderNames = {}
+      for _, e in ipairs(deck.commanders) do
+        table.insert(player.commanderNames, e.name)
+      end
     end
 
     progress("Spawning " .. #mainCards .. " cards...")
@@ -993,6 +1007,10 @@ function Importer.importDeck(color, text)
       broadcastToColor("Not found on Scryfall: " .. table.concat(missing, ", "), color, { 1, 0.3, 0.3 })
     end
     broadcastToAll(color .. "'s deck is ready: " .. #mainCards .. " cards + " .. #commanderJson .. " commander(s).", { 0.6, 1, 0.6 })
+    -- New commanders mean new commander damage counters on every tracker.
+    if Trackers then
+      Trackers.renderAll()
+    end
   end
 
   -- Original path: Lua decodes Scryfall's data itself (slower). Used without

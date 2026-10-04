@@ -27,6 +27,7 @@ require("src/gamestate")
 require("src/events")
 require("src/table")
 require("src/zones")
+require("src/trackers")
 require("src/deckparser")
 require("src/importer")
 require("src/archidekt")
@@ -50,7 +51,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.16 (area tracking by position)"
+SCRIPT_VERSION = "0.19 (tracker icons)"
 
 function onLoad(saved)
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)
@@ -61,6 +62,7 @@ function onLoad(saved)
     print("MTG > New Commander game state created.")
   end
   TableSetup.ensure()
+  Trackers.ensureTableDisplay()
   TableUI.build()
   -- Give the surface a moment to appear, then face everyone toward their seat.
   Wait.time(function()
@@ -201,6 +203,8 @@ function onChat(message, sender)
   if message == "!layout 4" or message == "!layout 2" then
     local layout = message == "!layout 4" and "four" or "two"
     TableSetup.setLayout(layout)
+    Trackers.ensureTableDisplay()
+    TableUI.build()
     broadcastToAll("Table layout: " .. (layout == "four" and "4 players" or "2 players")
       .. " (" .. table.concat(TableSetup.activeSeats(), ", ") .. ")", { 0.7, 0.85, 1 })
     return false

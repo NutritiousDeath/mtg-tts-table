@@ -28,6 +28,7 @@ local XML = [[
         fontStyle="Bold"
         color="#00B3A4">Import Deck</Button>
 
+
 <Panel id="importPanel"
        active="false"
        width="560" height="520"
@@ -52,6 +53,7 @@ local XML = [[
 </Panel>
 ]]
 
+-- Build the on-screen UI. (Life tracking is on the table: trackers.lua.)
 function TableUI.build()
   UI.setXml(XML)
 end
