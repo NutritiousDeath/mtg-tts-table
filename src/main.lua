@@ -1,20 +1,22 @@
 --[[
   main.lua
-  Global entry point: load/save the game state and dev test commands.
+  Global entry point: load/save the game state, build the UI, dev test commands.
 
   Chat commands (type in TTS chat):
-    !state      print the current game state
-    !testparse  run the deck parser on a built-in sample list
-    !reset      wipe the game state back to a fresh Commander game
+    !state       print the current game state
+    !testparse   run the deck parser on a built-in sample list
+    !testimport  import the sample list to your seat (needs a seat color)
+    !cardinfo    print the image links of the card under your mouse
+    !reset       wipe the game state back to a fresh Commander game
 --]]
 
 local SAMPLE_DECK = [[
 Commander
-1 Atraxa, Praetors' Voice (2X2) 190 *F*
+1 Atraxa, Praetors' Voice *F*
 
 Deck
 1x Sol Ring
-1 Arcane Signet (CMM) 381
+1 Arcane Signet
 1 Swords to Plowshares [Removal]
 1 Takenuma, Abandoned Mire (NEO)
 1 Delver of Secrets // Insectile Aberration
@@ -32,6 +34,7 @@ function onLoad(saved)
   else
     print("MTG > New Commander game state created.")
   end
+  TableUI.build()
 end
 
 function onSave()
@@ -67,6 +70,32 @@ function onChat(message, sender)
     local deck = DeckParser.parse(SAMPLE_DECK)
     DeckParser.validateCommander(deck)
     printDeck(deck)
+    return false
+  end
+
+  if message == "!testimport" then
+    if sender.color == "Grey" or sender.color == "Black" then
+      print("MTG > Take a seat (pick a color) first.")
+    else
+      Importer.importDeck(sender.color, SAMPLE_DECK)
+    end
+    return false
+  end
+
+  if message == "!cardinfo" then
+    local obj = Player[sender.color] and Player[sender.color].getHoverObject()
+    if obj == nil then
+      print("MTG > Hover your mouse over a card, then type !cardinfo.")
+    else
+      print("MTG > " .. obj.type .. ": " .. obj.getName())
+      local custom = obj.getCustomObject()
+      if custom then
+        print("   face: " .. tostring(custom.face))
+        print("   back: " .. tostring(custom.back))
+      else
+        print("   (no custom image data)")
+      end
+    end
     return false
   end
 
