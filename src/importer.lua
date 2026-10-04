@@ -305,40 +305,21 @@ end
 -- isn't duplicated. Phase 2 builds the other zones the same way.
 ---------------------------------------------------------------------------
 
+-- The command zone itself is now built by zones.lua with the rest of the
+-- playmat zones. This only removes the separate zone and "COMMAND ZONE" label
+-- that older versions of the importer created.
 local function ensureCommandZone(color, pos, yaw, labelPos)
   local player = GameState.player(color)
   if player == nil then
     return
   end
-
-  -- The playmat now labels the Commander area, so remove the separate
-  -- "COMMAND ZONE" label older versions created.
-  local oldLabel = player.commandZoneLabel and getObjectFromGUID(player.commandZoneLabel)
-  if oldLabel then
-    oldLabel.destruct()
+  for _, key in ipairs({ "commandZoneLabel", "commandZone" }) do
+    local old = player[key] and getObjectFromGUID(player[key])
+    if old then
+      old.destruct()
+    end
+    player[key] = nil
   end
-  player.commandZoneLabel = nil
-
-  local zone = player.commandZone and getObjectFromGUID(player.commandZone)
-  if zone then
-    -- Zone already exists: move it to this seat's current spot, in case the
-    -- table layout changed since it was made.
-    zone.setPosition({ pos.x, 1.5, pos.z })
-    zone.setRotation({ 0, yaw, 0 })
-    return
-  end
-
-  spawnObject({
-    type = "ScriptingTrigger",
-    position = { pos.x, 1.5, pos.z },
-    rotation = { 0, yaw, 0 },
-    scale = { 3.4, 2, 4.6 },
-    callback_function = function(zone)
-      zone.setName(color .. " Command Zone")
-      zone.addTag("CommandZone")
-      player.commandZone = zone.getGUID()
-    end,
-  })
 end
 
 ---------------------------------------------------------------------------

@@ -330,6 +330,9 @@ function TableSetup.ensure()
 
   applyHandZones()
   TableSetup.drawMats()
+  if Zones then
+    Zones.ensure()
+  end
 end
 
 ---------------------------------------------------------------------------
@@ -470,6 +473,9 @@ function TableSetup.setLayout(layout)
   GameState.data.table.layout = layout
   applyHandZones()
   TableSetup.drawMats()
+  if Zones then
+    Zones.ensure()
+  end
   TableSetup.enforceAllSeats()
   for _, color in ipairs(TableSetup.activeSeats()) do
     TableSetup.lookAtSeat(color)

@@ -14,6 +14,7 @@
     !cardinfo    print the image links of the card under your mouse
     !view        point your camera at your seat
     !seats       print the script version and every seat's hand zone
+    !moves       toggle printing every card move between areas
     !layout 4    four players, one per side (White, Red, Green, Blue)
     !layout 2    two players facing each other (White, Green)
     !reset       wipe the game state back to a fresh Commander game
@@ -21,7 +22,9 @@
 
 -- Load order matters: later modules use the earlier ones.
 require("src/gamestate")
+require("src/events")
 require("src/table")
+require("src/zones")
 require("src/deckparser")
 require("src/importer")
 require("src/archidekt")
@@ -45,7 +48,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.10 (playmats drawn)"
+SCRIPT_VERSION = "0.11 (Phase 2a: zones + icons)"
 
 function onLoad(saved)
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)
@@ -64,6 +67,15 @@ function onLoad(saved)
       TableSetup.lookAtSeat(color)
     end
   end, 1)
+end
+
+-- Card movement tracking (zones.lua).
+function onObjectEnterZone(zone, obj)
+  Zones.onEnter(zone, obj)
+end
+
+function onObjectLeaveContainer(container, obj)
+  Zones.onLeaveContainer(container, obj)
 end
 
 -- Someone sat down or switched seats: only the layout's seats are allowed;
@@ -143,6 +155,11 @@ function onChat(message, sender)
   if message == "!seats" then
     print("MTG > Version " .. SCRIPT_VERSION .. ", you are " .. tostring(sender.color))
     TableSetup.report()
+    return false
+  end
+
+  if message == "!moves" then
+    print("MTG > Card move log " .. (Zones.toggleMoveLog() and "ON" or "OFF"))
     return false
   end
 
