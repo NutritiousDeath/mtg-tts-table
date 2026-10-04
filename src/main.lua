@@ -12,11 +12,16 @@
     !testparse   run the deck parser on a built-in sample list
     !testimport  import the sample list to your seat (needs a seat color)
     !cardinfo    print the image links of the card under your mouse
+    !view        point your camera at your seat
+    !seats       print the script version and every seat's hand zone
+    !layout 4    four players, one per side (White, Red, Green, Blue)
+    !layout 2    two players facing each other (White, Green)
     !reset       wipe the game state back to a fresh Commander game
 --]]
 
 -- Load order matters: later modules use the earlier ones.
 require("src/gamestate")
+require("src/table")
 require("src/deckparser")
 require("src/importer")
 require("src/archidekt")
@@ -39,14 +44,38 @@ Sideboard
 1 Lightning Bolt
 ]]
 
+-- Bump this whenever the scripts change, so it's obvious which version TTS runs.
+SCRIPT_VERSION = "0.10 (playmats drawn)"
+
 function onLoad(saved)
+  print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)
   local restored = GameState.restore(saved)
   if restored then
     print("MTG > Game state restored.")
   else
     print("MTG > New Commander game state created.")
   end
+  TableSetup.ensure()
   TableUI.build()
+  -- Give the surface a moment to appear, then face everyone toward their seat.
+  Wait.time(function()
+    TableSetup.enforceAllSeats()
+    for _, color in ipairs(TableSetup.activeSeats()) do
+      TableSetup.lookAtSeat(color)
+    end
+  end, 1)
+end
+
+-- Someone sat down or switched seats: only the layout's seats are allowed;
+-- otherwise face their camera toward their seat.
+function onPlayerChangeColor(color)
+  if color == "Grey" or color == "Black" then
+    return
+  end
+  if TableSetup.enforceSeat(color) then
+    return
+  end
+  Wait.time(function() TableSetup.lookAtSeat(color) end, 0.5)
 end
 
 function onSave()
@@ -111,8 +140,34 @@ function onChat(message, sender)
     return false
   end
 
+  if message == "!seats" then
+    print("MTG > Version " .. SCRIPT_VERSION .. ", you are " .. tostring(sender.color))
+    TableSetup.report()
+    return false
+  end
+
+  if message == "!view" then
+    if TableSetup.isActive(sender.color) then
+      TableSetup.lookAtSeat(sender.color)
+    else
+      print("MTG > Take a seat in the current layout first: " .. table.concat(TableSetup.activeSeats(), ", "))
+    end
+    return false
+  end
+
+  if message == "!layout 4" or message == "!layout 2" then
+    local layout = message == "!layout 4" and "four" or "two"
+    TableSetup.setLayout(layout)
+    broadcastToAll("Table layout: " .. (layout == "four" and "4 players" or "2 players")
+      .. " (" .. table.concat(TableSetup.activeSeats(), ", ") .. ")", { 0.7, 0.85, 1 })
+    return false
+  end
+
   if message == "!reset" then
+    -- Keep the table (surface, layout); only the game itself resets.
+    local tableState = GameState.data and GameState.data.table
     GameState.new("commander")
+    GameState.data.table = tableState
     print("MTG > Game state reset.")
     return false
   end

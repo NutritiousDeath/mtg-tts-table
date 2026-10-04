@@ -256,8 +256,29 @@ end
 -- Placement
 ---------------------------------------------------------------------------
 
--- Spot on the table in front of a seat, pushed toward the table center.
+local handSeatSpots -- defined below
+
+-- Deck spot, command zone spot, facing yaw and command zone label spot for a
+-- seat. Uses the table layout (table.lua) when the seat is part of it;
+-- otherwise falls back to working it out from the seat's hand zone.
 local function seatSpots(color)
+  if TableSetup and TableSetup.seat and TableSetup.seat(color) then
+    local s = TableSetup.seat(color)
+    local deckPos = TableSetup.slot(color, "library", 2)
+    local cmdrPos = TableSetup.slot(color, "command", 2)
+    -- Label sits just beyond the command card (the deck is on the near side).
+    local labelPos = {
+      x = cmdrPos.x + s.inward.x * 2.4,
+      y = TableSetup.SURFACE_TOP + 0.02,
+      z = cmdrPos.z + s.inward.z * 2.4,
+    }
+    return deckPos, cmdrPos, s.yaw, labelPos
+  end
+  return handSeatSpots(color)
+end
+
+-- Fallback: spot in front of a seat's hand zone, pushed toward the center.
+handSeatSpots = function(color)
   local hand = Player[color] and Player[color].getHandTransform()
   local hp = hand and hand.position or { x = 0, y = 1, z = -20 }
   local len = math.sqrt(hp.x * hp.x + hp.z * hp.z)
@@ -289,15 +310,21 @@ local function ensureCommandZone(color, pos, yaw, labelPos)
   if player == nil then
     return
   end
-  -- Flat 3D text reads correctly from the seat when turned to face the player.
-  local labelRotation = { 90, yaw + 180, 0 }
 
-  if player.commandZone and getObjectFromGUID(player.commandZone) then
-    -- Zone already exists; keep its label facing the right way.
-    local existing = player.commandZoneLabel and getObjectFromGUID(player.commandZoneLabel)
-    if existing then
-      existing.setRotation(labelRotation)
-    end
+  -- The playmat now labels the Commander area, so remove the separate
+  -- "COMMAND ZONE" label older versions created.
+  local oldLabel = player.commandZoneLabel and getObjectFromGUID(player.commandZoneLabel)
+  if oldLabel then
+    oldLabel.destruct()
+  end
+  player.commandZoneLabel = nil
+
+  local zone = player.commandZone and getObjectFromGUID(player.commandZone)
+  if zone then
+    -- Zone already exists: move it to this seat's current spot, in case the
+    -- table layout changed since it was made.
+    zone.setPosition({ pos.x, 1.5, pos.z })
+    zone.setRotation({ 0, yaw, 0 })
     return
   end
 
@@ -310,20 +337,6 @@ local function ensureCommandZone(color, pos, yaw, labelPos)
       zone.setName(color .. " Command Zone")
       zone.addTag("CommandZone")
       player.commandZone = zone.getGUID()
-    end,
-  })
-
-  spawnObject({
-    type = "3DText",
-    position = { labelPos.x, labelPos.y, labelPos.z },
-    rotation = labelRotation,
-    callback_function = function(label)
-      label.TextTool.setValue("COMMAND ZONE")
-      label.TextTool.setFontSize(36)
-      label.TextTool.setFontColor({ 0, 0.7, 0.64 })
-      label.setLock(true)
-      label.interactable = false
-      player.commandZoneLabel = label.getGUID()
     end,
   })
 end
@@ -766,6 +779,11 @@ function Importer.importDeck(color, text)
     broadcastToColor("Paste a decklist first.", color, { 1, 0.6, 0.2 })
     return
   end
+  if TableSetup and TableSetup.isActive and not TableSetup.isActive(color) then
+    broadcastToColor(color .. " isn't a seat in the current layout. Seats: "
+      .. table.concat(TableSetup.activeSeats(), ", ") .. ".", color, { 1, 0.6, 0.2 })
+    return
+  end
 
   local deck = DeckParser.parse(text)
   DeckParser.validateCommander(deck)
@@ -851,6 +869,9 @@ function Importer.importDeck(color, text)
         callback_function = function(obj)
           obj.setName(color .. " Library")
           progress("Deck spawned.")
+          if TableSetup and TableSetup.lookAtSeat then
+            TableSetup.lookAtSeat(color)
+          end
           Wait.time(function() obj.shuffle() end, 0.5)
         end,
       })
@@ -959,6 +980,9 @@ function Importer.importDeck(color, text)
         callback_function = function(obj)
           obj.setName(color .. " Library")
           progress("Deck spawned.")
+          if TableSetup and TableSetup.lookAtSeat then
+            TableSetup.lookAtSeat(color)
+          end
           Wait.time(function() obj.shuffle() end, 0.5)
         end,
       })
