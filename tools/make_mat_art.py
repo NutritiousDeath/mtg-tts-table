@@ -205,23 +205,24 @@ def build_turnbar(color):
 # color, title and lit step are drawn on top live in the active player's
 # color. 30.4 x 1.6 table units at 60 px per unit.
 def build_turnstrip():
-    W, H = int(30.4 * 60), int(1.6 * 60)
+    # 80 px per unit and a fully solid fill: TTS builds a custom token's
+    # shape from the image's transparency, and failed on a thinner,
+    # semi-transparent version.
+    PPU = 80
+    W, H = int(30.4 * PPU), int(1.6 * PPU)
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     mask = Image.new("L", (W, H), 0)
-    ImageDraw.Draw(mask).rounded_rectangle([2, 2, W - 3, H - 3], radius=20, fill=255)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, W - 1, H - 1], radius=26, fill=255)
     panel = Image.new("RGBA", (W, H))
     pd = ImageDraw.Draw(panel)
     for y in range(H):
         t = y / H
-        pd.line([(0, y), (W, y)], fill=(int(10 + 7 * t), int(13 + 8 * t), int(22 + 11 * t), 235))
+        pd.line([(0, y), (W, y)], fill=(int(10 + 7 * t), int(13 + 8 * t), int(22 + 11 * t), 255))
+    g = ImageDraw.Draw(panel)
+    for gx in range(32, W, 32):
+        g.line([(gx, 0), (gx, H)], fill=(22, 28, 40, 255))
+    g.line([(int(6.8 * PPU), 22), (int(6.8 * PPU), H - 22)], fill=(70, 95, 120, 255), width=3)
     img.paste(panel, (0, 0), mask)
-    grid = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    g = ImageDraw.Draw(grid)
-    for gx in range(24, W, 24):
-        g.line([(gx, 0), (gx, H)], fill=(120, 160, 200, 14))
-    img.alpha_composite(Image.composite(grid, Image.new("RGBA", (W, H)), mask))
-    # divider between the title and the steps
-    ImageDraw.Draw(img).line([(int(6.8 * 60), 18), (int(6.8 * 60), H - 18)], fill=(120, 160, 200, 90), width=2)
     out = os.path.join(ROOT, "assets", "ui", "turnstrip.png")
     img.save(out)
     return out

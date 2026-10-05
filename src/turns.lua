@@ -65,7 +65,7 @@ end
 ---------------------------------------------------------------------------
 
 local ART_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/ui/"
-local ART_VERSION = "?v=1"
+local ART_VERSION = "?v=2"
 
 function Turns.xml()
   local steps = {}
