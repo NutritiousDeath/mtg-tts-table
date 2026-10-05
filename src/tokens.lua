@@ -37,7 +37,7 @@ function Tokens.xml()
 </Panel>]]):format(id, id, id, id, id))
     end
     table.insert(parts, ([[
-<Panel id="tokens_%s" visibility="%s" active="false" rectAlignment="UpperLeft" offsetXY="180 -220" width="700" height="150"
+<Panel id="tokens_%s" visibility="%s" active="false" rectAlignment="UpperLeft" offsetXY="180 -220" width="980" height="150"
        color="#0B0F17F2" outline="#5AF0FF" outlineSize="2 2" allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="12 12 12 12" spacing="8" childForceExpandHeight="false">
     <Text fontSize="15" fontStyle="Bold" color="#5AF0FF" alignment="MiddleLeft" preferredHeight="22">TOKENS</Text>
@@ -50,7 +50,7 @@ function Tokens.xml()
       <Button onClick="ui_tokenCopies(%s_plus)" preferredWidth="34" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold">+</Button>
     </HorizontalLayout>
     <Text id="tokStatus_%s" fontSize="12" color="#8B98A9" alignment="MiddleLeft" preferredHeight="18">Search for a token, then click it to put it onto your battlefield.</Text>
-    <GridLayout id="tokGrid_%s" active="false" cellSize="104 146" spacing="8 8" constraint="FixedColumnCount" constraintCount="6"
+    <GridLayout id="tokGrid_%s" active="false" cellSize="150 209" spacing="8 8" constraint="FixedColumnCount" constraintCount="6"
                 childAlignment="UpperLeft" preferredHeight="300">]] .. table.concat(slots) .. [[</GridLayout>
   </VerticalLayout>
 </Panel>
@@ -67,8 +67,8 @@ local function render(color)
   local list = results[color] or {}
   local rows = math.ceil(#list / 6)
   UI.setAttribute("tokGrid_" .. color, "active", #list > 0 and "true" or "false")
-  UI.setAttribute("tokGrid_" .. color, "preferredHeight", rows * 154)
-  UI.setAttribute("tokens_" .. color, "height", 150 + rows * 154)
+  UI.setAttribute("tokGrid_" .. color, "preferredHeight", rows * 217)
+  UI.setAttribute("tokens_" .. color, "height", 150 + rows * 217)
   UI.setValue("tokCopies_" .. color, "x" .. (copies[color] or 1))
   for i = 1, MAX_RESULTS do
     local id = color .. "_" .. i
@@ -76,7 +76,10 @@ local function render(color)
     if r then
       UI.setAttribute("tokSlot_" .. id, "active", "true")
       UI.setValue("tokName_" .. id, r.name)
-      UI.setAttribute("tokImg_" .. id, "image", r.image)
+      -- The preview uses Scryfall's "normal" size (488px), which shrinks into
+      -- the box cleanly; "large" (672px) looked blurry at this size. The
+      -- token itself still spawns with the large image.
+      UI.setAttribute("tokImg_" .. id, "image", (r.image:gsub("/large/", "/normal/", 1)))
       UI.setAttribute("tokBtn_" .. id, "tooltip", r.name .. "\n" .. r.typeLine .. "\nClick: put onto your battlefield")
     else
       UI.setAttribute("tokSlot_" .. id, "active", "false")
