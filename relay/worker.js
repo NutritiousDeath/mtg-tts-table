@@ -27,8 +27,14 @@
  *    Returns a public Archidekt deck as a plain-text decklist, so TTS doesn't
  *    have to decode Archidekt's large JSON.
  *
- * Only Scryfall card image paths, /cards and /archidekt/<id> are accepted, so
- * this can't be used as a general-purpose proxy.
+ * 4. Token search:  GET /tokens?q=<name>
+ *    Finds tokens on Scryfall whose name matches (e.g. "treasure", "1/1
+ *    soldier", "zombie") and returns up to 12, one line each, tab-separated:
+ *      TOKEN  <i>  <name>  <type line>  <image url>  <card JSON template>
+ *    or a single line NONE when nothing matches. Templates work like /cards.
+ *
+ * Only Scryfall card image paths, /cards, /tokens and /archidekt/<id> are
+ * accepted, so this can't be used as a general-purpose proxy.
  */
 
 const IMAGE_UPSTREAM = "https://cards.scryfall.io";
@@ -54,6 +60,17 @@ export default {
     const archidektMatch = url.pathname.match(/^\/archidekt\/(\d+)$/);
     if (archidektMatch) {
       return handleArchidekt(archidektMatch[1]);
+    }
+
+    if (url.pathname === "/tokens") {
+      try {
+        return await handleTokens(url.searchParams.get("q") || "", url.host);
+      } catch (err) {
+        return new Response("ERROR\t" + String(err && err.message ? err.message : err), {
+          status: 500,
+          headers: { "Content-Type": "text/plain" },
+        });
+      }
     }
 
     if (url.pathname === "/cards") {
@@ -337,6 +354,45 @@ async function handleCards(request, host) {
   });
 
   return new Response(lines.join("\n"), {
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// /tokens
+// ---------------------------------------------------------------------------
+
+const MAX_TOKENS = 12;
+
+async function handleTokens(q, host) {
+  q = q.trim().slice(0, 60);
+  if (!q) return new Response("NONE", { headers: { "Content-Type": "text/plain" } });
+  // Words in the query match the token's name or type line, e.g. "1/1 soldier".
+  const words = q.split(/\s+/).map((w) => {
+    const pt = w.match(/^(\d+|\*)\/(\d+|\*)$/);
+    if (pt) return "pow=" + pt[1] + " tou=" + pt[2];
+    return "(name:" + JSON.stringify(w) + " or t:" + JSON.stringify(w) + ")";
+  });
+  const query = "(t:token or t:emblem) " + words.join(" ");
+  const api = "https://api.scryfall.com/cards/search?unique=art&order=released&dir=desc&q=" + encodeURIComponent(query);
+  const res = await fetch(api, { headers: { "User-Agent": USER_AGENT, Accept: "application/json" } });
+  if (res.status === 404) return new Response("NONE", { headers: { "Content-Type": "text/plain" } });
+  if (!res.ok) throw new Error("Scryfall search returned " + res.status);
+  const data = await res.json();
+  const seen = new Set();
+  const lines = [];
+  for (const card of data.data || []) {
+    // One result per distinct token (name + type + power/toughness + text).
+    const key = [card.name, card.type_line, card.power, card.toughness, card.oracle_text].join("|");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const img = faceImage(card, isDoubleFaced(card) ? 0 : null, host);
+    if (!img) continue;
+    const [tpl] = buildTemplates(card, false, host);
+    lines.push(["TOKEN", lines.length, clean(card.name), clean(card.type_line), img, tpl].join("\t"));
+    if (lines.length >= MAX_TOKENS) break;
+  }
+  return new Response(lines.length ? lines.join("\n") : "NONE", {
     headers: { "Content-Type": "text/plain; charset=utf-8" },
   });
 }

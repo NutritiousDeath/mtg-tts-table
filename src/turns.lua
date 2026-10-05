@@ -19,9 +19,10 @@
     - Turn order is clockwise (White, Red, Green, Blue), skipping players
       who are out of the game.
 
-    - Hold: NEXT STEP / END TURN wait 3 seconds (shown on the strips) so
-      other players can click their HOLD tile to stop and respond. Clicking
-      NEXT STEP again during the wait goes right away.
+    - Responses: NEXT STEP / END TURN ask each other player in turn order
+      (a pop-up only they see): NO RESPONSE passes it on; I HAVE A RESPONSE
+      stops the move. Clicking NEXT STEP again during the wait goes now.
+    - END TURN: after the responses, runs end step and cleanup by itself.
     - Cleanup: discard down to 7 (actions.lua), then the turn passes.
     - TURN OPTIONS (screen, under Start Game): extra turn, extra combat,
       skip this step, reverse turn order.
@@ -91,7 +92,7 @@ function Turns.xml()
     .. [[
   </VerticalLayout>
 </Panel>
-]]
+]] .. Turns.respondXml()
 end
 
 function Turns.render()
@@ -142,12 +143,12 @@ local function renderStrip(color)
   B({ label = "", width = math.floor(th * U), height = math.floor(STRIP_D * U), color = line }, hw, 0)
   -- Title.
   local title = running and ("TURN " .. t.number .. " · " .. string.upper(t.activeSeat)) or "NO GAME RUNNING"
-  local pendingTo, left
+  local pendingTo, waitingOn
   if Turns.pendingLabel then
-    pendingTo, left = Turns.pendingLabel()
+    pendingTo, waitingOn = Turns.pendingLabel()
   end
   if running and pendingTo then
-    title = pendingTo .. " IN " .. left .. " · HOLD?"
+    title = pendingTo .. "? WAITING ON " .. string.upper(waitingOn or "")
   end
   B({ label = title, width = 0, height = 0, font_size = (running and not pendingTo) and 300 or 190,
     font_color = { rgb[1], rgb[2], rgb[3] }, color = { 0, 0, 0, 0 } }, TITLE_X, 0.02)
@@ -201,9 +202,6 @@ end
 
 local enterStep
 
--- Seconds other players get to HOLD before a step changes.
-local HOLD_SECONDS = 3
-
 local function livePlayers()
   local n = 0
   for _, c in ipairs(players()) do
@@ -244,6 +242,7 @@ function Turns.beginTurn(seat, number)
   t.number = number or ((t.number or 0) + 1)
   t.stepIndex = 1
   t.pending = nil
+  t.autoThrough = nil
   broadcastToAll("Turn " .. t.number .. ": " .. seat, { 0.55, 0.9, 0.6 })
   enterStep()
 end
@@ -318,6 +317,9 @@ enterStep = function()
     end
     -- Nothing else normally happens in the draw step: move on to Main 1.
     autoAdvance(1)
+  elseif step.id == "end" and t.autoThrough then
+    -- Reached through END TURN: carry on to cleanup by itself.
+    autoAdvance(1)
   elseif step.id == "cleanup" then
     -- Discard down to 7 first (if needed), then the turn passes.
     Actions.cleanupDiscard(seat, function() autoAdvance(0.6) end)
@@ -338,13 +340,18 @@ local function isActive(color)
 end
 
 ---------------------------------------------------------------------------
--- Hold: NEXT STEP / END TURN wait HOLD_SECONDS so other players can stop
--- the turn and respond. Clicking NEXT STEP again during the wait goes now.
+-- Responses: when the active player clicks NEXT STEP / END TURN, each other
+-- player in turn order gets a pop-up (only they see it): NO RESPONSE passes
+-- it to the next player; when the last one passes, the step changes.
+-- I HAVE A RESPONSE stops it; the active player clicks NEXT STEP again when
+-- the response is done. Clicking NEXT STEP again while waiting goes now.
 ---------------------------------------------------------------------------
 
-local holdToken = 0
+local function stepLabelAt(i)
+  return i > #Turns.STEPS and "NEXT TURN" or Turns.STEPS[i].label
+end
 
--- What the pending move will land on, for the strips.
+-- Where the pending move lands, and who it's waiting on (for the strips).
 function Turns.pendingLabel()
   local t = turn()
   if not t.pending then
@@ -356,62 +363,130 @@ function Turns.pendingLabel()
   else
     i = nextIndex(true)
   end
-  local label = i > #Turns.STEPS and "NEXT TURN" or Turns.STEPS[i].label
-  return label, t.pending.left
+  return stepLabelAt(i), t.pending.queue[t.pending.at]
+end
+
+local function showPrompt(color, show)
+  UI.setAttribute("respond_" .. color, "active", show and "true" or "false")
+end
+
+local function hideAllPrompts()
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    showPrompt(c, false)
+  end
+end
+
+local function promptNext()
+  local t = turn()
+  local p = t.pending
+  hideAllPrompts()
+  local who = p.queue[p.at]
+  local to = Turns.pendingLabel()
+  UI.setValue("respondText_" .. who, t.activeSeat .. " wants to move to " .. to .. ".\nAny responses?")
+  showPrompt(who, true)
+  Turns.render()
 end
 
 local function commit(kind)
   local t = turn()
-  holdToken = holdToken + 1
   t.pending = nil
-  if kind == "end" and t.stepIndex < STEP_INDEX["end"] then
-    t.stepIndex = STEP_INDEX["end"]
-    enterStep()
-  else
-    advance()
+  hideAllPrompts()
+  if kind == "end" then
+    -- END TURN runs the rest of the turn on its own: end step, cleanup, next.
+    t.autoThrough = true
+    if t.stepIndex < STEP_INDEX["end"] then
+      t.stepIndex = STEP_INDEX["end"]
+      enterStep()
+      return
+    end
   end
+  advance()
 end
 
 local function requestMove(kind)
   local t = turn()
   if t.pending then
-    commit(t.pending.kind)      -- clicked again: don't wait
+    broadcastToAll(t.activeSeat .. " moves on without waiting.", INFO)
+    commit(t.pending.kind)
     return
   end
-  if livePlayers() <= 1 then
+  -- Everyone else still in the game, in turn order after the active player.
+  local queue, c = {}, t.activeSeat
+  for _ = 1, #players() do
+    c = nextPlayer(c)
+    if c == t.activeSeat then
+      break
+    end
+    table.insert(queue, c)
+  end
+  if #queue == 0 then
     commit(kind)
     return
   end
-  holdToken = holdToken + 1
-  local mine = holdToken
-  t.pending = { kind = kind, left = HOLD_SECONDS }
-  Turns.render()
-  local function tick()
-    local now = turn()
-    if holdToken ~= mine or not now.pending then
-      return
-    end
-    now.pending.left = now.pending.left - 1
-    if now.pending.left <= 0 then
-      commit(now.pending.kind)
-    else
-      Turns.render()
-      Wait.time(tick, 1)
-    end
-  end
-  Wait.time(tick, 1)
+  t.pending = { kind = kind, queue = queue, at = 1 }
+  promptNext()
 end
 
+-- A player answered their pop-up.
+function Turns.respond(color, hasResponse)
+  local t = turn()
+  local p = t.pending
+  if p == nil then
+    return
+  end
+  if hasResponse then
+    t.pending = nil
+    hideAllPrompts()
+    broadcastToAll(color .. " has a response! " .. t.activeSeat .. ": click NEXT STEP when it's done.", WARN)
+    Turns.render()
+    return
+  end
+  if p.queue[p.at] ~= color then
+    return
+  end
+  p.at = p.at + 1
+  if p.at > #p.queue then
+    commit(p.kind)
+  else
+    promptNext()
+  end
+end
+
+-- Hotkey: "MTG: hold" = I have a response (while a move is waiting).
 function Turns.hold(color)
   local t = turn()
   if not GameState.data.started or not t.pending then
-    broadcastToColor("Nothing to hold right now: HOLD works while the turn is about to move on.", color, WARN)
     return
   end
-  holdToken = holdToken + 1
-  t.pending = nil
-  broadcastToAll(color .. " holds! " .. t.activeSeat .. ": click NEXT STEP when everyone is ready.", WARN)
-  Turns.render()
+  Turns.respond(color, true)
+end
+
+function ui_respond(player, arg)
+  local color, answer = tostring(arg):match("^(%a+)_(%a+)$")
+  if color == nil or player.color ~= color then
+    return
+  end
+  Turns.respond(color, answer == "yes")
+end
+
+function Turns.respondXml()
+  local parts = {}
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    table.insert(parts, ([[
+<Panel id="respond_%s" visibility="%s" active="false" rectAlignment="MiddleCenter" offsetXY="0 140" width="440" height="190"
+       color="#0B0F17F5" outline="#5AF0FF" outlineSize="2 2">
+  <VerticalLayout padding="16 16 14 14" spacing="10" childForceExpandHeight="false">
+    <Text fontSize="20" fontStyle="Bold" color="#5AF0FF" preferredHeight="26">RESPONSES?</Text>
+    <Text id="respondText_%s" fontSize="15" color="#E6F1FF" preferredHeight="46">-</Text>
+    <HorizontalLayout spacing="12" preferredHeight="48">
+      <Button onClick="ui_respond(%s_no)" color="#00B3A4" textColor="#06130B" fontStyle="Bold" fontSize="16">NO RESPONSE</Button>
+      <Button onClick="ui_respond(%s_yes)" color="#DB5454" textColor="#1A0606" fontStyle="Bold" fontSize="16">I HAVE A RESPONSE</Button>
+    </HorizontalLayout>
+  </VerticalLayout>
+</Panel>
+]]):format(c, c, c, c, c))
+  end
+  return table.concat(parts)
 end
 
 function Turns.next(color)

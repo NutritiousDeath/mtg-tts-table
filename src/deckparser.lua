@@ -16,6 +16,12 @@
     Commander / Commanders        -> commander zone
     Deck / Main / Mainboard       -> main deck
     Sideboard / Maybeboard / Considering / Companion / Tokens / About -> ignored
+
+  No commander marked? (Moxfield's "Copy for MTGO" export has no commander
+  header: the commander comes after the deck, after a blank line or under
+  SIDEBOARD.) Then a separate group of 1-2 cards that makes the deck exactly
+  100 is taken as the commander(s): the sideboard first, else the last group
+  after a blank line, else the first group.
 --]]
 
 DeckParser = {}
@@ -27,7 +33,7 @@ local SECTIONS = {
   ["main"] = "main",
   ["main deck"] = "main",
   ["mainboard"] = "main",
-  ["sideboard"] = "skip",
+  ["sideboard"] = "sideboard",
   ["maybeboard"] = "skip",
   ["considering"] = "skip",
   ["companion"] = "skip",
@@ -144,13 +150,21 @@ function DeckParser.parse(text)
 
   local section = "main"
   local lineNo = 0
+  local block = 1          -- groups of lines separated by blank lines
+  local sawCard = false
+  local sideboard = {}
 
   for rawLine in (text .. "\n"):gmatch("(.-)\r?\n") do
     lineNo = lineNo + 1
     local line = trim(rawLine)
 
-    if line == "" or line:sub(1, 2) == "//" or line:sub(1, 1) == "#" then
-      -- blank line or comment
+    if line == "" then
+      if sawCard then
+        block = block + 1
+        sawCard = false
+      end
+    elseif line:sub(1, 2) == "//" or line:sub(1, 1) == "#" then
+      -- comment
     else
       local newSection = sectionFor(line)
       if newSection then
@@ -162,17 +176,73 @@ function DeckParser.parse(text)
         elseif entry.commander or section == "commander" then
           entry.commander = true
           table.insert(deck.commanders, entry)
+        elseif section == "sideboard" then
+          table.insert(sideboard, entry)
         else
+          entry.block = block
+          sawCard = true
           table.insert(deck.main, entry)
         end
       end
     end
   end
 
+  if #deck.commanders == 0 then
+    DeckParser.findUnmarkedCommanders(deck, sideboard)
+  end
+
   deck.commanders = mergeDuplicates(deck.commanders)
   deck.main = mergeDuplicates(deck.main)
   deck.total = countCards(deck.commanders) + countCards(deck.main)
   return deck
+end
+
+-- See the header: pick out an unmarked commander group (1-2 cards) that
+-- makes the deck exactly 100.
+function DeckParser.findUnmarkedCommanders(deck, sideboard)
+  local mainCount = countCards(deck.main)
+  local function take(list, why)
+    for _, e in ipairs(list) do
+      e.commander = true
+      table.insert(deck.commanders, e)
+    end
+    local names = {}
+    for _, e in ipairs(list) do table.insert(names, e.name) end
+    table.insert(deck.warnings, "No commander header, so " .. table.concat(names, " + ")
+      .. " (" .. why .. ") was used as the commander.")
+  end
+  local sbCount = countCards(sideboard)
+  if sbCount >= 1 and sbCount <= 2 and mainCount + sbCount == 100 then
+    take(sideboard, "the sideboard")
+    return
+  end
+  -- Group the main entries by block.
+  local blocks, order = {}, {}
+  for _, e in ipairs(deck.main) do
+    if blocks[e.block] == nil then
+      blocks[e.block] = {}
+      table.insert(order, e.block)
+    end
+    table.insert(blocks[e.block], e)
+  end
+  if #order < 2 or mainCount ~= 100 then
+    return
+  end
+  for _, which in ipairs({ order[#order], order[1] }) do
+    local group = blocks[which]
+    local n = countCards(group)
+    if n >= 1 and n <= 2 then
+      local keep = {}
+      for _, e in ipairs(deck.main) do
+        if e.block ~= which then
+          table.insert(keep, e)
+        end
+      end
+      deck.main = keep
+      take(group, which == order[1] and "the first group" or "the last group")
+      return
+    end
+  end
 end
 
 -- Commander deck checks. Adds messages to deck.warnings; returns true if clean.

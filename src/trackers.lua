@@ -353,6 +353,7 @@ function Trackers.ensureTableDisplay()
   for _, obj in ipairs(getObjectsWithTag("Tracker")) do
     obj.destruct()
   end
+  GameState.data.table.partnerChips = {}
   for _, registry in ipairs({ tiles(), taxTiles() }) do
     for key, guid in pairs(registry) do
       local obj = getObjectFromGUID(guid)
@@ -476,6 +477,7 @@ function Trackers.render(color)
     end
   end
   local rowsZ = CROWN_ROWS[seats] or CROWN_ROWS[3]
+  local usedChips = {}
   for i, c in ipairs(list) do
     colInRow[c.seat] = (colInRow[c.seat] or 0) + 1
     local col, z = colInRow[c.seat], rowsZ[rowOf[c.seat]]
@@ -488,11 +490,82 @@ function Trackers.render(color)
       if col == 1 then
         outlined(tile, tostring(dmg), CROWN_X[1], z, 280, fontColor, click, tip, 640, 560)
       else
-        local t = SEAT_TINT[c.seat] or INK
-        button(tile, { label = tostring(dmg), tooltip = tip, click_function = click,
-          width = 380, height = 320, font_size = 230, font_color = BLACK,
-          color = { t[1], t[2], t[3], 0.9 } }, CROWN_X[2], z)
+        -- Partner / background: its own small crown tile beside the first.
+        usedChips[color .. "|" .. c.key] = true
+        Trackers.partnerChip(color, c.key, c.seat, CROWN_X[2], z, function(chip)
+          outlined(chip, tostring(dmg), 0, 0, 240, fontColor, click, tip, 600, 600)
+        end)
       end
+    end
+  end
+  Trackers.dropUnusedChips(color, usedChips)
+end
+
+---------------------------------------------------------------------------
+-- Partner crown chips: a small crown tile on a tracker for an opponent's
+-- second commander (partner or background), with its own damage number.
+---------------------------------------------------------------------------
+
+local CHIP_W = 1.3
+
+local function chips()
+  GameState.data.table = GameState.data.table or {}
+  GameState.data.table.partnerChips = GameState.data.table.partnerChips or {}
+  return GameState.data.table.partnerChips
+end
+
+function Trackers.partnerChip(color, key, oppSeat, x, z, draw)
+  local id = color .. "|" .. key
+  local guid = chips()[id]
+  if guid == "spawning" then
+    return
+  end
+  local chip = guid and getObjectFromGUID(guid)
+  if chip and not chip.loading_custom then
+    chip.clearButtons()
+    draw(chip)
+    return
+  end
+  if chip then
+    return   -- still loading; it draws itself when ready
+  end
+  local r = TableSetup.region(color, "tracker")
+  local s = TableSetup.seat(color)
+  -- Tile coordinates: x to the player's right, z toward the player.
+  local px = r.center.x + s.right.x * x - s.inward.x * z
+  local pz = r.center.z + s.right.z * x - s.inward.z * z
+  chips()[id] = "spawning"
+  local obj = spawnObject({
+    type = "Custom_Token",
+    position = { px, TableSetup.SURFACE_TOP + 0.6, pz },
+    rotation = { 0, s.yaw, 0 },
+    sound = false,
+    callback_function = function(o)
+      o.setName(oppSeat .. " partner commander damage")
+      o.addTag("Tracker")
+      o.setLock(true)
+      chips()[id] = o.getGUID()
+      Wait.condition(function()
+        local b = o.getBoundsNormalized()
+        local k = CHIP_W / math.max(0.05, b.size.x / o.getScale().x)
+        o.setScale({ k, 1, k })
+        o.setPosition({ px, TableSetup.SURFACE_TOP + 0.2 + o.getBoundsNormalized().size.y / 2, pz })
+        Trackers.render(color)
+      end, function() return o.isDestroyed() or not o.loading_custom end, 10)
+    end,
+  })
+  obj.setCustomObject({ image = ICON_BASE .. "tracker_crownchip_" .. oppSeat .. ".png" .. ICON_VERSION,
+    thickness = 0.1, merge_distance = 5, stackable = false })
+end
+
+function Trackers.dropUnusedChips(color, used)
+  for id, guid in pairs(chips()) do
+    if id:sub(1, #color + 1) == color .. "|" and not used[id] then
+      local obj = getObjectFromGUID(guid)
+      if obj then
+        obj.destruct()
+      end
+      chips()[id] = nil
     end
   end
 end
@@ -521,11 +594,16 @@ function Trackers.renderTax(color, slot)
   end
   tile.clearButtons()
   local tax = taxOf(p)[slot]
-  local name = p.commanderNames[slot] or (slot == 1 and "your commander" or "your partner")
-  outlined(tile, tostring(tax), 0, TAX_NUMBER_DZ, 420, INK,
+  local role = (p.commanderRoles and p.commanderRoles[slot]) or (slot == 1 and "COMMANDER" or "PARTNER")
+  local name = p.commanderNames[slot] or (slot == 1 and "your commander" or "your partner / background")
+  -- Which commander this tax belongs to (shown once a deck is imported).
+  if p.commanderNames[slot] then
+    outlined(tile, role, 0, -0.1, 110, { 0.35, 0.94, 1 }, "trk_noop", name, 0, 0)
+  end
+  outlined(tile, tostring(tax), 0, TAX_NUMBER_DZ + 0.12, 360, INK,
     handler("trk_" .. color .. "_tax" .. slot,
       function(pc, alt) Trackers.changeTax(color, slot, alt and -2 or 2, pc) end),
-    "Commander tax for " .. name .. ": click +2, right-click -2", 900, 520)
+    "Commander tax for " .. name .. " (" .. role:lower() .. "): click +2, right-click -2", 900, 520)
 end
 
 function Trackers.changeTax(color, slot, delta, byColor, reason)

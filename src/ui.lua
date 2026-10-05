@@ -4,20 +4,24 @@
   lives in the repo with everything else.
 
   Current controls:
-    "Import Deck" button (top left) opens a panel with a paste box.
-    "Import" takes an Archidekt link (fetched via Archidekt) or a pasted
-    list, and hands it to Importer.importDeck for that player.
-    "Start Game" and the mulligan panels come from game.lua.
+    "Import Deck" button (top left) opens that player's own import panel
+    (one panel per seat, each visible only to its seat, so nobody else sees
+    it pop up). "Import" takes an Archidekt link (fetched via Archidekt) or a
+    pasted list (plain text, Moxfield MTGA/MTGO export, Archidekt export) and
+    hands it to Importer.importDeck for that player.
     The Deck Importer cards on the table (importcards.lua) open the same
-    panel, shown only to the player who clicked.
+    panel for whoever clicked.
+    "Start Game" and the mulligan panels come from game.lua; "Turn Options"
+    from turns.lua; the Scry / discard panels from actions.lua; "Roll Dice"
+    from dice.lua; "Tokens" from tokens.lua.
 --]]
 
 TableUI = {}
 
--- Text each player has typed into the paste box, by seat color.
+-- Text each player has typed into their paste box, by seat color.
 local pastedText = {}
 
-local XML = [[
+local HEADER = [[
 <Defaults>
   <Button fontSize="16" textColor="#E6F1FF" color="#1B2333" />
   <Text color="#E6F1FF" />
@@ -30,9 +34,13 @@ local XML = [[
         width="150" height="40"
         fontStyle="Bold"
         color="#00B3A4">Import Deck</Button>
+]]
 
-
-<Panel id="importPanel"
+-- One import panel per seat (visibility fixed to that seat).
+local function importPanel(color)
+  return ([[
+<Panel id="importPanel_%s"
+       visibility="%s"
        active="false"
        width="560" height="520"
        color="#0D1117F2"
@@ -40,9 +48,8 @@ local XML = [[
        allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="16 16 16 16" spacing="10" childForceExpandHeight="false">
     <Text fontSize="22" fontStyle="Bold" alignment="MiddleLeft" preferredHeight="32">Import Commander Deck</Text>
-    <Text fontSize="13" alignment="MiddleLeft" preferredHeight="36" color="#8B98A9">Paste an Archidekt deck link, or a decklist (plain text, Moxfield or Archidekt export). In a pasted list, put the commander under a "Commander" header or tag it [Commander] / *CMDR*.</Text>
-    <InputField id="deckInput"
-                onValueChanged="ui_deckText"
+    <Text fontSize="13" alignment="MiddleLeft" preferredHeight="36" color="#8B98A9">Paste an Archidekt deck link, or a decklist (plain text, or a Moxfield / Archidekt export). The commander is found from a "Commander" header, a [Commander] / *CMDR* tag, or Moxfield's MTGO export.</Text>
+    <InputField onValueChanged="ui_deckText"
                 lineType="MultiLineNewline"
                 characterLimit="0"
                 fontSize="14"
@@ -54,11 +61,17 @@ local XML = [[
     </HorizontalLayout>
   </VerticalLayout>
 </Panel>
-]]
+]]):format(color, color)
+end
 
 -- Build the on-screen UI. (Life tracking is on the table: trackers.lua.)
 function TableUI.build()
-  UI.setXml(XML .. GameFlow.xml() .. Turns.xml() .. Actions.xml())
+  local panels = {}
+  for _, color in ipairs(TableSetup.activeSeats()) do
+    table.insert(panels, importPanel(color))
+  end
+  UI.setXml(HEADER .. table.concat(panels) .. GameFlow.xml() .. Turns.xml() .. Actions.xml()
+    .. Dice.xml() .. Tokens.xml())
   -- The new XML takes a moment to load before it can be changed.
   Wait.time(function()
     GameFlow.refreshUI()
@@ -70,24 +83,34 @@ end
 -- XML event handlers (must be global; XML calls them by name)
 ---------------------------------------------------------------------------
 
-local importOpen = false
+local importOpen = {}   -- [color] = true while that player's panel is open
+
+local function seated(color)
+  if color == nil or color == "Grey" or color == "Black" or not TableSetup.isActive(color) then
+    broadcastToColor("Take a seat first, then import.", color or "Grey", { 1, 0.6, 0.2 })
+    return false
+  end
+  return true
+end
 
 -- Open the import panel for one player only (the table's Deck Importer cards
 -- and the screen button both use this).
 function TableUI.openImport(color)
-  if color == nil or color == "Grey" or color == "Black" then
-    broadcastToColor("Take a seat first, then import.", color or "Grey", { 1, 0.6, 0.2 })
+  if not seated(color) then
     return
   end
-  UI.setAttribute("importPanel", "visibility", color)
-  UI.show("importPanel")
-  importOpen = true
+  UI.setAttribute("importPanel_" .. color, "active", "true")
+  importOpen[color] = true
+end
+
+local function closeImport(color)
+  UI.setAttribute("importPanel_" .. color, "active", "false")
+  importOpen[color] = nil
 end
 
 function ui_toggleImport(player)
-  if importOpen then
-    importOpen = false
-    UI.hide("importPanel")
+  if importOpen[player.color] then
+    closeImport(player.color)
   else
     TableUI.openImport(player.color)
   end
@@ -99,19 +122,17 @@ end
 
 function ui_importDeck(player)
   local color = player.color
-  if color == "Grey" or color == "Black" then
-    broadcastToColor("Take a seat first, then import.", color, { 1, 0.6, 0.2 })
+  if not seated(color) then
     return
   end
   local text = pastedText[color]
 
   if Archidekt.isMoxfieldLink(text) then
-    broadcastToColor("Moxfield blocks importing by link. In Moxfield: Export > Copy for MTGO, then paste the list here.", color, { 1, 0.6, 0.2 })
+    broadcastToColor("Moxfield blocks importing by link. In Moxfield: Export > Copy for MTGO (or MTGA), then paste the list here.", color, { 1, 0.6, 0.2 })
     return
   end
 
-  importOpen = false
-  UI.hide("importPanel")
+  closeImport(color)
 
   local deckId = Archidekt.deckId(text)
   if deckId then

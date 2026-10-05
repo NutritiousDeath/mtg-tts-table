@@ -277,6 +277,29 @@ local function seatSpots(color)
   return handSeatSpots(color)
 end
 
+-- Order commanders (commander first, a Background second) and name their
+-- roles. Cards are JSON text here: a Background's type line says
+-- "Background"; the creature that takes one says "Choose a Background".
+function Importer.commanderRoles(list)
+  local function isBackground(c)
+    return c.json:find("Background", 1, true) ~= nil and c.json:find("Choose a Background", 1, true) == nil
+  end
+  if #list == 2 and isBackground(list[1]) and not isBackground(list[2]) then
+    list[1], list[2] = list[2], list[1]
+  end
+  local roles = {}
+  for i, c in ipairs(list) do
+    if i == 1 then
+      roles[i] = "COMMANDER"
+    elseif isBackground(c) then
+      roles[i] = "BACKGROUND"
+    else
+      roles[i] = "PARTNER"
+    end
+  end
+  return roles
+end
+
 -- Where commander number i goes: its own command zone (1 = commander,
 -- 2 = partner) when the seat is on the table layout, else stacked on cmdrPos.
 local function commanderSpot(color, cmdrPos, i)
@@ -689,6 +712,13 @@ local function fillTemplate(tpl, id1, id2)
   return s
 end
 
+-- Shared with tokens.lua (token search spawns cards the same way).
+Importer.RELAY_HOST = RELAY_HOST
+Importer.splitPlain = splitPlain
+Importer.replacePlain = replacePlain
+Importer.fillTemplate = fillTemplate
+Importer.nextDeckId = function() return nextDeckId() end
+
 -- Read one batch of relay output into results. Lines are
 -- KIND <tab> index <tab> a [<tab> b]; indexes are 0-based within the batch.
 local function parseRelayText(text, first, results)
@@ -938,6 +968,7 @@ function Importer.importDeck(color, text)
     local deckPos, cmdrPos, yaw, labelPos = seatSpots(color)
 
     local commanderJson, mainCards, deckIds, deckEntries = {}, {}, {}, {}
+    local commanderList = {}
     for i, e in ipairs(entries) do
       local t = results.cards[i]
       if t then
@@ -946,7 +977,7 @@ function Importer.importDeck(color, text)
           local id1, id2 = nextDeckId(), nextDeckId()
           local json = fillTemplate(t.card, id1, id2)
           if e.commander then
-            table.insert(commanderJson, json)
+            table.insert(commanderList, { json = json, name = e.name })
           else
             table.insert(mainCards, json)
             table.insert(deckIds, tostring(id1 * 100))
@@ -956,6 +987,13 @@ function Importer.importDeck(color, text)
       end
     end
 
+    -- Roles: the first zone holds the commander; the second a partner or a
+    -- Background (a Background goes second even if listed first).
+    local roles = Importer.commanderRoles(commanderList)
+    for _, c in ipairs(commanderList) do
+      table.insert(commanderJson, c.json)
+    end
+
     if #commanderJson > 0 then
       ensureCommandZone(color, cmdrPos, yaw, labelPos)
     end
@@ -963,8 +1001,16 @@ function Importer.importDeck(color, text)
       player.commanders = {}
       -- Commander names drive the commander damage counters on the trackers.
       player.commanderNames = {}
-      for _, e in ipairs(deck.commanders) do
-        table.insert(player.commanderNames, e.name)
+      player.commanderRoles = roles
+      for _, c in ipairs(commanderList) do
+        table.insert(player.commanderNames, c.name)
+      end
+      if #commanderList > 0 then
+        local bits = {}
+        for i, c in ipairs(commanderList) do
+          table.insert(bits, roles[i]:sub(1, 1) .. roles[i]:sub(2):lower() .. ": " .. c.name)
+        end
+        broadcastToAll(color .. " - " .. table.concat(bits, " · "), { 0.7, 0.85, 1 })
       end
     end
 

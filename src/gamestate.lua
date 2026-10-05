@@ -31,6 +31,7 @@ local function newPlayer(color, format)
     commanderDamage = {},    -- ["<seat>|<slot>"] = damage taken from that seat's commander (slot 2 = partner)
     commanders = {},         -- GUIDs of this player's commander card(s)
     commanderNames = {},     -- names of this player's commander(s), set on import
+    commanderRoles = {},     -- "COMMANDER" / "PARTNER" / "BACKGROUND" per command zone
     commanderTax = { 0, 0 }, -- tax per command zone (1 = commander, 2 = partner), in mana
     mulligans = 0,
     hasKept = false,

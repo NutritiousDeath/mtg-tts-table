@@ -47,7 +47,7 @@ local function ready(obj)
     position = { 0, 0.12, 0 },
     rotation = { 0, 0, 0 },
     scale = { 1 / k, 1, 1 / k },
-    width = 1250, height = 1750,
+    width = 2450, height = 3450,
     color = { 0, 0, 0, 0 },
     hover_color = { 0.35, 0.95, 1, 0.12 },
     press_color = { 0.35, 0.95, 1, 0.25 },

@@ -33,7 +33,6 @@ local ACTIONS = {
   { name = "untap", label = "Untap", tip = "UNTAP\nClick: untap all your tapped permanents" },
   { name = "next", label = "Next step", tip = "NEXT STEP\nYour turn: move to the next step of the turn" },
   { name = "endturn", label = "End turn", tip = "END TURN\nYour turn: skip to the end step\n(from the end step: pass the turn)" },
-  { name = "hold", label = "Hold", tip = "HOLD\nWhile the turn is about to move on (3 second countdown on the strip),\nclick to stop it so you can respond." },
 }
 
 local function tiles()
@@ -104,7 +103,9 @@ end
 -- they all resolve at once and the viewer closes. X cancels.
 ---------------------------------------------------------------------------
 
-local MAX_SCRY = 6
+local MAX_SCRY = 24          -- cards the viewer can hold (6 per row, scrolls)
+local SCRY_COLS = 6
+local SCRY_CELL_H = 404
 local scry = {}   -- [color] = { choices = { [i] = "top"|"bottom"|"grave" }, count = n }
 
 local CHOICE_TEXT = { top = "KEEP ON TOP", bottom = "TO THE BOTTOM", grave = "TO GRAVEYARD" }
@@ -151,13 +152,16 @@ function Actions.xml()
       <Button onClick="ui_scry(%s_0_cancel)" preferredWidth="30" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold"
               tooltip="Cancel: leave the cards where they are">X</Button>
     </HorizontalLayout>
-    <Text fontSize="12" color="#8B98A9" preferredHeight="16">Click SCRY again to look at one more card</Text>
-    <HorizontalLayout spacing="12" preferredHeight="420" childForceExpandWidth="false" childAlignment="UpperCenter">]]
+    <Text fontSize="12" color="#8B98A9" preferredHeight="16">Click SCRY again to look at one more card (scroll for more rows)</Text>
+    <VerticalScrollView id="scryScroll_%s" preferredHeight="410" scrollSensitivity="40" color="#00000000">
+      <GridLayout id="scryGrid_%s" cellSize="210 ]] .. SCRY_CELL_H .. [[" spacing="12 10" constraint="FixedColumnCount"
+                  constraintCount="]] .. SCRY_COLS .. [[" childAlignment="UpperLeft" height="404">]]
       .. table.concat(slots) .. [[
-    </HorizontalLayout>
+      </GridLayout>
+    </VerticalScrollView>
   </VerticalLayout>
 </Panel>
-]]):format(c, c, c, c))
+]]):format(c, c, c, c, c, c))
     table.insert(parts, Actions.discardXml(c))
   end
   return table.concat(parts)
@@ -345,7 +349,14 @@ local function renderScry(color)
     return
   end
   UI.setAttribute("scry_" .. color, "active", "true")
-  UI.setAttribute("scry_" .. color, "width", 30 + st.count * 222)
+  local cols = math.min(st.count, SCRY_COLS)
+  local rows = math.ceil(st.count / SCRY_COLS)
+  local gridH = rows * SCRY_CELL_H + (rows - 1) * 10
+  local viewH = math.min(gridH, 2 * SCRY_CELL_H + 10)
+  UI.setAttribute("scry_" .. color, "width", 30 + cols * 222)
+  UI.setAttribute("scryGrid_" .. color, "height", gridH)
+  UI.setAttribute("scryScroll_" .. color, "preferredHeight", viewH)
+  UI.setAttribute("scry_" .. color, "height", 100 + viewH)
   UI.setValue("scryTitle_" .. color, "SCRY / SURVEIL " .. st.count)
   for i = 1, MAX_SCRY do
     local id = color .. "_" .. i
@@ -374,7 +385,8 @@ function Actions.openScry(color)
     end
     scry[color] = { choices = {}, count = 1 }
   elseif st.count >= math.min(MAX_SCRY, total) then
-    broadcastToColor("That's as many cards as the viewer shows at once.", color, WARN)
+    broadcastToColor(st.count >= total and "That's every card in your library."
+      or ("The viewer holds up to " .. MAX_SCRY .. " cards at once: choose for these, then scry again."), color, WARN)
     return
   else
     st.count = st.count + 1
@@ -455,13 +467,11 @@ local function renderTile(color, a)
       Turns.next(color)
     elseif a.name == "endturn" then
       Turns.endTurn(color)
-    elseif a.name == "hold" then
-      Turns.hold(color)
     end
   end
   -- One invisible button over the whole tile: the click area + tooltip.
   Trackers.tileButton(tile, { label = "", click_function = fn, tooltip = a.tip,
-    width = 760, height = 1060, color = { 0, 0, 0, 0 }, hover_color = { 1, 1, 1, 0.08 },
+    width = 1460, height = 2060, color = { 0, 0, 0, 0 }, hover_color = { 1, 1, 1, 0.08 },
     press_color = { 1, 1, 1, 0.18 } }, 0, 0)
 end
 

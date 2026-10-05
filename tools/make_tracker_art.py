@@ -127,7 +127,31 @@ def build_tax(color):
     return out
 
 
+# Partner crown chip (trackers.lua): a small solid tile with one seat's
+# crown, placed on the tracker for an opponent's second commander.
+def build_crownchip(color):
+    W = H = 320
+    rgb = SEAT_RGB[color]
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(img).rounded_rectangle([0, 0, W - 1, H - 1], radius=48, fill=(12, 15, 24, 255),
+                                         outline=rgb + (255,), width=10)
+    icon = Image.open(os.path.join(ICONS, "tracker_crown_%s.png" % color)).convert("RGBA").resize((250, 250), Image.LANCZOS)
+    img.alpha_composite(icon, (35, 30))
+    # keep it fully solid (custom tokens are cut out from the transparency)
+    solid = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, W - 1, H - 1], radius=48, fill=255)
+    base = Image.new("RGBA", (W, H), (12, 15, 24, 255))
+    base.alpha_composite(img)
+    solid.paste(base, (0, 0), mask)
+    out = os.path.join(ICONS, "tracker_crownchip_%s.png" % color)
+    solid.save(out)
+    return out
+
+
 if __name__ == "__main__":
+    for color in SEAT_RGB:
+        print(build_crownchip(color))
     for color in SEAT_RGB:
         print(build_tax(color))
     for layout, seats in LAYOUTS.items():

@@ -40,6 +40,8 @@ require("src/deckparser")
 require("src/importer")
 require("src/archidekt")
 require("src/game")
+require("src/dice")
+require("src/tokens")
 require("src/ui")
 require("src/importcards")
 
@@ -61,7 +63,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.61 (hold, discard to 7, turn options)"
+SCRIPT_VERSION = "0.62 (playtest fixes: responses, dice, tokens, partner crowns)"
 
 function onLoad(saved)
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)
@@ -115,6 +117,20 @@ end
 
 function onObjectLeaveContainer(container, obj)
   Zones.onLeaveContainer(container, obj)
+end
+
+-- A player finished searching a library (right-click > Search): shuffle it,
+-- as searching a library always ends with a shuffle.
+function onObjectSearchEnd(obj, playerColor)
+  if obj == nil or obj.isDestroyed() or obj.type ~= "Deck" then
+    return
+  end
+  local loc = Zones.regionAt(obj.getPosition())
+  if loc.region == "library" then
+    obj.shuffle()
+    broadcastToAll((loc.seat or "A") .. "'s library was shuffled after " .. tostring(playerColor) .. " searched it.",
+      { 0.75, 0.8, 0.9 })
+  end
 end
 
 function onObjectEnterContainer(container, obj)
