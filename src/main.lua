@@ -61,7 +61,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.59 (turn strip image fix)"
+SCRIPT_VERSION = "0.60 (turn strips only, no screen bar)"
 
 function onLoad(saved)
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)

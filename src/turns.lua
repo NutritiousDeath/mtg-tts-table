@@ -1,7 +1,7 @@
 --[[
   turns.lua
   The turn engine (Phase 4): steps in order, automatic untap and draw,
-  clockwise turn order and a turn bar everyone can see.
+  clockwise turn order, and a live turn strip on the table at every seat.
 
   Steps: Untap, Upkeep, Draw, Main 1, Beginning of combat, Declare attackers,
   Declare blockers, Combat damage, End of combat, Main 2, End step, Cleanup.
@@ -44,8 +44,6 @@ for i, s in ipairs(Turns.STEPS) do
   STEP_INDEX[s.id] = i
 end
 
-local SEAT_HEX = { White = "#C7CCD9", Red = "#DB5454", Green = "#52C26B", Blue = "#5294F2" }
-local ON, OFF = "#5AF0FF", "#3A4556"
 local INFO = { 0.75, 0.8, 0.9 }
 local WARN = { 1, 0.6, 0.2 }
 
@@ -67,50 +65,13 @@ end
 local ART_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/ui/"
 local ART_VERSION = "?v=2"
 
+-- The turn shows on the table strips (below); there is no screen bar.
 function Turns.xml()
-  local steps = {}
-  for i, s in ipairs(Turns.STEPS) do
-    table.insert(steps, ([[
-      <Panel id="turnStepBg_%d" color="#00000000" preferredWidth="74">
-        <Text id="turnStep_%d" fontSize="11" fontStyle="Bold" color="%s">%s</Text>
-      </Panel>]]):format(i, i, OFF, s.label))
-  end
-  return [[
-<Panel id="turnBar" active="false" rectAlignment="UpperCenter" offsetXY="0 -10" width="980" height="96" color="#00000000">
-  <Image id="turnBarBg" image="]] .. ART_BASE .. "turnbar_White.png" .. ART_VERSION .. [[" raycastTarget="false" />
-  <VerticalLayout padding="22 22 12 12" spacing="6" childForceExpandHeight="false">
-    <HorizontalLayout preferredHeight="34" spacing="12" childForceExpandWidth="false">
-      <Text id="turnTitle" fontSize="20" fontStyle="Bold" color="#E6F1FF" alignment="MiddleCenter" flexibleWidth="1">TURN</Text>
-    </HorizontalLayout>
-    <HorizontalLayout preferredHeight="22" spacing="4">]] .. table.concat(steps) .. [[</HorizontalLayout>
-  </VerticalLayout>
-</Panel>
-]]
+  return ""
 end
 
--- Seat color as a translucent fill for the current step's chip.
-local CHIP = { White = "#C7CCD955", Red = "#DB545466", Green = "#52C26B66", Blue = "#5294F266" }
-
 function Turns.render()
-  local d = GameState.data
-  local t = turn()
   Turns.renderStrips()
-  if not d.started or t.activeSeat == nil then
-    UI.setAttribute("turnBar", "active", "false")
-    return
-  end
-  local seat = t.activeSeat
-  UI.setAttribute("turnBar", "active", "true")
-  UI.setAttribute("turnBarBg", "image", ART_BASE .. "turnbar_" .. seat .. ".png" .. ART_VERSION)
-  local step = Turns.STEPS[t.stepIndex or 1]
-  UI.setValue("turnTitle", "TURN " .. t.number .. "  ·  " .. string.upper(seat)
-    .. "  ·  " .. (step and step.label or ""))
-  UI.setAttribute("turnTitle", "color", SEAT_HEX[seat] or "#E6F1FF")
-  for i = 1, #Turns.STEPS do
-    local on = i == t.stepIndex
-    UI.setAttribute("turnStepBg_" .. i, "color", on and (CHIP[seat] or "#5AF0FF44") or "#00000000")
-    UI.setAttribute("turnStep_" .. i, "color", on and "#FFFFFF" or (i < (t.stepIndex or 1) and "#5B6B80" or OFF))
-  end
 end
 
 ---------------------------------------------------------------------------
