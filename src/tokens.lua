@@ -50,7 +50,7 @@ function Tokens.xml()
       <Button onClick="ui_tokenCopies(%s_plus)" preferredWidth="34" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold">+</Button>
     </HorizontalLayout>
     <Text id="tokStatus_%s" fontSize="12" color="#8B98A9" alignment="MiddleLeft" preferredHeight="18">Search for a token, then click it to put it onto your battlefield.</Text>
-    <GridLayout id="tokGrid_%s" active="false" cellSize="150 209" spacing="8 8" constraint="FixedColumnCount" constraintCount="6"
+    <GridLayout id="tokGrid_%s" active="false" cellSize="146 204" spacing="8 8" constraint="FixedColumnCount" constraintCount="6"
                 childAlignment="UpperLeft" preferredHeight="300">]] .. table.concat(slots) .. [[</GridLayout>
   </VerticalLayout>
 </Panel>
@@ -67,8 +67,8 @@ local function render(color)
   local list = results[color] or {}
   local rows = math.ceil(#list / 6)
   UI.setAttribute("tokGrid_" .. color, "active", #list > 0 and "true" or "false")
-  UI.setAttribute("tokGrid_" .. color, "preferredHeight", rows * 217)
-  UI.setAttribute("tokens_" .. color, "height", 150 + rows * 217)
+  UI.setAttribute("tokGrid_" .. color, "preferredHeight", rows * 212)
+  UI.setAttribute("tokens_" .. color, "height", 150 + rows * 212)
   UI.setValue("tokCopies_" .. color, "x" .. (copies[color] or 1))
   for i = 1, MAX_RESULTS do
     local id = color .. "_" .. i
@@ -76,10 +76,11 @@ local function render(color)
     if r then
       UI.setAttribute("tokSlot_" .. id, "active", "true")
       UI.setValue("tokName_" .. id, r.name)
-      -- The preview uses Scryfall's "normal" size (488px), which shrinks into
-      -- the box cleanly; "large" (672px) looked blurry at this size. The
-      -- token itself still spawns with the large image.
-      UI.setAttribute("tokImg_" .. id, "image", (r.image:gsub("/large/", "/normal/", 1)))
+      -- The preview uses Scryfall's "small" size (146 x 204), about the same
+      -- size as the box, so TTS doesn't have to shrink it (shrinking big
+      -- images is what made them fuzzy). The token itself still spawns with
+      -- the large image.
+      UI.setAttribute("tokImg_" .. id, "image", (r.image:gsub("/large/", "/small/", 1)))
       UI.setAttribute("tokBtn_" .. id, "tooltip", r.name .. "\n" .. r.typeLine .. "\nClick: put onto your battlefield")
     else
       UI.setAttribute("tokSlot_" .. id, "active", "false")
