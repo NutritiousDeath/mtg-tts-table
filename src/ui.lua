@@ -8,6 +8,8 @@
     "Import" takes an Archidekt link (fetched via Archidekt) or a pasted
     list, and hands it to Importer.importDeck for that player.
     "Start Game" and the mulligan panels come from game.lua.
+    The Deck Importer cards on the table (importcards.lua) open the same
+    panel, shown only to the player who clicked.
 --]]
 
 TableUI = {}
@@ -67,12 +69,24 @@ end
 
 local importOpen = false
 
+-- Open the import panel for one player only (the table's Deck Importer cards
+-- and the screen button both use this).
+function TableUI.openImport(color)
+  if color == nil or color == "Grey" or color == "Black" then
+    broadcastToColor("Take a seat first, then import.", color or "Grey", { 1, 0.6, 0.2 })
+    return
+  end
+  UI.setAttribute("importPanel", "visibility", color)
+  UI.show("importPanel")
+  importOpen = true
+end
+
 function ui_toggleImport(player)
-  importOpen = not importOpen
   if importOpen then
-    UI.show("importPanel")
-  else
+    importOpen = false
     UI.hide("importPanel")
+  else
+    TableUI.openImport(player.color)
   end
 end
 

@@ -37,6 +37,7 @@ require("src/importer")
 require("src/archidekt")
 require("src/game")
 require("src/ui")
+require("src/importcards")
 
 local SAMPLE_DECK = [[
 Commander
@@ -56,7 +57,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.43 (new heart and poison art)"
+SCRIPT_VERSION = "0.44 (deck importer cards)"
 
 function onLoad(saved)
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)
@@ -68,6 +69,7 @@ function onLoad(saved)
   end
   TableSetup.ensure()
   Trackers.ensureTableDisplay()
+  ImportCards.ensure()
   TableUI.build()
   Counters.registerHotkeys()
   Counters.setupAll()
