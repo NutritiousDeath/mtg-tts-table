@@ -247,16 +247,18 @@ local function resetPlayer(color)
   p.lossDismissed = nil
   p.mulligans = 0
   p.hasKept = false
+  p.commanderTax = { 0, 0 }
 end
 
 local function returnCommanders(color)
   local p = GameState.player(color)
-  local pos = TableSetup.slot(color, "command", 2)
   local s = TableSetup.seat(color)
-  for i, guid in ipairs(p.commanders or {}) do
+  for i, guid in pairs(p.commanders or {}) do
     local obj = getObjectFromGUID(guid)
+    -- Commander i goes back to command zone i (2 = partner).
+    local pos = TableSetup.slot(color, "command" .. math.min(i, 2), 2)
     if obj and pos then
-      obj.setPositionSmooth({ x = pos.x, y = pos.y + i, z = pos.z }, false, true)
+      obj.setPositionSmooth(pos, false, true)
       obj.setRotationSmooth({ 0, s.yaw, 0 }, false, true)
     end
   end

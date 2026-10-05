@@ -265,6 +265,7 @@ local OUTLINE_PER_FONT = 0.00008  -- outline offset (table units) per point of f
 local BLACK = { 0, 0, 0 }
 local HOVER = { 1, 1, 1, 0.06 }
 local INVISIBLE = { 0, 0, 0, 0 }
+local SOLID_TEXT_ALPHA = 100
 
 local function tiles()
   GameState.data.table = GameState.data.table or {}
@@ -281,22 +282,60 @@ local function imageFor(color)
   return ICON_BASE .. "tracker_bg_" .. TableSetup.layout() .. "_" .. color .. ".png" .. ICON_VERSION
 end
 
--- The token has loaded its image: size it to the tracker area, then draw.
-local function tileReady(color, obj)
+-- An image tile has loaded: size it to its area (width w), lay it on the
+-- table there, then draw its buttons.
+local function tileReady(obj, color, regionName, width, draw)
   local b = obj.getBoundsNormalized()
   local w = b and b.size and b.size.x or 0
   if w < 0.05 then
     -- Image not measured yet; try again shortly.
-    Wait.time(function() if not obj.isDestroyed() then tileReady(color, obj) end end, 0.5)
+    Wait.time(function() if not obj.isDestroyed() then tileReady(obj, color, regionName, width, draw) end end, 0.5)
     return
   end
-  local k = TILE_W / (w / obj.getScale().x)
+  local k = width / (w / obj.getScale().x)
   obj.setScale({ k, 1, k })
-  local r = TableSetup.region(color, "tracker")
+  local r = TableSetup.region(color, regionName)
   local thick = obj.getBoundsNormalized().size.y
   obj.setPosition({ r.center.x, TableSetup.SURFACE_TOP + thick / 2 + 0.01, r.center.z })
   obj.setLock(true)
-  Trackers.render(color)
+  draw()
+  -- Draw again once the tile has settled, in case the first pass came too early.
+  Wait.time(draw, 1)
+end
+
+-- Spawn an image tile (custom token) for a seat's area.
+local function spawnTile(color, regionName, name, url, width, register, draw)
+  local r = TableSetup.region(color, regionName)
+  local s = TableSetup.seat(color)
+  local obj = spawnObject({
+    type = "Custom_Token",
+    position = { r.center.x, TableSetup.SURFACE_TOP + 0.5, r.center.z },
+    -- Same facing as cards at this seat: upright for its player.
+    rotation = { 0, s.yaw, 0 },
+    scale = { 1, 1, 1 },
+    sound = false,
+    callback_function = function(o)
+      o.setName(name)
+      o.addTag("Tracker")
+      o.setLock(true)
+      o.interactable = true
+      register(o.getGUID())
+      Wait.condition(function() tileReady(o, color, regionName, width, draw) end,
+        function() return o.isDestroyed() or not o.loading_custom end, 10,
+        function() tileReady(o, color, regionName, width, draw) end)
+    end,
+  })
+  obj.setCustomObject({ image = url, thickness = 0.1, merge_distance = 5, stackable = false })
+end
+
+-- Commander tax tiles: one above each command zone ("<Color>|1", "<Color>|2").
+local TAX_W = 4.2
+local TAX_NUMBER_DZ = 0.25   -- the number window sits a little below the title
+
+local function taxTiles()
+  GameState.data.table = GameState.data.table or {}
+  GameState.data.table.taxTiles = GameState.data.table.taxTiles or {}
+  return GameState.data.table.taxTiles
 end
 
 -- Spawn every active seat's tile fresh (old tiles, including the block
@@ -314,36 +353,26 @@ function Trackers.ensureTableDisplay()
   for _, obj in ipairs(getObjectsWithTag("Tracker")) do
     obj.destruct()
   end
-  for color, guid in pairs(tiles()) do
-    local obj = getObjectFromGUID(guid)
-    if obj then
-      obj.destruct()
+  for _, registry in ipairs({ tiles(), taxTiles() }) do
+    for key, guid in pairs(registry) do
+      local obj = getObjectFromGUID(guid)
+      if obj then
+        obj.destruct()
+      end
+      registry[key] = nil
     end
-    tiles()[color] = nil
   end
 
   for _, color in ipairs(TableSetup.activeSeats()) do
-    local r = TableSetup.region(color, "tracker")
-    local s = TableSetup.seat(color)
-    local obj = spawnObject({
-      type = "Custom_Token",
-      position = { r.center.x, TableSetup.SURFACE_TOP + 0.5, r.center.z },
-      -- Same facing as cards at this seat: upright for its player.
-      rotation = { 0, s.yaw, 0 },
-      scale = { 1, 1, 1 },
-      sound = false,
-      callback_function = function(o)
-        o.setName(color .. " tracker")
-        o.addTag("Tracker")
-        o.setLock(true)
-        o.interactable = true
-        tiles()[color] = o.getGUID()
-        Wait.condition(function() tileReady(color, o) end,
-          function() return o.isDestroyed() or not o.loading_custom end, 10,
-          function() tileReady(color, o) end)
-      end,
-    })
-    obj.setCustomObject({ image = imageFor(color), thickness = 0.1, merge_distance = 5, stackable = false })
+    spawnTile(color, "tracker", color .. " tracker", imageFor(color), TILE_W,
+      function(guid) tiles()[color] = guid end,
+      function() Trackers.render(color) end)
+    for slot = 1, 2 do
+      spawnTile(color, "tax" .. slot, color .. " commander tax " .. slot,
+        ICON_BASE .. "tax_" .. color .. ".png" .. ICON_VERSION, TAX_W,
+        function(guid) taxTiles()[color .. "|" .. slot] = guid end,
+        function() Trackers.renderTax(color, slot) end)
+    end
   end
 end
 
@@ -367,6 +396,13 @@ local function button(tile, params, x, z)
   params.scale = { 1 / k, 1, 1 / k }
   params.font_color = params.font_color or INK
   params.color = params.color or PANEL
+  -- TTS fades a button's text along with a fully see-through background.
+  -- A text alpha far above 1 keeps the text solid (found by testing; the
+  -- other scripted MTG table uses the same trick).
+  if (params.color[4] or 1) == 0 then
+    local f = params.font_color
+    params.font_color = { f[1], f[2], f[3], SOLID_TEXT_ALPHA }
+  end
   tile.createButton(params)
 end
 
@@ -386,7 +422,7 @@ end
 function Trackers.render(color)
   local tile = tileFor(color)
   local p = player(color)
-  if tile == nil or p == nil or tile.loading_custom then
+  if tile == nil or p == nil then
     return
   end
   tile.clearButtons()
@@ -461,6 +497,74 @@ function Trackers.render(color)
   end
 end
 
+---------------------------------------------------------------------------
+-- Commander tax
+-- Each command zone has its own tax (commander tax is per commander):
+-- +2 every time that commander is cast from the command zone. The table adds
+-- it automatically when the commander goes from its command zone onto the
+-- battlefield; click the tile for +2 / right-click for -2 to correct it.
+---------------------------------------------------------------------------
+
+local function taxOf(p)
+  p.commanderTax = p.commanderTax or { 0, 0 }
+  p.commanderTax[1] = p.commanderTax[1] or 0
+  p.commanderTax[2] = p.commanderTax[2] or 0
+  return p.commanderTax
+end
+
+function Trackers.renderTax(color, slot)
+  local guid = taxTiles()[color .. "|" .. slot]
+  local tile = guid and getObjectFromGUID(guid)
+  local p = player(color)
+  if tile == nil or p == nil then
+    return
+  end
+  tile.clearButtons()
+  local tax = taxOf(p)[slot]
+  local name = p.commanderNames[slot] or (slot == 1 and "your commander" or "your partner")
+  outlined(tile, tostring(tax), 0, TAX_NUMBER_DZ, 420, INK,
+    handler("trk_" .. color .. "_tax" .. slot,
+      function(pc, alt) Trackers.changeTax(color, slot, alt and -2 or 2, pc) end),
+    "Commander tax for " .. name .. ": click +2, right-click -2", 900, 520)
+end
+
+function Trackers.changeTax(color, slot, delta, byColor, reason)
+  local p = player(color)
+  if p == nil then
+    return
+  end
+  local tax = taxOf(p)
+  local before = tax[slot]
+  tax[slot] = math.max(0, before + delta)
+  if tax[slot] == before then
+    return
+  end
+  local name = p.commanderNames[slot] or (color .. "'s " .. (slot == 1 and "commander" or "partner"))
+  log(byColor, name .. " commander tax " .. before .. " -> " .. tax[slot] .. (reason and (" (" .. reason .. ")") or ""))
+  Trackers.renderTax(color, slot)
+end
+
+-- A commander went from its command zone onto the battlefield: it was cast
+-- (as far as the table can tell), so its tax goes up by 2.
+Events.on("cardMoved", function(d)
+  if d.card == nil or d.from == nil or d.to == nil then
+    return
+  end
+  if d.from.region ~= "command" or (d.to.region ~= "battlefield" and d.to.region ~= "lands") then
+    return
+  end
+  local guid = d.card.getGUID()
+  for _, color in ipairs(TableSetup.activeSeats()) do
+    local p = player(color)
+    for slot, g in pairs(p and p.commanders or {}) do
+      if g == guid then
+        Trackers.changeTax(color, math.min(slot, 2), 2, nil, "cast from the command zone; right-click the tax to undo")
+        return
+      end
+    end
+  end
+end)
+
 -- Debug (!trackers): every tracker tile on the table.
 function Trackers.report()
   local registered = {}
@@ -474,16 +578,21 @@ function Trackers.report()
     local buttons = obj.getButtons() or {}
     local labels = {}
     for i, b in ipairs(buttons) do
-      if i <= 4 then table.insert(labels, "'" .. tostring(b.label) .. "'") end
+      if i <= 12 and b.width and b.width > 0 then table.insert(labels, "'" .. tostring(b.label) .. "'") end
     end
-    print(string.format("   %s [%s] %s at (%.1f, %.2f, %.1f), %d buttons: %s",
+    local sc = obj.getScale()
+    local b = obj.getBoundsNormalized()
+    print(string.format("   %s [%s] %s type %s at (%.1f, %.2f, %.1f) scale %.2f thick %.2f loading %s, %d buttons: %s",
       obj.getName(), obj.getGUID(), registered[obj.getGUID()] and "registered" or "NOT registered",
-      p.x, p.y, p.z, #buttons, table.concat(labels, " ")))
+      tostring(obj.type), p.x, p.y, p.z, sc.x, b and b.size.y or -1, tostring(obj.loading_custom),
+      #buttons, table.concat(labels, " ")))
   end
 end
 
 function Trackers.renderAll()
   for _, color in ipairs(TableSetup.activeSeats()) do
     Trackers.render(color)
+    Trackers.renderTax(color, 1)
+    Trackers.renderTax(color, 2)
   end
 end

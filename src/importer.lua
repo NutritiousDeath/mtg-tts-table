@@ -277,6 +277,15 @@ local function seatSpots(color)
   return handSeatSpots(color)
 end
 
+-- Where commander number i goes: its own command zone (1 = commander,
+-- 2 = partner) when the seat is on the table layout, else stacked on cmdrPos.
+local function commanderSpot(color, cmdrPos, i)
+  if TableSetup and TableSetup.seat and TableSetup.seat(color) then
+    return TableSetup.slot(color, "command" .. math.min(i, 2), 2 + math.max(0, i - 2))
+  end
+  return { x = cmdrPos.x, y = cmdrPos.y + i, z = cmdrPos.z }
+end
+
 -- Fallback: spot in front of a seat's hand zone, pushed toward the center.
 handSeatSpots = function(color)
   local hand = Player[color] and Player[color].getHandTransform()
@@ -864,14 +873,14 @@ function Importer.importDeck(color, text)
     end
 
     for i, c in ipairs(commanderCards) do
-      local pos = { x = cmdrPos.x, y = cmdrPos.y + i, z = cmdrPos.z }
       spawnObjectJSON({
         json = JSON.encode(c),
-        position = pos,
+        position = commanderSpot(color, cmdrPos, i),
         rotation = { 0, yaw, 0 },
         callback_function = function(obj)
           if player then
-            table.insert(player.commanders, obj.getGUID())
+            -- By index, so commander i always matches command zone i.
+            player.commanders[i] = obj.getGUID()
           end
         end,
       })
@@ -986,11 +995,12 @@ function Importer.importDeck(color, text)
     for i, json in ipairs(commanderJson) do
       spawnObjectJSON({
         json = json,
-        position = { x = cmdrPos.x, y = cmdrPos.y + i, z = cmdrPos.z },
+        position = commanderSpot(color, cmdrPos, i),
         rotation = { 0, yaw, 0 },
         callback_function = function(obj)
           if player then
-            table.insert(player.commanders, obj.getGUID())
+            -- By index, so commander i always matches command zone i.
+            player.commanders[i] = obj.getGUID()
           end
         end,
       })

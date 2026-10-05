@@ -57,7 +57,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.44 (deck importer cards)"
+SCRIPT_VERSION = "0.48 (partner command zones, commander tax)"
 
 function onLoad(saved)
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)

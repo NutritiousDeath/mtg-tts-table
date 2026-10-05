@@ -25,7 +25,9 @@
 Zones = {}
 
 -- Areas that count as card locations (life and tax are display-only spots).
-local TRACKED_REGIONS = { "command", "battlefield", "lands", "library", "graveyard", "exile" }
+local TRACKED_REGIONS = { "command1", "command2", "battlefield", "lands", "library", "graveyard", "exile" }
+-- Both command zones count as "command"; slot says which one (2 = partner).
+local REGION_AS = { command1 = { "command", 1 }, command2 = { "command", 2 } }
 
 -- A card counts as inside an area if its center is within this margin of the
 -- area's edge, so a card overhanging an outline slightly still counts.
@@ -37,8 +39,16 @@ local SETTLE_DELAY = 0.4
 -- Icons are served from the public GitHub repo.
 local ICON_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/icons/"
 -- Areas with an icon (others, like the tracker, have none).
-local ICON_SIZE = { command = 2.6, tax = 1.1, battlefield = 3.4, lands = 2.6,
+local ICON_SIZE = { command1 = 2.4, command2 = 2.4, battlefield = 3.4, lands = 2.6,
   library = 2.6, graveyard = 2.6, exile = 2.6 }
+-- Icon file per area (default: <area>.png). Command zones show the seat's
+-- own crown, the same art as the commander damage crowns.
+local function iconFile(color, name)
+  if name == "command1" or name == "command2" then
+    return "tracker_crown_" .. color .. ".png?v=2"
+  end
+  return name .. ".png"
+end
 
 local where = {}     -- card GUID -> { seat, region }
 local showMoves = false
@@ -73,7 +83,7 @@ function Zones.drawIcons()
       local size = ICON_SIZE[name]
       table.insert(decals, {
         name = color .. "_" .. name,
-        url = ICON_BASE .. name .. ".png",
+        url = ICON_BASE .. iconFile(color, name),
         position = { r.center.x, TableSetup.SURFACE_TOP + 0.02, r.center.z },
         -- Same facing as the mat labels, so icons are upright for the seat.
         rotation = { 90, s.angle, 0 },
@@ -101,6 +111,10 @@ function Zones.regionAt(pos)
       local side = dx * s.right.x + dz * s.right.z
       local depth = dx * s.inward.x + dz * s.inward.z
       if math.abs(side) <= r.w / 2 + EDGE_MARGIN and math.abs(depth) <= r.d / 2 + EDGE_MARGIN then
+        local as = REGION_AS[name]
+        if as then
+          return { seat = color, region = as[1], slot = as[2] }
+        end
         return { seat = color, region = name }
       end
     end

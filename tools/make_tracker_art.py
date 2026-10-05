@@ -8,7 +8,7 @@ Layout must match TRACKER_LAYOUT in src/trackers.lua:
   x to the player's right, z toward the player (image down).
 """
 import os
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ICONS = os.path.join(ROOT, "assets", "icons")
@@ -38,7 +38,7 @@ def paste_icon(base, name, x, z, size):
     base.alpha_composite(icon, (cx - s // 2, cy - s // 2))
 
 
-def plate(color):
+def plate(color, W=W, H=H, radius=38, tick=40):
     rgb = SEAT_RGB[color]
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     # Dark panel with a vertical gradient.
@@ -49,7 +49,7 @@ def plate(color):
         c = (int(10 + 8 * t), int(13 + 9 * t), int(22 + 12 * t), 255)
         d.line([(0, y), (W, y)], fill=c)
     mask = Image.new("L", (W, H), 0)
-    ImageDraw.Draw(mask).rounded_rectangle([6, 6, W - 7, H - 7], radius=38, fill=255)
+    ImageDraw.Draw(mask).rounded_rectangle([6, 6, W - 7, H - 7], radius=radius, fill=255)
     img.paste(panel, (0, 0), mask)
     # Faint grid.
     grid = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -61,7 +61,7 @@ def plate(color):
     img.alpha_composite(Image.composite(grid, Image.new("RGBA", (W, H)), mask))
     # Neon border: blurred glow plus a crisp line.
     border = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    ImageDraw.Draw(border).rounded_rectangle([10, 10, W - 11, H - 11], radius=34, outline=rgb + (255,), width=4)
+    ImageDraw.Draw(border).rounded_rectangle([10, 10, W - 11, H - 11], radius=radius - 4, outline=rgb + (255,), width=4)
     glow = border.filter(ImageFilter.GaussianBlur(8))
     img.alpha_composite(glow)
     img.alpha_composite(glow)
@@ -69,7 +69,7 @@ def plate(color):
     # Corner ticks.
     t = ImageDraw.Draw(img)
     for (x0, y0, dx, dy) in [(30, 30, 1, 1), (W - 31, 30, -1, 1), (30, H - 31, 1, -1), (W - 31, H - 31, -1, -1)]:
-        t.line([(x0, y0 + dy * 40), (x0, y0), (x0 + dx * 40, y0)], fill=rgb + (200,), width=3)
+        t.line([(x0, y0 + dy * tick), (x0, y0), (x0 + dx * tick, y0)], fill=rgb + (200,), width=3)
     return img
 
 
@@ -98,7 +98,38 @@ def build(layout, color):
     return out
 
 
+# Commander tax tile: 4.2 x 2.4 table units (200 px per unit). Title along
+# the top; the number goes in the middle (TAX_NUMBER_DZ in trackers.lua).
+TAX_W, TAX_H = 840, 480
+FONT = os.path.join(ROOT, "tools", "fonts", "Orbitron.ttf")
+
+
+def build_tax(color):
+    rgb = SEAT_RGB[color]
+    img = plate(color, TAX_W, TAX_H, radius=48, tick=34)
+    f = ImageFont.truetype(FONT, 58)
+    try:
+        f.set_variation_by_axes([800])
+    except Exception:
+        pass
+    layer = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(layer).text((TAX_W // 2, 92), "COMMANDER TAX", font=f, fill=rgb + (255,), anchor="mm")
+    glow = layer.filter(ImageFilter.GaussianBlur(7))
+    img.alpha_composite(glow)
+    ImageDraw.Draw(img).text((TAX_W // 2, 92), "COMMANDER TAX", font=f, fill=(235, 245, 255, 255), anchor="mm")
+    # dark inset for the number
+    inset = Image.new("RGBA", img.size, (0, 0, 0, 0))
+    ImageDraw.Draw(inset).rounded_rectangle([250, 160, TAX_W - 250, 420], radius=30,
+                                            fill=(6, 8, 13, 235), outline=rgb + (160,), width=3)
+    img.alpha_composite(inset)
+    out = os.path.join(ICONS, "tax_%s.png" % color)
+    img.save(out)
+    return out
+
+
 if __name__ == "__main__":
+    for color in SEAT_RGB:
+        print(build_tax(color))
     for layout, seats in LAYOUTS.items():
         for color in seats:
             print(build(layout, color))

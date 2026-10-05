@@ -64,17 +64,24 @@ local REGIONS = {
   library = { side = 20, depth = 23.5, w = 6, d = 6.5 },
   graveyard = { side = 20, depth = 16, w = 6, d = 6.5 },
   exile = { side = 20, depth = 8.5, w = 6, d = 6.5 },
-  -- left column
-  command = { side = -20, depth = 22.5, w = 6, d = 7 },
-  tax = { side = -20, depth = 16.5, w = 3, d = 2.5 },
+  -- left: two command zones side by side (commander, partner), each with
+  -- its commander tax counter just above it (toward the table center)
+  command1 = { side = -19, depth = 16.75, w = 4.2, d = 5.5 },
+  command2 = { side = -14.5, depth = 16.75, w = 4.2, d = 5.5 },
+  tax1 = { side = -19, depth = 21.6, w = 4.2, d = 2.4 },
+  tax2 = { side = -14.5, depth = 21.6, w = 4.2, d = 2.4 },
   -- middle
-  battlefield = { side = 0, depth = 19.5, w = 32, d = 14 },
+  battlefield = { side = 2, depth = 19.5, w = 28, d = 14 },
   lands = { side = -3.5, depth = 6.75, w = 39, d = 5.5 },
   -- clickable life / poison / commander damage tracker, in front of the
   -- playmat toward the table center (trackers.lua)
   tracker = { side = 0, depth = 31, w = 14, d = 4.8 },
 }
-TableSetup.REGION_NAMES = { "command", "tax", "battlefield", "lands", "library", "graveyard", "exile", "tracker" }
+TableSetup.REGION_NAMES = { "command1", "command2", "tax1", "tax2", "battlefield", "lands", "library", "graveyard",
+  "exile", "tracker" }
+
+-- Older names still used in places: "command" = the first command zone.
+local ALIASES = { command = "command1", tax = "tax1" }
 
 local SURFACE_COLOR = { 0.07, 0.08, 0.10 }
 
@@ -127,7 +134,7 @@ end
 -- An area for a seat: { center = world position, w, d, yaw }, or nil.
 function TableSetup.region(color, name)
   local s = TableSetup.seat(color)
-  local r = REGIONS[name]
+  local r = REGIONS[ALIASES[name] or name]
   if s == nil or r == nil then
     return nil
   end
@@ -355,8 +362,8 @@ local SEAT_TINT = {
 }
 
 local LABELS = {
-  command = "COMMANDER",
-  tax = "TAX",
+  command1 = "COMMANDER",
+  command2 = "PARTNER",
   battlefield = "BATTLEFIELD",
   lands = "LANDS",
   library = "LIBRARY",
@@ -383,12 +390,11 @@ local function outlinePoints(color, name)
   return pts
 end
 
--- Where an area's label goes: just inside the far edge of the box (the tax
--- box is too small, so its label sits just below it, toward the player).
+-- Where an area's label goes: just inside the far edge of the box.
 local function labelPosition(color, name)
   local s = TableSetup.seat(color)
   local r = TableSetup.region(color, name)
-  local offset = (name == "tax") and -(r.d / 2 + 0.7) or (r.d / 2 - 0.8)
+  local offset = r.d / 2 - 0.8
   return {
     r.center.x + s.inward.x * offset,
     TableSetup.SURFACE_TOP + 0.02,
@@ -435,7 +441,7 @@ function TableSetup.drawMats()
         rotation = { 90, s.angle, 0 },
         callback_function = function(label)
           label.TextTool.setValue(LABELS[name])
-          label.TextTool.setFontSize((name == "tax") and 22 or 30)
+          label.TextTool.setFontSize((name == "command1" or name == "command2") and 22 or 30)
           label.TextTool.setFontColor(tint)
           label.setLock(true)
           label.interactable = false

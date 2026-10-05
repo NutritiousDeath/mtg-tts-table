@@ -55,7 +55,7 @@ end
 local function commanderGuids()
   local set = {}
   for _, p in pairs(GameState.data.players) do
-    for _, guid in ipairs(p.commanders or {}) do
+    for _, guid in pairs(p.commanders or {}) do
       set[guid] = true
     end
   end
