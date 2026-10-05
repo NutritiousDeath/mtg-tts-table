@@ -56,7 +56,21 @@ end
 
 -- Remove old importer cards and spawn the two fresh ones.
 function ImportCards.ensure()
-  for _, obj in ipairs(getObjectsWithTag("DeckImporter")) do
+  -- Keep the two cards if they're already on the table with this image
+  -- (respawning them is slow); otherwise replace them.
+  local found = getObjectsWithTag("DeckImporter")
+  local good = #found == #SPOTS
+  for _, obj in ipairs(found) do
+    local co = obj.getCustomObject()
+    good = good and co ~= nil and co.image == IMAGE
+  end
+  if good then
+    for _, obj in ipairs(found) do
+      ready(obj)
+    end
+    return
+  end
+  for _, obj in ipairs(found) do
     obj.destruct()
   end
   for _, spot in ipairs(SPOTS) do

@@ -338,8 +338,59 @@ local function taxTiles()
   return GameState.data.table.taxTiles
 end
 
--- Spawn every active seat's tile fresh (old tiles, including the block
--- tiles from earlier versions, are removed first).
+-- Make the table's image tiles match what's wanted, keeping tiles that are
+-- already there. Spawning a custom token makes TTS rebuild it from its image,
+-- which was most of the load time when every tile was respawned on every
+-- load; a tile that still exists with the same image is just put back in
+-- place and redrawn. A changed image (art version bump) or a seat that's no
+-- longer playing (!layout) still gets its tile replaced / removed.
+--   tag    the tag these tiles carry (strays with it are removed)
+--   groups list of { registry = { key = guid }, wanted = { list of
+--          { key, color, region, name, url, width, draw } } }; a group with
+--          wanted = nil is left as is (its tiles are only protected from the
+--          stray sweep)
+function Trackers.syncTiles(tag, groups)
+  local keep = {}
+  for _, g in ipairs(groups) do
+    local want = {}
+    for _, w in ipairs(g.wanted or {}) do
+      want[w.key] = w
+    end
+    for key, guid in pairs(g.registry) do
+      local obj = guid ~= "spawning" and getObjectFromGUID(guid) or nil
+      local co = obj and obj.getCustomObject()
+      local w = want[key]
+      if obj and (g.wanted == nil or (w and co and co.image == w.url)) then
+        keep[guid] = true
+      else
+        if obj then
+          obj.destruct()
+        end
+        g.registry[key] = nil
+      end
+    end
+  end
+  for _, obj in ipairs(getObjectsWithTag(tag)) do
+    if not keep[obj.getGUID()] then
+      obj.destruct()
+    end
+  end
+  for _, g in ipairs(groups) do
+    for _, w in ipairs(g.wanted or {}) do
+      local guid = g.registry[w.key]
+      local obj = guid and getObjectFromGUID(guid)
+      if obj then
+        tileReady(obj, w.color, w.region, w.width, w.draw)
+      else
+        local registry = g.registry
+        spawnTile(w.color, w.region, w.name, w.url, w.width,
+          function(newGuid) registry[w.key] = newGuid end, w.draw, tag)
+      end
+    end
+  end
+end
+
+-- Every active seat's tracker tile and two commander tax tiles.
 function Trackers.ensureTableDisplay()
   local t = GameState.data.table or {}
   for _, guid in pairs(t.lifeLabels or {}) do
@@ -350,31 +401,35 @@ function Trackers.ensureTableDisplay()
   end
   t.lifeLabels = nil
 
-  for _, obj in ipairs(getObjectsWithTag("Tracker")) do
-    obj.destruct()
-  end
-  GameState.data.table.partnerChips = {}
-  for _, registry in ipairs({ tiles(), taxTiles() }) do
-    for key, guid in pairs(registry) do
-      local obj = getObjectFromGUID(guid)
+  -- Partner chips stay, except ones for a seat that's no longer playing.
+  local chipReg = GameState.data.table.partnerChips or {}
+  GameState.data.table.partnerChips = chipReg
+  for id, guid in pairs(chipReg) do
+    local owner, opp = tostring(id):match("^(%a+)|(%a+)|")
+    if not (owner and opp and TableSetup.isActive(owner) and TableSetup.isActive(opp)) then
+      local obj = guid ~= "spawning" and getObjectFromGUID(guid) or nil
       if obj then
         obj.destruct()
       end
-      registry[key] = nil
+      chipReg[id] = nil
     end
   end
-
+  local trackers, taxes = {}, {}
   for _, color in ipairs(TableSetup.activeSeats()) do
-    spawnTile(color, "tracker", color .. " tracker", imageFor(color), TILE_W,
-      function(guid) tiles()[color] = guid end,
-      function() Trackers.render(color) end)
+    table.insert(trackers, { key = color, color = color, region = "tracker", name = color .. " tracker",
+      url = imageFor(color), width = TILE_W, draw = function() Trackers.render(color) end })
     for slot = 1, 2 do
-      spawnTile(color, "tax" .. slot, color .. " commander tax " .. slot,
-        ICON_BASE .. "tax_" .. color .. ".png" .. ICON_VERSION, TAX_W,
-        function(guid) taxTiles()[color .. "|" .. slot] = guid end,
-        function() Trackers.renderTax(color, slot) end)
+      table.insert(taxes, { key = color .. "|" .. slot, color = color, region = "tax" .. slot,
+        name = color .. " commander tax " .. slot, url = ICON_BASE .. "tax_" .. color .. ".png" .. ICON_VERSION,
+        width = TAX_W, draw = function() Trackers.renderTax(color, slot) end })
     end
   end
+  Trackers.syncTiles("Tracker", {
+    { registry = tiles(), wanted = trackers },
+    { registry = taxTiles(), wanted = taxes },
+    -- Partner chips are kept; Trackers.render adds / removes them as needed.
+    { registry = GameState.data.table.partnerChips },
+  })
 end
 
 -- Register a click handler under a global name (buttons call functions by name).

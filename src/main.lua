@@ -23,6 +23,7 @@
     !endturn     end your turn (active player)
     !layout 4    four players, one per side (White, Red, Green, Blue)
     !layout 2    two players facing each other (White, Green)
+    !rebuild     remove and respawn every table tile (if one looks wrong)
     !reset       wipe the game state back to a fresh Commander game
 --]]
 
@@ -63,7 +64,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.63 (tokens tile)"
+SCRIPT_VERSION = "0.64 (faster loading)"
 
 function onLoad(saved)
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)
@@ -277,6 +278,25 @@ function onChat(message, sender)
     TableUI.build()
     broadcastToAll("Table layout: " .. (layout == "four" and "4 players" or "2 players")
       .. " (" .. table.concat(TableSetup.activeSeats(), ", ") .. ")", { 0.7, 0.85, 1 })
+    return false
+  end
+
+  if message == "!rebuild" then
+    -- Tiles are kept between loads (faster); this forces a fresh set.
+    for _, tag in ipairs({ "Tracker", "ActionTile", "TurnStrip", "DeckImporter" }) do
+      for _, obj in ipairs(getObjectsWithTag(tag)) do
+        obj.destruct()
+      end
+    end
+    local t = GameState.data.table
+    t.trackerTiles, t.taxTiles, t.partnerChips, t.actionTiles, t.turnStrips = {}, {}, {}, {}, {}
+    Wait.frames(function()
+      Trackers.ensureTableDisplay()
+      Actions.ensure()
+      Turns.ensureStrips()
+      ImportCards.ensure()
+      broadcastToAll("Table tiles rebuilt.", { 0.7, 0.85, 1 })
+    end, 3)
     return false
   end
 

@@ -175,25 +175,15 @@ end
 
 function Turns.ensureStrips()
   if GameState.data.turn then
-    GameState.data.turn.pending = nil   -- a hold countdown doesn't survive a reload
+    GameState.data.turn.pending = nil   -- a waiting response round doesn't survive a reload
   end
-  for _, obj in ipairs(getObjectsWithTag("TurnStrip")) do
-    obj.destruct()
-  end
-  for key, guid in pairs(strips()) do
-    local obj = getObjectFromGUID(guid)
-    if obj then
-      obj.destruct()
-    end
-    strips()[key] = nil
-  end
+  local wanted = {}
   for _, color in ipairs(TableSetup.activeSeats()) do
-    Trackers.spawnTile(color, "turnstrip", "Turn (" .. color .. ")",
-      ART_BASE .. "turnstrip.png" .. ART_VERSION, STRIP_W,
-      function(guid) strips()[color] = guid end,
-      function() renderStrip(color) end,
-      "TurnStrip")
+    table.insert(wanted, { key = color, color = color, region = "turnstrip", name = "Turn (" .. color .. ")",
+      url = ART_BASE .. "turnstrip.png" .. ART_VERSION, width = STRIP_W,
+      draw = function() renderStrip(color) end })
   end
+  Trackers.syncTiles("TurnStrip", { { registry = strips(), wanted = wanted } })
 end
 
 ---------------------------------------------------------------------------

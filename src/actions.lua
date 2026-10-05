@@ -103,12 +103,14 @@ end
 -- Each click on the SCRY tile adds the next card from the top (click twice =
 -- scry 2). Each card gets its own choice; when every shown card has one,
 -- they all resolve at once and the viewer closes. X cancels.
+-- The viewer shows 6 cards at a time; with more, < > pages through them
+-- (6 slots per seat keeps the screen UI small, which keeps loading fast).
 ---------------------------------------------------------------------------
 
-local MAX_SCRY = 24          -- cards the viewer can hold (6 per row, scrolls)
-local SCRY_COLS = 6
+local MAX_SCRY = 24          -- cards the viewer can hold
+local SCRY_COLS = 6          -- cards shown at once; more are on further pages (< >)
 local SCRY_CELL_H = 404
-local scry = {}   -- [color] = { choices = { [i] = "top"|"bottom"|"grave" }, count = n }
+local scry = {}   -- [color] = { choices = { [i] = "top"|"bottom"|"grave" }, count = n, page = p }
 
 local CHOICE_TEXT = { top = "KEEP ON TOP", bottom = "TO THE BOTTOM", grave = "TO GRAVEYARD" }
 
@@ -116,7 +118,7 @@ function Actions.xml()
   local parts = {}
   for _, c in ipairs(TableSetup.activeSeats()) do
     local slots = {}
-    for i = 1, MAX_SCRY do
+    for i = 1, SCRY_COLS do
       local id = c .. "_" .. i
       local function icon(img, choice, tip)
         return ([[
@@ -154,16 +156,19 @@ function Actions.xml()
       <Button onClick="ui_scry(%s_0_cancel)" preferredWidth="30" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold"
               tooltip="Cancel: leave the cards where they are">X</Button>
     </HorizontalLayout>
-    <Text fontSize="12" color="#8B98A9" preferredHeight="16">Click SCRY again to look at one more card (scroll for more rows)</Text>
-    <VerticalScrollView id="scryScroll_%s" preferredHeight="410" scrollSensitivity="40" color="#00000000">
-      <GridLayout id="scryGrid_%s" cellSize="210 ]] .. SCRY_CELL_H .. [[" spacing="12 10" constraint="FixedColumnCount"
-                  constraintCount="]] .. SCRY_COLS .. [[" childAlignment="UpperLeft" height="404">]]
+    <HorizontalLayout preferredHeight="22" spacing="8" childForceExpandWidth="false">
+      <Text fontSize="12" color="#8B98A9" alignment="MiddleLeft" flexibleWidth="1">Click SCRY again to look at one more card</Text>
+      <Button id="scryPrev_%s" onClick="ui_scry(%s_0_prev)" preferredWidth="34" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold" tooltip="Previous cards">&lt;</Button>
+      <Text id="scryPage_%s" preferredWidth="96" fontSize="12" fontStyle="Bold" color="#E6F1FF">1-6 OF 6</Text>
+      <Button id="scryNext_%s" onClick="ui_scry(%s_0_next)" preferredWidth="34" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold" tooltip="More cards">&gt;</Button>
+    </HorizontalLayout>
+    <GridLayout id="scryGrid_%s" cellSize="210 ]] .. SCRY_CELL_H .. [[" spacing="12 10" constraint="FixedColumnCount"
+                constraintCount="]] .. SCRY_COLS .. [[" childAlignment="UpperLeft" preferredHeight="]] .. SCRY_CELL_H .. [[">]]
       .. table.concat(slots) .. [[
-      </GridLayout>
-    </VerticalScrollView>
+    </GridLayout>
   </VerticalLayout>
 </Panel>
-]]):format(c, c, c, c, c, c))
+]]):format(c, c, c, c, c, c, c, c, c, c))
     table.insert(parts, Actions.discardXml(c))
   end
   return table.concat(parts)
@@ -345,30 +350,38 @@ local function closeScry(color)
   UI.setAttribute("scry_" .. color, "active", "false")
 end
 
+local function pages(st)
+  return math.max(1, math.ceil(st.count / SCRY_COLS))
+end
+
 local function renderScry(color)
   local st = scry[color]
   if st == nil then
     return
   end
-  UI.setAttribute("scry_" .. color, "active", "true")
+  st.page = math.max(1, math.min(st.page or 1, pages(st)))
+  local first = (st.page - 1) * SCRY_COLS          -- cards before this page
+  local shown = math.min(SCRY_COLS, st.count - first)
   local cols = math.min(st.count, SCRY_COLS)
-  local rows = math.ceil(st.count / SCRY_COLS)
-  local gridH = rows * SCRY_CELL_H + (rows - 1) * 10
-  local viewH = math.min(gridH, 2 * SCRY_CELL_H + 10)
-  UI.setAttribute("scry_" .. color, "width", 30 + cols * 222)
-  UI.setAttribute("scryGrid_" .. color, "height", gridH)
-  UI.setAttribute("scryScroll_" .. color, "preferredHeight", viewH)
-  UI.setAttribute("scry_" .. color, "height", 100 + viewH)
+  UI.setAttribute("scry_" .. color, "active", "true")
+  UI.setAttribute("scry_" .. color, "width", math.max(470, 30 + cols * 222))
+  UI.setAttribute("scry_" .. color, "height", 104 + SCRY_CELL_H)
   UI.setValue("scryTitle_" .. color, "SCRY / SURVEIL " .. st.count)
-  for i = 1, MAX_SCRY do
-    local id = color .. "_" .. i
+  local paged = st.count > SCRY_COLS
+  for _, part in ipairs({ "scryPrev_", "scryPage_", "scryNext_" }) do
+    UI.setAttribute(part .. color, "active", paged and "true" or "false")
+  end
+  UI.setValue("scryPage_" .. color, (first + 1) .. "-" .. (first + shown) .. " OF " .. st.count)
+  for s = 1, SCRY_COLS do
+    local id = color .. "_" .. s
+    local i = first + s
     if i <= st.count then
       local card = Library.peek(color, i - 1)
       UI.setAttribute("scrySlot_" .. id, "active", "true")
       UI.setValue("scryName_" .. id, card and card.name or "-")
       UI.setAttribute("scryImg_" .. id, "image", card and card.face or "")
       local ch = st.choices[i]
-      UI.setValue("scryChoice_" .. id, ch and CHOICE_TEXT[ch] or "CHOOSE")
+      UI.setValue("scryChoice_" .. id, (i .. ". ") .. (ch and CHOICE_TEXT[ch] or "CHOOSE"))
       UI.setAttribute("scryChoice_" .. id, "color", ch and "#2FBF71" or "#5AF0FF")
     else
       UI.setAttribute("scrySlot_" .. id, "active", "false")
@@ -385,13 +398,14 @@ function Actions.openScry(color)
       broadcastToColor("Your library is empty.", color, WARN)
       return
     end
-    scry[color] = { choices = {}, count = 1 }
+    scry[color] = { choices = {}, count = 1, page = 1 }
   elseif st.count >= math.min(MAX_SCRY, total) then
     broadcastToColor(st.count >= total and "That's every card in your library."
       or ("The viewer holds up to " .. MAX_SCRY .. " cards at once: choose for these, then scry again."), color, WARN)
     return
   else
     st.count = st.count + 1
+    st.page = pages(st)   -- show the page with the new card
   end
   renderScry(color)
 end
@@ -427,13 +441,30 @@ function ui_scry(player, arg)
     return
   end
   local st = scry[color]
-  slot = tonumber(slot)
-  if slot < 1 or slot > st.count then
+  if choice == "prev" or choice == "next" then
+    st.page = (st.page or 1) + (choice == "next" and 1 or -1)
+    renderScry(color)
     return
   end
-  st.choices[slot] = choice
-  for i = 1, st.count do
-    if st.choices[i] == nil then
+  -- Buttons are per slot on the page; turn that into the card's position.
+  local i = ((st.page or 1) - 1) * SCRY_COLS + tonumber(slot)
+  if i < 1 or i > st.count then
+    return
+  end
+  st.choices[i] = choice
+  -- Every card on this page chosen: go to the first page that still needs one.
+  local pageDone = true
+  local first = ((st.page or 1) - 1) * SCRY_COLS
+  for k = first + 1, math.min(first + SCRY_COLS, st.count) do
+    if st.choices[k] == nil then
+      pageDone = false
+    end
+  end
+  for k = 1, st.count do
+    if st.choices[k] == nil then
+      if pageDone then
+        st.page = math.ceil(k / SCRY_COLS)
+      end
       renderScry(color)
       return
     end
@@ -480,25 +511,16 @@ local function renderTile(color, a)
 end
 
 function Actions.ensure()
-  for _, obj in ipairs(getObjectsWithTag("ActionTile")) do
-    obj.destruct()
-  end
-  for key, guid in pairs(tiles()) do
-    local obj = getObjectFromGUID(guid)
-    if obj then
-      obj.destruct()
-    end
-    tiles()[key] = nil
-  end
+  local wanted = {}
   for _, color in ipairs(TableSetup.activeSeats()) do
     for _, a in ipairs(ACTIONS) do
-      Trackers.spawnTile(color, "act_" .. a.name, a.label .. " (" .. color .. ")",
-        ART_BASE .. "mats/action_" .. a.name .. "_" .. color .. ".png" .. ART_VERSION, TILE_W,
-        function(guid) tiles()[color .. "|" .. a.name] = guid end,
-        function() renderTile(color, a) end,
-        "ActionTile")
+      table.insert(wanted, { key = color .. "|" .. a.name, color = color, region = "act_" .. a.name,
+        name = a.label .. " (" .. color .. ")",
+        url = ART_BASE .. "mats/action_" .. a.name .. "_" .. color .. ".png" .. ART_VERSION, width = TILE_W,
+        draw = function() renderTile(color, a) end })
     end
   end
+  Trackers.syncTiles("ActionTile", { { registry = tiles(), wanted = wanted } })
 end
 
 -- Hover text on the tile object itself too (shown by TTS when hovering).
