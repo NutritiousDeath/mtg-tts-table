@@ -73,7 +73,9 @@ local REGIONS = {
   tax1 = { side = -14.0, depth = 35.3, w = 4.2, d = 2.4 },
   tax2 = { side = -9.6, depth = 35.3, w = 4.2, d = 2.4 },
   -- middle: lined up with the lands row, from just above it to the tracker row
-  battlefield = { side = -3.5, depth = 18.25, w = 39, d = 16.5 },
+  battlefield = { side = -3.5, depth = 17.83, w = 39, d = 15.65 },
+  -- turn strip between the battlefield and the top row (turns.lua)
+  turnstrip = { side = -0.9, depth = 26.95, w = 30.4, d = 1.6 },
   lands = { side = -3.5, depth = 6.75, w = 39, d = 5.5 },
   -- action tiles in a strip beside the library column (actions.lua)
   act_draw = { side = 25.3, depth = 24.6, w = 3, d = 4.2 },

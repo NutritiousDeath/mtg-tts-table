@@ -64,7 +64,7 @@ end
 -- dark plate, glowing border in the seat's color, title and icon. Cards sit
 -- on top of it; areas are still worked out from position (regionAt).
 local MAT_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/mats/"
-local MAT_VERSION = "?v=4"
+local MAT_VERSION = "?v=5"
 local MAT_AREAS = { "command1", "command2", "battlefield", "lands", "library", "graveyard", "exile" }
 local MAT_HEIGHT = 0.012   -- just above the surface, under cards lying on it
 

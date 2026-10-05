@@ -61,7 +61,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.57 (wide battlefield, command zones by tracker)"
+SCRIPT_VERSION = "0.58 (turn strips on the table)"
 
 function onLoad(saved)
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)
@@ -74,6 +74,7 @@ function onLoad(saved)
   TableSetup.ensure()
   Trackers.ensureTableDisplay()
   Actions.ensure()
+  Turns.ensureStrips()
   ImportCards.ensure()
   TableUI.build()
   Counters.registerHotkeys()
@@ -256,6 +257,7 @@ function onChat(message, sender)
     TableSetup.setLayout(layout)
     Trackers.ensureTableDisplay()
     Actions.ensure()
+    Turns.ensureStrips()
     TableUI.build()
     broadcastToAll("Table layout: " .. (layout == "four" and "4 players" or "2 players")
       .. " (" .. table.concat(TableSetup.activeSeats(), ", ") .. ")", { 0.7, 0.85, 1 })

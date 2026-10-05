@@ -94,6 +94,7 @@ local CHIP = { White = "#C7CCD955", Red = "#DB545466", Green = "#52C26B66", Blue
 function Turns.render()
   local d = GameState.data
   local t = turn()
+  Turns.renderStrips()
   if not d.started or t.activeSeat == nil then
     UI.setAttribute("turnBar", "active", "false")
     return
@@ -109,6 +110,93 @@ function Turns.render()
     local on = i == t.stepIndex
     UI.setAttribute("turnStepBg_" .. i, "color", on and (CHIP[seat] or "#5AF0FF44") or "#00000000")
     UI.setAttribute("turnStep_" .. i, "color", on and "#FFFFFF" or (i < (t.stepIndex or 1) and "#5B6B80" or OFF))
+  end
+end
+
+---------------------------------------------------------------------------
+-- Turn strips on the table: one per seat, between its battlefield and its
+-- top row, all showing the same live turn info in the active player's color.
+-- The plate is a fixed image (assets/ui/turnstrip.png); border, title and the
+-- lit step are buttons drawn on top, redrawn every step.
+---------------------------------------------------------------------------
+
+local STRIP_W, STRIP_D = 30.4, 1.6
+local U = 500                 -- button units per table unit
+local TITLE_X = -11.6         -- center of the title area (table units)
+local STEPS_X0 = -8.0         -- left edge of the step chips
+local CHIP_W = 1.93
+local STRIP_LABELS = { "UNTAP", "UPKEEP", "DRAW", "MAIN 1", "COMBAT", "ATTACK", "BLOCK", "DAMAGE",
+  "END CMBT", "MAIN 2", "END", "CLEANUP" }
+local SEAT_RGB = { White = { 0.80, 0.83, 0.90 }, Red = { 0.90, 0.30, 0.33 },
+  Green = { 0.30, 0.85, 0.48 }, Blue = { 0.33, 0.60, 1.0 } }
+local NEUTRAL = { 0.45, 0.55, 0.65 }
+
+local function strips()
+  GameState.data.table = GameState.data.table or {}
+  GameState.data.table.turnStrips = GameState.data.table.turnStrips or {}
+  return GameState.data.table.turnStrips
+end
+
+local function renderStrip(color)
+  local guid = strips()[color]
+  local tile = guid and getObjectFromGUID(guid)
+  if tile == nil then
+    return
+  end
+  tile.clearButtons()
+  local d, t = GameState.data, turn()
+  local running = d.started and t.activeSeat ~= nil
+  local rgb = running and (SEAT_RGB[t.activeSeat] or NEUTRAL) or NEUTRAL
+  local line = { rgb[1], rgb[2], rgb[3], 1 }
+  local B = function(params, x, z) params.click_function = "trk_noop"; Trackers.tileButton(tile, params, x, z) end
+  -- Border in the active player's color.
+  local hw, hd, th = STRIP_W / 2 - 0.05, STRIP_D / 2 - 0.05, 0.07
+  B({ label = "", width = math.floor(STRIP_W * U), height = math.floor(th * U), color = line }, 0, -hd)
+  B({ label = "", width = math.floor(STRIP_W * U), height = math.floor(th * U), color = line }, 0, hd)
+  B({ label = "", width = math.floor(th * U), height = math.floor(STRIP_D * U), color = line }, -hw, 0)
+  B({ label = "", width = math.floor(th * U), height = math.floor(STRIP_D * U), color = line }, hw, 0)
+  -- Title.
+  local title = running and ("TURN " .. t.number .. " · " .. string.upper(t.activeSeat)) or "NO GAME RUNNING"
+  B({ label = title, width = 0, height = 0, font_size = running and 300 or 230,
+    font_color = { rgb[1], rgb[2], rgb[3] }, color = { 0, 0, 0, 0 } }, TITLE_X, 0.02)
+  -- Step chips: the current one lit in the player's color, done ones dimmed.
+  for i, label in ipairs(STRIP_LABELS) do
+    local x = STEPS_X0 + CHIP_W * (i - 0.5)
+    local on = running and i == t.stepIndex
+    local done = running and i < (t.stepIndex or 1)
+    if on then
+      B({ label = label, width = math.floor((CHIP_W - 0.12) * U), height = math.floor(1.1 * U), font_size = 150,
+        font_color = { 1, 1, 1 }, color = { rgb[1], rgb[2], rgb[3], 0.6 } }, x, 0)
+    else
+      local c = done and { 0.36, 0.42, 0.50 } or { 0.62, 0.68, 0.78 }
+      B({ label = label, width = 0, height = 0, font_size = 150, font_color = c, color = { 0, 0, 0, 0 } }, x, 0.02)
+    end
+  end
+end
+
+function Turns.renderStrips()
+  for _, color in ipairs(TableSetup.activeSeats()) do
+    renderStrip(color)
+  end
+end
+
+function Turns.ensureStrips()
+  for _, obj in ipairs(getObjectsWithTag("TurnStrip")) do
+    obj.destruct()
+  end
+  for key, guid in pairs(strips()) do
+    local obj = getObjectFromGUID(guid)
+    if obj then
+      obj.destruct()
+    end
+    strips()[key] = nil
+  end
+  for _, color in ipairs(TableSetup.activeSeats()) do
+    Trackers.spawnTile(color, "turnstrip", "Turn (" .. color .. ")",
+      ART_BASE .. "turnstrip.png" .. ART_VERSION, STRIP_W,
+      function(guid) strips()[color] = guid end,
+      function() renderStrip(color) end,
+      "TurnStrip")
   end
 end
 

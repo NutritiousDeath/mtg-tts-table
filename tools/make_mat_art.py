@@ -21,7 +21,7 @@ SEAT_RGB = {"White": (205, 212, 230), "Red": (230, 70, 80), "Green": (70, 220, 1
 AREAS = {
     "command1": (4.2, 5.5, "COMMANDER", None, 2.4),
     "command2": (4.2, 5.5, "PARTNER|OR BACKGROUND", None, 2.4),
-    "battlefield": (39, 16.5, "BATTLEFIELD", "battlefield.png", 3.4),
+    "battlefield": (39, 15.65, "BATTLEFIELD", "battlefield.png", 3.4),
     "lands": (39, 5.5, "LANDS", "lands.png", 2.6),
     "library": (6, 6.5, "LIBRARY", "library.png", 2.6),
     "graveyard": (6, 6.5, "GRAVEYARD", "graveyard.png", 2.6),
@@ -201,7 +201,34 @@ def build_turnbar(color):
     return out
 
 
+# Turn strip on the table (turns.lua): a neutral dark plate; the border
+# color, title and lit step are drawn on top live in the active player's
+# color. 30.4 x 1.6 table units at 60 px per unit.
+def build_turnstrip():
+    W, H = int(30.4 * 60), int(1.6 * 60)
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([2, 2, W - 3, H - 3], radius=20, fill=255)
+    panel = Image.new("RGBA", (W, H))
+    pd = ImageDraw.Draw(panel)
+    for y in range(H):
+        t = y / H
+        pd.line([(0, y), (W, y)], fill=(int(10 + 7 * t), int(13 + 8 * t), int(22 + 11 * t), 235))
+    img.paste(panel, (0, 0), mask)
+    grid = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    g = ImageDraw.Draw(grid)
+    for gx in range(24, W, 24):
+        g.line([(gx, 0), (gx, H)], fill=(120, 160, 200, 14))
+    img.alpha_composite(Image.composite(grid, Image.new("RGBA", (W, H)), mask))
+    # divider between the title and the steps
+    ImageDraw.Draw(img).line([(int(6.8 * 60), 18), (int(6.8 * 60), H - 18)], fill=(120, 160, 200, 90), width=2)
+    out = os.path.join(ROOT, "assets", "ui", "turnstrip.png")
+    img.save(out)
+    return out
+
+
 if __name__ == "__main__":
+    print(build_turnstrip())
     for color in SEAT_RGB:
         print(build_turnbar(color))
     for color in SEAT_RGB:
