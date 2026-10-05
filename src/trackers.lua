@@ -241,8 +241,9 @@ end
 -- kept at scale 1 and the visible tile outline comes from the playmat lines.
 ---------------------------------------------------------------------------
 
-local TILE_SINK = 0.45    -- block center sits this far below the surface
-local BUTTON_Y = 0.52     -- local height of buttons (just above the surface)
+local TILE_SINK = 0.56    -- block center this far below the surface (its top stays under the table)
+local BUTTON_Y = 0.66     -- local height of buttons (numbers), clearly above the icons
+local ICON_Y = 0.58       -- local height of the icon pictures (just above the surface)
 -- Rows in the tile's local depth. With the tile turned to the seat's angle
 -- and buttons turned 180, local -z is toward the player (the bottom of the
 -- text). If the rows ever appear swapped in TTS, swap these two numbers.
@@ -280,6 +281,20 @@ function Trackers.ensureTableDisplay()
       end
       tiles()[color] = nil
     end
+  end
+
+  -- Always start from fresh tiles: delete every tracker tile on the table
+  -- (including strays from earlier versions) and spawn new ones below.
+  -- Repairing old tiles in place left numbers that didn't show or update.
+  for _, obj in ipairs(getObjectsWithTag("Tracker")) do
+    obj.destruct()
+  end
+  for color, guid in pairs(tiles()) do
+    local obj = getObjectFromGUID(guid)
+    if obj then
+      obj.destruct()
+    end
+    tiles()[color] = nil
   end
 
   for _, color in ipairs(TableSetup.activeSeats()) do
@@ -334,7 +349,12 @@ end
 
 -- Icons drawn on the tile (decals), from the repo's assets/icons folder.
 local ICON_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/icons/"
-local CLEAR = { 0, 0, 0, 0 }   -- invisible button background (icon shows through)
+-- Bump when the tracker images change, so TTS downloads them again instead
+-- of showing its cached copy.
+local ICON_VERSION = "?v=2"
+-- Background behind the numbers. Not fully transparent: TTS doesn't draw a
+-- button at all (text included) when its background alpha is 0.
+local BADGE = { 0.04, 0.05, 0.08, 0.6 }
 
 -- Tile layout in local units (tile is 14 wide x 4.8 deep; -z is toward the player).
 local HEART = { x = 0, z = 0, size = 4.2 }
@@ -349,8 +369,8 @@ local ICON_SIZE = 1.3
 local function decal(name, file, x, z, size)
   return {
     name = name,
-    url = ICON_BASE .. file,
-    position = { x, BUTTON_Y - 0.015, z },
+    url = ICON_BASE .. file .. ICON_VERSION,
+    position = { x, ICON_Y, z },
     -- Flat, upright for the seat (same orientation as the mat labels).
     rotation = { 90, 0, 0 },
     scale = { size, size, 1 },
@@ -383,7 +403,7 @@ function Trackers.render(color)
   table.insert(decals, decal("heart", "tracker_heart.png", HEART.x, HEART.z, HEART.size))
   button(tile, { label = tostring(p.life), tooltip = "Life: click +1, right-click -1",
     click_function = handler(key .. "life", function(pc, alt) Trackers.changeLife(color, alt and -1 or 1, pc) end),
-    width = 1500, height = 1300, font_size = 620, color = CLEAR,
+    width = 1100, height = 760, font_size = 560, color = BADGE,
     font_color = p.lossFlag and WARN or INK, x = HEART.x, z = HEART.z + 0.15 })
   button(tile, { label = "-", tooltip = "Life -1 (right-click: -5)",
     click_function = handler(key .. "minus", function(pc, alt) Trackers.changeLife(color, alt and -5 or -1, pc) end),
@@ -409,7 +429,7 @@ function Trackers.render(color)
   table.insert(decals, decal("poison", "tracker_poison.png", POISON_SLOT.x, POISON_SLOT.z, ICON_SIZE))
   button(tile, { label = tostring(p.poison), tooltip = "Poison: click +1, right-click -1",
     click_function = handler(key .. "poison", function(pc, alt) Trackers.changePoison(color, alt and -1 or 1, pc) end),
-    width = 700, height = 700, font_size = 300, color = CLEAR, x = POISON_SLOT.x, z = POISON_SLOT.z - 0.15 })
+    width = 560, height = 480, font_size = 300, color = BADGE, x = POISON_SLOT.x, z = POISON_SLOT.z - 0.15 })
 
   -- Commander damage: a crown in each opposing seat's color, count on top.
   -- Row = which opponent, column = which of their commanders.
@@ -429,11 +449,32 @@ function Trackers.render(color)
         tooltip = "Commander damage from " .. c.name .. " (" .. c.seat .. "): click +1, right-click -1",
         click_function = handler(key .. "cmd" .. i,
           function(pc, alt) Trackers.changeCommanderDamage(color, c.key, alt and -1 or 1, pc) end),
-        width = 700, height = 700, font_size = 280, color = CLEAR,
+        width = 520, height = 440, font_size = 260, color = BADGE,
         font_color = dmg >= COMMANDER_LETHAL - 5 and WARN or INK, x = slot.x, z = slot.z - 0.1 })
     end
   end
   tile.setDecals(decals)
+end
+
+-- Debug (!trackers): every tracker tile on the table.
+function Trackers.report()
+  local registered = {}
+  for color, guid in pairs(tiles()) do
+    registered[guid] = color
+  end
+  local found = getObjectsWithTag("Tracker")
+  print("MTG > Tracker tiles on the table: " .. #found)
+  for _, obj in ipairs(found) do
+    local p = obj.getPosition()
+    local buttons = obj.getButtons() or {}
+    local labels = {}
+    for i, b in ipairs(buttons) do
+      if i <= 4 then table.insert(labels, "'" .. tostring(b.label) .. "'") end
+    end
+    print(string.format("   %s [%s] %s at (%.1f, %.2f, %.1f), %d buttons: %s",
+      obj.getName(), obj.getGUID(), registered[obj.getGUID()] and "registered" or "NOT registered",
+      p.x, p.y, p.z, #buttons, table.concat(labels, " ")))
+  end
 end
 
 function Trackers.renderAll()

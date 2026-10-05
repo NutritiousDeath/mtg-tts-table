@@ -144,8 +144,28 @@ end
 
 -- Re-check a card's area from where it is now (also usable by other modules
 -- after moving a card by script).
+-- The seat whose hand a card is in, or nil.
+local function handOwner(obj)
+  local guid = obj.getGUID()
+  for _, color in ipairs(TableSetup.activeSeats()) do
+    for _, h in ipairs(Player[color].getHandObjects() or {}) do
+      if h.getGUID() == guid then
+        return color
+      end
+    end
+  end
+  return nil
+end
+
 function Zones.refresh(obj)
   if not isCard(obj) or obj.held_by_color then
+    return
+  end
+  -- Clicking or rearranging a card in a hand also counts as a drop; it's
+  -- still in the hand, not on the table.
+  local owner = handOwner(obj)
+  if owner then
+    moveTo(obj, obj.getName(), obj.getGUID(), { seat = owner, region = "hand" })
     return
   end
   moveTo(obj, obj.getName(), obj.getGUID(), Zones.regionAt(obj.getPosition()))
@@ -191,6 +211,11 @@ function Zones.onEnterContainer(container, obj)
     return
   end
   moveTo(obj, obj.getName(), obj.getGUID(), Zones.regionAt(container.getPosition()))
+end
+
+-- Stop tracking a card that was destroyed by script (e.g. rebuilt into a deck).
+function Zones.forget(guid)
+  where[guid] = nil
 end
 
 -- Where a card currently is: { seat, region } or nil.

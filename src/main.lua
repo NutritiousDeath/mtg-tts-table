@@ -18,6 +18,7 @@
     !where       show which zones the card under your mouse is in
     !zones       count the cards tracked in each of your areas
     !counters    show the counters stored on the card under your mouse
+    !trackers    list the tracker tiles on the table and their buttons
     !layout 4    four players, one per side (White, Red, Green, Blue)
     !layout 2    two players facing each other (White, Green)
     !reset       wipe the game state back to a fresh Commander game
@@ -29,10 +30,12 @@ require("src/events")
 require("src/table")
 require("src/zones")
 require("src/counters")
+require("src/library")
 require("src/trackers")
 require("src/deckparser")
 require("src/importer")
 require("src/archidekt")
+require("src/game")
 require("src/ui")
 
 local SAMPLE_DECK = [[
@@ -53,7 +56,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.27 (two-line counter label)"
+SCRIPT_VERSION = "0.38 (new crown art)"
 
 function onLoad(saved)
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)
@@ -74,6 +77,7 @@ function onLoad(saved)
     for _, color in ipairs(TableSetup.activeSeats()) do
       TableSetup.lookAtSeat(color)
     end
+    GameFlow.restore()
   end, 1)
 end
 
@@ -187,6 +191,11 @@ function onChat(message, sender)
   if message == "!counters" then
     local obj = Player[sender.color] and Player[sender.color].getHoverObject()
     print("MTG > " .. Counters.describe(obj))
+    return false
+  end
+
+  if message == "!trackers" then
+    Trackers.report()
     return false
   end
 

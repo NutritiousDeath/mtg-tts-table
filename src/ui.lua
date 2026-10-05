@@ -7,6 +7,7 @@
     "Import Deck" button (top left) opens a panel with a paste box.
     "Import" takes an Archidekt link (fetched via Archidekt) or a pasted
     list, and hands it to Importer.importDeck for that player.
+    "Start Game" and the mulligan panels come from game.lua.
 --]]
 
 TableUI = {}
@@ -55,7 +56,9 @@ local XML = [[
 
 -- Build the on-screen UI. (Life tracking is on the table: trackers.lua.)
 function TableUI.build()
-  UI.setXml(XML)
+  UI.setXml(XML .. GameFlow.xml())
+  -- The new XML takes a moment to load before it can be changed.
+  Wait.time(function() GameFlow.refreshUI() end, 1)
 end
 
 ---------------------------------------------------------------------------
