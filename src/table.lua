@@ -78,6 +78,9 @@ local REGIONS = {
   act_scry = { side = 25.3, depth = 19.9, w = 3, d = 4.2 },
   act_mill = { side = 25.3, depth = 15.2, w = 3, d = 4.2 },
   act_untap = { side = 25.3, depth = 10.5, w = 3, d = 4.2 },
+  -- turn tiles to the right of the tracker (actions.lua)
+  act_next = { side = 9.2, depth = 31, w = 3, d = 4.2 },
+  act_endturn = { side = 12.8, depth = 31, w = 3, d = 4.2 },
   -- clickable life / poison / commander damage tracker, in front of the
   -- playmat toward the table center (trackers.lua)
   tracker = { side = 0, depth = 31, w = 14, d = 4.8 },

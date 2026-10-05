@@ -111,6 +111,8 @@ ACTIONS = {
     "scry": ("SCRY", "CLICK PER CARD"),
     "mill": ("MILL", "CLICK 1  /  RIGHT 3"),
     "untap": ("UNTAP", "ALL PERMANENTS"),
+    "next": ("NEXT STEP", "YOUR TURN ONLY"),
+    "endturn": ("END TURN", "YOUR TURN ONLY"),
 }
 ACTION_W, ACTION_D, ACTION_PPU = 3.0, 4.2, 200
 
@@ -141,7 +143,9 @@ def build_action(name, color):
     s = int(W * 0.72)
     ic = ic.resize((s, s), Image.LANCZOS)
     img.alpha_composite(ic, ((W - s) // 2, int(H * 0.10)))
-    f = font(108)
+    # Title as large as fits the tile width.
+    tsize = min(108, (W - 90) / (len(title) * 0.8))
+    f = font(tsize)
     ty = int(H * 0.76)
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     ImageDraw.Draw(layer).text((W // 2, ty), title, font=f, fill=rgb + (255,), anchor="mm")
@@ -154,7 +158,45 @@ def build_action(name, color):
     return out
 
 
+# Turn bar background (turns.lua): the screen bar at the top, bordered in the
+# active seat's color. 1960 x 192 px (the bar is 980 x 96 on screen).
+def build_turnbar(color):
+    rgb = SEAT_RGB[color]
+    W, H = 1960, 192
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([4, 4, W - 5, H - 5], radius=26, fill=255)
+    panel = Image.new("RGBA", (W, H))
+    pd = ImageDraw.Draw(panel)
+    for y in range(H):
+        t = y / H
+        pd.line([(0, y), (W, y)], fill=(int(10 + 7 * t), int(13 + 8 * t), int(22 + 11 * t), 242))
+    img.paste(panel, (0, 0), mask)
+    grid = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    g = ImageDraw.Draw(grid)
+    for gx in range(32, W, 32):
+        g.line([(gx, 0), (gx, H)], fill=rgb + (14,))
+    for gy in range(32, H, 32):
+        g.line([(0, gy), (W, gy)], fill=rgb + (14,))
+    img.alpha_composite(Image.composite(grid, Image.new("RGBA", (W, H)), mask))
+    border = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(border).rounded_rectangle([8, 8, W - 9, H - 9], radius=22, outline=rgb + (255,), width=4)
+    glow = border.filter(ImageFilter.GaussianBlur(7))
+    img.alpha_composite(glow)
+    img.alpha_composite(glow)
+    img.alpha_composite(border)
+    t = ImageDraw.Draw(img)
+    for (x0, y0, dx, dy) in [(24, 24, 1, 1), (W - 25, 24, -1, 1), (24, H - 25, 1, -1), (W - 25, H - 25, -1, -1)]:
+        t.line([(x0, y0 + dy * 26), (x0, y0), (x0 + dx * 40, y0)], fill=rgb + (200,), width=3)
+    out = os.path.join(ROOT, "assets", "ui", "turnbar_%s.png" % color)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    img.save(out)
+    return out
+
+
 if __name__ == "__main__":
+    for color in SEAT_RGB:
+        print(build_turnbar(color))
     for color in SEAT_RGB:
         for area in AREAS:
             print(build(area, color))

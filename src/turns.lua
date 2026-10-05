@@ -63,21 +63,26 @@ end
 -- Turn bar (top of the screen)
 ---------------------------------------------------------------------------
 
+local ART_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/ui/"
+local ART_VERSION = "?v=1"
+
 function Turns.xml()
   local steps = {}
   for i, s in ipairs(Turns.STEPS) do
-    table.insert(steps, ('<Text id="turnStep_%d" fontSize="12" fontStyle="Bold" color="%s">%s</Text>')
-      :format(i, OFF, s.label))
+    table.insert(steps, ([[
+      <Panel id="turnStepBg_%d" color="#00000000" preferredWidth="74">
+        <Text id="turnStep_%d" fontSize="11" fontStyle="Bold" color="%s">%s</Text>
+      </Panel>]]):format(i, i, OFF, s.label))
   end
   return [[
-<Panel id="turnBar" active="false" rectAlignment="UpperCenter" offsetXY="0 -12" width="980" height="96"
-       color="#0B0F17F0" outline="#5AF0FF" outlineSize="2 2">
-  <VerticalLayout padding="14 14 8 8" spacing="6" childForceExpandHeight="false">
+<Panel id="turnBar" active="false" rectAlignment="UpperCenter" offsetXY="0 -10" width="980" height="96" color="#00000000">
+  <Image id="turnBarBg" image="]] .. ART_BASE .. "turnbar_White.png" .. ART_VERSION .. [[" raycastTarget="false" />
+  <VerticalLayout padding="22 22 12 12" spacing="6" childForceExpandHeight="false">
     <HorizontalLayout preferredHeight="34" spacing="12" childForceExpandWidth="false">
       <Text id="turnTitle" fontSize="20" fontStyle="Bold" color="#E6F1FF" alignment="MiddleLeft" flexibleWidth="1">TURN</Text>
-      <Button id="turnNext" onClick="ui_turnNext" preferredWidth="150" color="#00B3A4" textColor="#06130B" fontStyle="Bold"
+      <Button id="turnNext" onClick="ui_turnNext" preferredWidth="140" color="#0F2A33" textColor="#5AF0FF" fontStyle="Bold"
               tooltip="Active player: go to the next step">NEXT STEP</Button>
-      <Button id="turnEnd" onClick="ui_turnEnd" preferredWidth="150" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold"
+      <Button id="turnEnd" onClick="ui_turnEnd" preferredWidth="140" color="#141B26" textColor="#E6F1FF" fontStyle="Bold"
               tooltip="Active player: skip to the end of your turn">END TURN</Button>
     </HorizontalLayout>
     <HorizontalLayout preferredHeight="22" spacing="4">]] .. table.concat(steps) .. [[</HorizontalLayout>
@@ -86,6 +91,9 @@ function Turns.xml()
 ]]
 end
 
+-- Seat color as a translucent fill for the current step's chip.
+local CHIP = { White = "#C7CCD955", Red = "#DB545466", Green = "#52C26B66", Blue = "#5294F266" }
+
 function Turns.render()
   local d = GameState.data
   local t = turn()
@@ -93,14 +101,17 @@ function Turns.render()
     UI.setAttribute("turnBar", "active", "false")
     return
   end
+  local seat = t.activeSeat
   UI.setAttribute("turnBar", "active", "true")
-  UI.setAttribute("turnBar", "outline", SEAT_HEX[t.activeSeat] or ON)
+  UI.setAttribute("turnBarBg", "image", ART_BASE .. "turnbar_" .. seat .. ".png" .. ART_VERSION)
   local step = Turns.STEPS[t.stepIndex or 1]
-  UI.setValue("turnTitle", "TURN " .. t.number .. "  ·  " .. string.upper(t.activeSeat)
+  UI.setValue("turnTitle", "TURN " .. t.number .. "  ·  " .. string.upper(seat)
     .. "  ·  " .. (step and step.label or ""))
-  UI.setAttribute("turnTitle", "color", SEAT_HEX[t.activeSeat] or "#E6F1FF")
+  UI.setAttribute("turnTitle", "color", SEAT_HEX[seat] or "#E6F1FF")
   for i = 1, #Turns.STEPS do
-    UI.setAttribute("turnStep_" .. i, "color", i == t.stepIndex and ON or OFF)
+    local on = i == t.stepIndex
+    UI.setAttribute("turnStepBg_" .. i, "color", on and (CHIP[seat] or "#5AF0FF44") or "#00000000")
+    UI.setAttribute("turnStep_" .. i, "color", on and "#FFFFFF" or (i < (t.stepIndex or 1) and "#5B6B80" or OFF))
   end
 end
 
