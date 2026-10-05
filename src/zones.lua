@@ -177,6 +177,21 @@ function Zones.refresh(obj)
   moveTo(obj, obj.getName(), obj.getGUID(), Zones.regionAt(obj.getPosition()))
 end
 
+-- A player picked something up: note where it was, so the move that follows
+-- knows where it came from (cards placed by script, like commanders, are
+-- never "dropped" there, so they'd otherwise have no starting area).
+function Zones.onPickUp(color, obj)
+  if not isCard(obj) then
+    return
+  end
+  local owner = handOwner(obj)
+  if owner then
+    where[obj.getGUID()] = { seat = owner, region = "hand" }
+  else
+    where[obj.getGUID()] = Zones.regionAt(obj.getPosition())
+  end
+end
+
 -- A player let go of something: check where it landed once it settles.
 function Zones.onDrop(color, obj)
   if not isCard(obj) then

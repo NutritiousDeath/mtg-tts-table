@@ -57,7 +57,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.50 (new area icons)"
+SCRIPT_VERSION = "0.51 (moves know where cards started)"
 
 function onLoad(saved)
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)
@@ -94,6 +94,10 @@ function onObjectSpawn(obj)
 end
 
 -- Card movement tracking (zones.lua).
+function onObjectPickUp(color, obj)
+  Zones.onPickUp(color, obj)
+end
+
 function onObjectDrop(color, obj)
   Zones.onDrop(color, obj)
 end
