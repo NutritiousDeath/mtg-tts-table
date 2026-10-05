@@ -1,6 +1,7 @@
 --[[
   tokens.lua
-  Token search: "Tokens" (screen, top left) opens a panel only you see.
+  Token search: the TOKENS tile on your side of the table (below UNTAP)
+  opens a panel only you see.
   Type a token ("treasure", "1/1 soldier", "zombie", "food"...) and SEARCH:
   the relay looks it up on Scryfall (GET /tokens?q=...) and shows up to 12
   matching tokens with their pictures. Click one to put it onto your
@@ -21,10 +22,7 @@ local copies = {}    -- [color] = copies per click
 local open = {}
 
 function Tokens.xml()
-  local parts = { [[
-<Button id="tokensToggle" onClick="ui_tokensToggle" rectAlignment="UpperLeft" offsetXY="20 -220"
-        width="150" height="40" fontStyle="Bold" color="#2A3346" textColor="#E6F1FF">Tokens</Button>
-]] }
+  local parts = {}
   for _, c in ipairs(TableSetup.activeSeats()) do
     local slots = {}
     for i = 1, MAX_RESULTS do
@@ -37,10 +35,13 @@ function Tokens.xml()
 </Panel>]]):format(id, id, id, id, id))
     end
     table.insert(parts, ([[
-<Panel id="tokens_%s" visibility="%s" active="false" rectAlignment="UpperLeft" offsetXY="180 -220" width="980" height="150"
+<Panel id="tokens_%s" visibility="%s" active="false" rectAlignment="UpperLeft" offsetXY="20 -220" width="980" height="156"
        color="#0B0F17F2" outline="#5AF0FF" outlineSize="2 2" allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="12 12 12 12" spacing="8" childForceExpandHeight="false">
-    <Text fontSize="15" fontStyle="Bold" color="#5AF0FF" alignment="MiddleLeft" preferredHeight="22">TOKENS</Text>
+    <HorizontalLayout preferredHeight="26" childForceExpandWidth="false">
+      <Text fontSize="15" fontStyle="Bold" color="#5AF0FF" alignment="MiddleLeft" flexibleWidth="1">TOKENS</Text>
+      <Button onClick="ui_tokensClose(%s)" preferredWidth="30" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold" tooltip="Close">X</Button>
+    </HorizontalLayout>
     <HorizontalLayout spacing="8" preferredHeight="38" childForceExpandWidth="false">
       <InputField onValueChanged="ui_tokenText" onEndEdit="ui_tokenSubmit" fontSize="16" flexibleWidth="1"
                   placeholder="treasure, 1/1 soldier, zombie, food..." />
@@ -54,7 +55,7 @@ function Tokens.xml()
                 childAlignment="UpperLeft" preferredHeight="300">]] .. table.concat(slots) .. [[</GridLayout>
   </VerticalLayout>
 </Panel>
-]]):format(c, c, c, c, c, c, c))
+]]):format(c, c, c, c, c, c, c, c))
   end
   return table.concat(parts)
 end
@@ -68,7 +69,7 @@ local function render(color)
   local rows = math.ceil(#list / 6)
   UI.setAttribute("tokGrid_" .. color, "active", #list > 0 and "true" or "false")
   UI.setAttribute("tokGrid_" .. color, "preferredHeight", rows * 212)
-  UI.setAttribute("tokens_" .. color, "height", 150 + rows * 212)
+  UI.setAttribute("tokens_" .. color, "height", 156 + rows * 212)
   UI.setValue("tokCopies_" .. color, "x" .. (copies[color] or 1))
   for i = 1, MAX_RESULTS do
     local id = color .. "_" .. i
@@ -154,17 +155,21 @@ end
 -- XML handlers
 ---------------------------------------------------------------------------
 
-function ui_tokensToggle(player)
-  local c = player.color
-  if not TableSetup.isActive(c) then
-    broadcastToColor("Take a seat first.", c, WARN)
-    return
-  end
+-- Open / close a seat's token panel (the TOKENS tile calls this).
+function Tokens.toggle(c)
   open[c] = not open[c]
   UI.setAttribute("tokens_" .. c, "active", open[c] and "true" or "false")
   if open[c] then
     render(c)
   end
+end
+
+function ui_tokensClose(player, c)
+  if c ~= player.color then
+    return
+  end
+  open[c] = false
+  UI.setAttribute("tokens_" .. c, "active", "false")
 end
 
 function ui_tokenText(player, value)

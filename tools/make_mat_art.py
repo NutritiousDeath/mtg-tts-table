@@ -118,6 +118,7 @@ ACTIONS = {
     "scry": ("SCRY", "CLICK PER CARD"),
     "mill": ("MILL", "CLICK 1  /  RIGHT 3"),
     "untap": ("UNTAP", "ALL PERMANENTS"),
+    "tokens": ("TOKENS", "SEARCH & CREATE"),
     "next": ("NEXT STEP", "YOUR TURN ONLY"),
     "endturn": ("END TURN", "YOUR TURN ONLY"),
     "hold": ("HOLD", "STOP TO RESPOND"),

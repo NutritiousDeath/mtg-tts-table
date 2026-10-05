@@ -13,7 +13,8 @@
     panel for whoever clicked.
     "Start Game" and the mulligan panels come from game.lua; "Turn Options"
     from turns.lua; the Scry / discard panels from actions.lua; "Roll Dice"
-    from dice.lua; "Tokens" from tokens.lua.
+    from dice.lua; the token search panel from tokens.lua (opened by the
+    TOKENS tile on the table).
 --]]
 
 TableUI = {}
