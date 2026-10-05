@@ -307,7 +307,8 @@ function GameFlow.start(byColor)
   if first == "Random" or not isParticipant(first) then
     first = players[math.random(#players)]
   end
-  GameState.data.turn = { number = 0, activeSeat = nil, startingSeat = first, step = nil }
+  GameState.data.turn = { number = 0, activeSeat = nil, startingSeat = first, stepIndex = nil }
+  Turns.render()   -- hides the turn bar until everyone has kept
 
   for _, color in ipairs(GameState.SEATS) do
     resetPlayer(color)
@@ -372,8 +373,6 @@ local function finishMulligans()
   s.phase = nil
   local d = GameState.data
   d.started = true
-  d.turn.number = 1
-  d.turn.activeSeat = d.turn.startingSeat
   broadcastToAll("Everyone has kept. " .. d.turn.startingSeat .. " takes the first turn.", GOOD)
   Events.emit("gameStarted", { first = d.turn.startingSeat, players = s.participants })
 end

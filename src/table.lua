@@ -57,8 +57,8 @@ local SEAT_ORDER = {
 -- Areas in seat-local units: side = along the player's right (+) / left (-)
 -- from the middle of their edge; depth = distance in from the table edge;
 -- w, d = width (sideways) and depth of the area. A card is about 2.2 x 3.1.
--- Columns stay within side -23..23 and depth 3..27 so neighbouring seats'
--- areas never overlap at the corners.
+-- Areas stay within side -23..27 and depth 3..27 so neighbouring seats'
+-- areas never overlap at the corners (checked for all four seats).
 local REGIONS = {
   -- right column
   library = { side = 20, depth = 23.5, w = 6, d = 6.5 },
@@ -73,6 +73,11 @@ local REGIONS = {
   -- middle
   battlefield = { side = 2, depth = 19.5, w = 28, d = 14 },
   lands = { side = -3.5, depth = 6.75, w = 39, d = 5.5 },
+  -- action tiles in a strip beside the library column (actions.lua)
+  act_draw = { side = 25.3, depth = 24.6, w = 3, d = 4.2 },
+  act_scry = { side = 25.3, depth = 19.9, w = 3, d = 4.2 },
+  act_mill = { side = 25.3, depth = 15.2, w = 3, d = 4.2 },
+  act_untap = { side = 25.3, depth = 10.5, w = 3, d = 4.2 },
   -- clickable life / poison / commander damage tracker, in front of the
   -- playmat toward the table center (trackers.lua)
   tracker = { side = 0, depth = 31, w = 14, d = 4.8 },

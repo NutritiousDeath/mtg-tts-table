@@ -105,7 +105,58 @@ def build(area, color):
     return out
 
 
+# Action tiles beside the library column (actions.lua): 3.0 x 4.2 table units.
+ACTIONS = {
+    "draw": ("DRAW", "CLICK 1  /  RIGHT 3"),
+    "scry": ("SCRY", "SURVEIL TOO"),
+    "mill": ("MILL", "CLICK 1  /  RIGHT 3"),
+    "untap": ("UNTAP", "ALL PERMANENTS"),
+}
+ACTION_W, ACTION_D, ACTION_PPU = 3.0, 4.2, 200
+
+
+def build_action(name, color):
+    title, hint = ACTIONS[name]
+    W, H = int(ACTION_W * ACTION_PPU), int(ACTION_D * ACTION_PPU)
+    rgb = SEAT_RGB[color]
+    u = ACTION_PPU / 100.0
+    pad, radius = 10, 60
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([pad, pad, W - pad - 1, H - pad - 1], radius=radius, fill=255)
+    panel = Image.new("RGBA", (W, H))
+    pd = ImageDraw.Draw(panel)
+    for y in range(H):
+        t = y / H
+        pd.line([(0, y), (W, y)], fill=(int(10 + 8 * t), int(13 + 9 * t), int(22 + 12 * t), 240))
+    img.paste(panel, (0, 0), mask)
+    border = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(border).rounded_rectangle([pad + 4, pad + 4, W - pad - 5, H - pad - 5],
+                                             radius=radius - 4, outline=rgb + (255,), width=6)
+    glow = border.filter(ImageFilter.GaussianBlur(12))
+    img.alpha_composite(glow)
+    img.alpha_composite(glow)
+    img.alpha_composite(border)
+    ic = Image.open(os.path.join(ICONS, "action_%s.png" % name)).convert("RGBA")
+    s = int(W * 0.72)
+    ic = ic.resize((s, s), Image.LANCZOS)
+    img.alpha_composite(ic, ((W - s) // 2, int(H * 0.10)))
+    f = font(108)
+    ty = int(H * 0.76)
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(layer).text((W // 2, ty), title, font=f, fill=rgb + (255,), anchor="mm")
+    img.alpha_composite(layer.filter(ImageFilter.GaussianBlur(9)))
+    ImageDraw.Draw(img).text((W // 2, ty), title, font=f, fill=(235, 245, 255, 255), anchor="mm")
+    ImageDraw.Draw(img).text((W // 2, int(H * 0.88)), hint, font=font(40, 600), fill=rgb + (230,), anchor="mm")
+    os.makedirs(OUT, exist_ok=True)
+    out = os.path.join(OUT, "action_%s_%s.png" % (name, color))
+    img.save(out)
+    return out
+
+
 if __name__ == "__main__":
     for color in SEAT_RGB:
         for area in AREAS:
             print(build(area, color))
+        for name in ACTIONS:
+            print(build_action(name, color))

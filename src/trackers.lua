@@ -304,7 +304,7 @@ local function tileReady(obj, color, regionName, width, draw)
 end
 
 -- Spawn an image tile (custom token) for a seat's area.
-local function spawnTile(color, regionName, name, url, width, register, draw)
+local function spawnTile(color, regionName, name, url, width, register, draw, tag)
   local r = TableSetup.region(color, regionName)
   local s = TableSetup.seat(color)
   local obj = spawnObject({
@@ -316,7 +316,7 @@ local function spawnTile(color, regionName, name, url, width, register, draw)
     sound = false,
     callback_function = function(o)
       o.setName(name)
-      o.addTag("Tracker")
+      o.addTag(tag or "Tracker")
       o.setLock(true)
       o.interactable = true
       register(o.getGUID())
@@ -564,6 +564,10 @@ Events.on("cardMoved", function(d)
     end
   end
 end)
+
+-- Shared with other modules (actions.lua) that put image tiles on the table.
+Trackers.spawnTile = spawnTile
+Trackers.tileButton = button
 
 -- Debug (!trackers): every tracker tile on the table.
 function Trackers.report()

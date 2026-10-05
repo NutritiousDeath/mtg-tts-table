@@ -58,9 +58,12 @@ local XML = [[
 
 -- Build the on-screen UI. (Life tracking is on the table: trackers.lua.)
 function TableUI.build()
-  UI.setXml(XML .. GameFlow.xml())
+  UI.setXml(XML .. GameFlow.xml() .. Turns.xml() .. Actions.xml())
   -- The new XML takes a moment to load before it can be changed.
-  Wait.time(function() GameFlow.refreshUI() end, 1)
+  Wait.time(function()
+    GameFlow.refreshUI()
+    Turns.render()
+  end, 1)
 end
 
 ---------------------------------------------------------------------------

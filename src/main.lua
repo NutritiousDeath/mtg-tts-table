@@ -19,6 +19,8 @@
     !zones       count the cards tracked in each of your areas
     !counters    show the counters stored on the card under your mouse
     !trackers    list the tracker tiles on the table and their buttons
+    !next        next step (active player; same as the NEXT STEP button)
+    !endturn     end your turn (active player)
     !layout 4    four players, one per side (White, Red, Green, Blue)
     !layout 2    two players facing each other (White, Green)
     !reset       wipe the game state back to a fresh Commander game
@@ -32,6 +34,8 @@ require("src/zones")
 require("src/counters")
 require("src/library")
 require("src/trackers")
+require("src/actions")
+require("src/turns")
 require("src/deckparser")
 require("src/importer")
 require("src/archidekt")
@@ -57,7 +61,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.51 (moves know where cards started)"
+SCRIPT_VERSION = "0.52 (turn engine, action tiles, scry viewer)"
 
 function onLoad(saved)
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)
@@ -69,9 +73,11 @@ function onLoad(saved)
   end
   TableSetup.ensure()
   Trackers.ensureTableDisplay()
+  Actions.ensure()
   ImportCards.ensure()
   TableUI.build()
   Counters.registerHotkeys()
+  Turns.registerHotkeys()
   Counters.setupAll()
   -- Give the surface a moment to appear, then face everyone toward their seat.
   Wait.time(function()
@@ -200,6 +206,16 @@ function onChat(message, sender)
     return false
   end
 
+  if message == "!next" then
+    Turns.next(sender.color)
+    return false
+  end
+
+  if message == "!endturn" then
+    Turns.endTurn(sender.color)
+    return false
+  end
+
   if message == "!trackers" then
     Trackers.report()
     return false
@@ -239,6 +255,7 @@ function onChat(message, sender)
     local layout = message == "!layout 4" and "four" or "two"
     TableSetup.setLayout(layout)
     Trackers.ensureTableDisplay()
+    Actions.ensure()
     TableUI.build()
     broadcastToAll("Table layout: " .. (layout == "four" and "4 players" or "2 players")
       .. " (" .. table.concat(TableSetup.activeSeats(), ", ") .. ")", { 0.7, 0.85, 1 })
