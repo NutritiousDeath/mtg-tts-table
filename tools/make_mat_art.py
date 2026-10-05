@@ -108,7 +108,7 @@ def build(area, color):
 # Action tiles beside the library column (actions.lua): 3.0 x 4.2 table units.
 ACTIONS = {
     "draw": ("DRAW", "CLICK 1  /  RIGHT 3"),
-    "scry": ("SCRY", "SURVEIL TOO"),
+    "scry": ("SCRY", "CLICK PER CARD"),
     "mill": ("MILL", "CLICK 1  /  RIGHT 3"),
     "untap": ("UNTAP", "ALL PERMANENTS"),
 }

@@ -61,7 +61,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.52 (turn engine, action tiles, scry viewer)"
+SCRIPT_VERSION = "0.53 (scry: click per card)"
 
 function onLoad(saved)
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)

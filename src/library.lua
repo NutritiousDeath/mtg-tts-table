@@ -17,6 +17,10 @@
     Library.moveToBottom(color, index, onDone)
                                      card at depth index (0 = top) to the bottom
     Library.peek(color, index)       { name, face } of the card at depth index
+    Library.arrangeTop(color, choices, onDone)
+                                     scry / surveil the top #choices cards at
+                                     once: choices[i] = "top" | "bottom" |
+                                     "grave" for the i-th card from the top
 
   The library is found by position (the library rectangle from table.lua), so
   it works even after the deck object is replaced.
@@ -285,5 +289,72 @@ function Library.moveToBottom(color, index, onDone)
   lib.destruct()
   spawnObjectData({ data = data, position = pos, rotation = rot,
     callback_function = function(obj) if onDone then onDone(obj) end end })
+end
+
+-- Resolve a scry / surveil of the top cards in one go. Cards kept on top stay
+-- in the order they were seen, "bottom" cards go under the library (in order),
+-- "grave" cards are milled.
+function Library.arrangeTop(color, choices, onDone)
+  local lib = Library.find(color)
+  local function finish() if onDone then onDone() end end
+  if lib == nil then
+    finish()
+    return
+  end
+  if lib.type ~= "Deck" then
+    if choices[1] == "grave" then
+      Library.mill(color, 1, 0, finish)
+    else
+      finish()
+    end
+    return
+  end
+  local data = lib.getData()
+  local objs, ids = data.ContainedObjects or {}, data.DeckIDs or {}
+  local k = math.min(#choices, #objs)
+  local graves, tops, bottoms, changed = {}, {}, {}, false
+  for i = 1, k do
+    local pair = { objs[i], ids[i] }
+    local c = choices[i]
+    if c == "grave" then
+      table.insert(graves, pair)
+      changed = true
+    elseif c == "bottom" then
+      table.insert(bottoms, pair)
+      changed = true
+    else
+      table.insert(tops, pair)
+    end
+  end
+  if not changed then
+    finish()
+    return
+  end
+  local newObjs, newIds = {}, {}
+  local function add(list)
+    for _, pair in ipairs(list) do
+      table.insert(newObjs, pair[1])
+      table.insert(newIds, pair[2])
+    end
+  end
+  add(graves)
+  add(tops)
+  for i = k + 1, #objs do
+    table.insert(newObjs, objs[i])
+    table.insert(newIds, ids[i])
+  end
+  add(bottoms)
+  data.ContainedObjects, data.DeckIDs = newObjs, newIds
+  local pos, rot = lib.getPosition(), lib.getRotation()
+  lib.destruct()
+  spawnObjectData({ data = data, position = pos, rotation = rot,
+    callback_function = function()
+      if #graves > 0 then
+        -- The graveyard cards were put on top: mill exactly those.
+        Wait.time(function() Library.mill(color, #graves, 0, finish) end, 0.3)
+      else
+        finish()
+      end
+    end })
 end
 

@@ -4,12 +4,12 @@
   Scry / Surveil viewer.
 
     DRAW   click: draw 1 · right-click: draw 3
-    SCRY   click: look at the top card (only you see it) in the viewer:
-             up arrow    = keep it on top (then shows the next card)
-             down arrow  = put it on the bottom
-             TOP         = surveil: keep it on top (next card)
-             GRAVEYARD   = surveil: put it into your graveyard
-             DONE        = close
+    SCRY   each click shows one more card from the top (2 clicks = scry 2),
+           in a viewer only you can see. Per card:
+             up arrow / down arrow = scry: keep on top / put on the bottom
+             TOP / GRAVEYARD       = surveil: keep on top / to graveyard
+           When every card has a choice they all resolve and the viewer
+           closes. X cancels.
     MILL   click: mill 1 · right-click: mill 3 (top cards face up to graveyard)
     UNTAP  click: untap every tapped permanent on your battlefield and lands
 
@@ -20,14 +20,14 @@
 Actions = {}
 
 local ART_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/"
-local ART_VERSION = "?v=1"
+local ART_VERSION = "?v=2"
 local TILE_W = 3
 local INFO = { 0.75, 0.8, 0.9 }
 local WARN = { 1, 0.6, 0.2 }
 
 local ACTIONS = {
   { name = "draw", label = "Draw", tip = "DRAW\nClick: draw 1 card\nRight-click: draw 3 cards" },
-  { name = "scry", label = "Scry", tip = "SCRY / SURVEIL\nClick: look at the top card of your library (only you see it)" },
+  { name = "scry", label = "Scry", tip = "SCRY / SURVEIL\nClick once per card to look at (2 clicks = scry 2).\nOnly you see them. Choose for each card to finish." },
   { name = "mill", label = "Mill", tip = "MILL\nClick: mill 1 card\nRight-click: mill 3 cards" },
   { name = "untap", label = "Untap", tip = "UNTAP\nClick: untap all your tapped permanents" },
 }
@@ -95,47 +95,65 @@ end
 
 ---------------------------------------------------------------------------
 -- Scry / Surveil viewer (a screen panel only that player can see)
+-- Each click on the SCRY tile adds the next card from the top (click twice =
+-- scry 2). Each card gets its own choice; when every shown card has one,
+-- they all resolve at once and the viewer closes. X cancels.
 ---------------------------------------------------------------------------
 
-local scry = {}   -- [color] = { depth = cards already kept on top }
+local MAX_SCRY = 6
+local scry = {}   -- [color] = { choices = { [i] = "top"|"bottom"|"grave" }, count = n }
+
+local CHOICE_TEXT = { top = "KEEP ON TOP", bottom = "TO THE BOTTOM", grave = "TO GRAVEYARD" }
 
 function Actions.xml()
   local parts = {}
-  for _, color in ipairs(TableSetup.activeSeats()) do
-    local c = color
-    local function iconButton(id, img, onClick, tip)
-      return ([[
-      <Panel id="%s" preferredWidth="64" preferredHeight="64">
-        <Image image="%s" preserveAspect="true" raycastTarget="false" />
-        <Button onClick="%s" color="#00000000" tooltip="%s" tooltipPosition="Above" />
-      </Panel>]]):format(id, ART_BASE .. img .. ART_VERSION, onClick, tip)
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    local slots = {}
+    for i = 1, MAX_SCRY do
+      local id = c .. "_" .. i
+      local function icon(img, choice, tip)
+        return ([[
+          <Panel preferredWidth="52" preferredHeight="52">
+            <Image image="%s" preserveAspect="true" raycastTarget="false" />
+            <Button onClick="ui_scry(%s_%s)" color="#00000000" tooltip="%s" tooltipPosition="Above" />
+          </Panel>]]):format(ART_BASE .. img .. ART_VERSION, id, choice, tip)
+      end
+      table.insert(slots, ([[
+      <VerticalLayout id="scrySlot_%s" active="false" preferredWidth="210" spacing="6" childForceExpandHeight="false" childAlignment="UpperCenter">
+        <HorizontalLayout spacing="40" preferredHeight="52" childForceExpandWidth="false" childAlignment="MiddleCenter">]]
+        .. icon("ui/arrow_up.png", "top", "Scry: keep on top")
+        .. icon("ui/arrow_down.png", "bottom", "Scry: put on the bottom")
+        .. [[
+        </HorizontalLayout>
+        <Panel preferredHeight="280" preferredWidth="200">
+          <Text id="scryName_%s" fontSize="13" color="#E6F1FF">-</Text>
+          <Image id="scryImg_%s" preserveAspect="true" raycastTarget="false" />
+        </Panel>
+        <Text id="scryChoice_%s" fontSize="13" fontStyle="Bold" color="#5AF0FF" preferredHeight="18">CHOOSE</Text>
+        <HorizontalLayout spacing="6" preferredHeight="34">
+          <Button onClick="ui_scry(%s_top)" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold" fontSize="13" tooltip="Surveil: keep on top">TOP</Button>
+          <Button onClick="ui_scry(%s_grave)" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold" fontSize="13" tooltip="Surveil: put into your graveyard">GRAVEYARD</Button>
+        </HorizontalLayout>
+      </VerticalLayout>]]):format(id, id, id, id, id, id))
     end
     table.insert(parts, ([[
 <Panel id="scry_%s" visibility="%s" active="false"
-       rectAlignment="MiddleRight" offsetXY="-40 0" width="330" height="610"
+       rectAlignment="MiddleCenter" offsetXY="0 40" width="250" height="500"
        color="#0B0F17F5" outline="#5AF0FF" outlineSize="2 2"
        allowDragging="true" returnToOriginalPositionWhenReleased="false">
-  <VerticalLayout padding="14 14 12 12" spacing="8" childForceExpandHeight="false" childAlignment="UpperCenter">
-    <Text fontSize="18" fontStyle="Bold" color="#5AF0FF" preferredHeight="24">SCRY / SURVEIL</Text>
-    <Text id="scryInfo_%s" fontSize="13" color="#8B98A9" preferredHeight="18">Top card</Text>
-    <HorizontalLayout spacing="40" preferredHeight="64" childForceExpandWidth="false" childAlignment="MiddleCenter">]]
-      .. iconButton("scryUp_" .. c, "ui/arrow_up.png", "ui_scry(" .. c .. "_top)", "Keep on top (scry)")
-      .. iconButton("scryDown_" .. c, "ui/arrow_down.png", "ui_scry(" .. c .. "_bottom)", "Put on the bottom (scry)")
-      .. [[
+  <VerticalLayout padding="14 14 10 12" spacing="8" childForceExpandHeight="false">
+    <HorizontalLayout preferredHeight="26" childForceExpandWidth="false">
+      <Text id="scryTitle_%s" fontSize="17" fontStyle="Bold" color="#5AF0FF" alignment="MiddleLeft" flexibleWidth="1">SCRY / SURVEIL 1</Text>
+      <Button onClick="ui_scry(%s_0_cancel)" preferredWidth="30" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold"
+              tooltip="Cancel: leave the cards where they are">X</Button>
     </HorizontalLayout>
-    <Panel preferredHeight="300" preferredWidth="215">
-      <Text id="scryName_%s" fontSize="14" color="#E6F1FF">-</Text>
-      <Image id="scryImg_%s" preserveAspect="true" raycastTarget="false" />
-    </Panel>
-    <Text fontSize="12" color="#8B98A9" preferredHeight="16">SURVEIL</Text>
-    <HorizontalLayout spacing="10" preferredHeight="40">
-      <Button onClick="ui_scry(%s_keep)" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold" tooltip="Keep it on top (surveil)">TOP</Button>
-      <Button onClick="ui_scry(%s_grave)" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold" tooltip="Put it into your graveyard (surveil)">GRAVEYARD</Button>
+    <Text fontSize="12" color="#8B98A9" preferredHeight="16">Click SCRY again to look at one more card</Text>
+    <HorizontalLayout spacing="12" preferredHeight="420" childForceExpandWidth="false" childAlignment="UpperCenter">]]
+      .. table.concat(slots) .. [[
     </HorizontalLayout>
-    <Button onClick="ui_scry(%s_done)" color="#00B3A4" textColor="#06130B" fontStyle="Bold" preferredHeight="36">DONE</Button>
   </VerticalLayout>
 </Panel>
-]]):format(c, c, c, c, c, c, c, c))
+]]):format(c, c, c, c))
   end
   return table.concat(parts)
 end
@@ -145,60 +163,92 @@ local function closeScry(color)
   UI.setAttribute("scry_" .. color, "active", "false")
 end
 
--- Show the card at the current depth, or close when the library runs out.
-local function showScry(color)
+local function renderScry(color)
   local st = scry[color]
   if st == nil then
     return
   end
-  local card = Library.peek(color, st.depth)
-  if card == nil then
-    broadcastToColor("No more cards to look at.", color, WARN)
-    closeScry(color)
-    return
-  end
   UI.setAttribute("scry_" .. color, "active", "true")
-  UI.setValue("scryInfo_" .. color, st.depth == 0 and "Top card of your library"
-    or ("Card " .. (st.depth + 1) .. " from the top (" .. st.depth .. " kept above it)"))
-  UI.setValue("scryName_" .. color, card.name)
-  UI.setAttribute("scryImg_" .. color, "image", card.face or "")
+  UI.setAttribute("scry_" .. color, "width", 30 + st.count * 222)
+  UI.setValue("scryTitle_" .. color, "SCRY / SURVEIL " .. st.count)
+  for i = 1, MAX_SCRY do
+    local id = color .. "_" .. i
+    if i <= st.count then
+      local card = Library.peek(color, i - 1)
+      UI.setAttribute("scrySlot_" .. id, "active", "true")
+      UI.setValue("scryName_" .. id, card and card.name or "-")
+      UI.setAttribute("scryImg_" .. id, "image", card and card.face or "")
+      local ch = st.choices[i]
+      UI.setValue("scryChoice_" .. id, ch and CHOICE_TEXT[ch] or "CHOOSE")
+      UI.setAttribute("scryChoice_" .. id, "color", ch and "#2FBF71" or "#5AF0FF")
+    else
+      UI.setAttribute("scrySlot_" .. id, "active", "false")
+    end
+  end
 end
 
+-- SCRY tile clicked: open with the top card, or add the next card.
 function Actions.openScry(color)
-  scry[color] = { depth = 0, looked = 0 }
-  showScry(color)
+  local total = Library.count(color)
+  local st = scry[color]
+  if st == nil then
+    if total == 0 then
+      broadcastToColor("Your library is empty.", color, WARN)
+      return
+    end
+    scry[color] = { choices = {}, count = 1 }
+  elseif st.count >= math.min(MAX_SCRY, total) then
+    broadcastToColor("That's as many cards as the viewer shows at once.", color, WARN)
+    return
+  else
+    st.count = st.count + 1
+  end
+  renderScry(color)
 end
 
--- Viewer buttons: "<Color>_<choice>".
+local function resolveScry(color)
+  local st = scry[color]
+  local counts = { top = 0, bottom = 0, grave = 0 }
+  for i = 1, st.count do
+    counts[st.choices[i]] = counts[st.choices[i]] + 1
+  end
+  local choices = {}
+  for i = 1, st.count do
+    choices[i] = st.choices[i]
+  end
+  closeScry(color)
+  Library.arrangeTop(color, choices, function()
+    local bits = {}
+    if counts.top > 0 then table.insert(bits, counts.top .. " on top") end
+    if counts.bottom > 0 then table.insert(bits, counts.bottom .. " on the bottom") end
+    if counts.grave > 0 then table.insert(bits, counts.grave .. " into the graveyard") end
+    log(color .. " looked at " .. #choices .. " card" .. (#choices == 1 and "" or "s") .. ": " .. table.concat(bits, ", "))
+  end)
+end
+
+-- Viewer buttons: "<Color>_<slot>_<choice>".
 function ui_scry(player, arg)
-  local color, choice = tostring(arg):match("^(%a+)_(%a+)$")
+  local color, slot, choice = tostring(arg):match("^(%a+)_(%d+)_(%a+)$")
   if color == nil or player.color ~= color or scry[color] == nil then
     return
   end
-  local st = scry[color]
-  if choice == "done" then
-    if st.looked > 0 then
-      log(color .. " finished looking at " .. st.looked .. " card" .. (st.looked == 1 and "" or "s"))
-    end
+  if choice == "cancel" then
     closeScry(color)
-  elseif choice == "top" or choice == "keep" then
-    st.looked = st.looked + 1
-    log(color .. " keeps a card on top (" .. (choice == "top" and "scry" or "surveil") .. ")")
-    st.depth = st.depth + 1
-    showScry(color)
-  elseif choice == "bottom" then
-    st.looked = st.looked + 1
-    log(color .. " puts a card on the bottom (scry)")
-    Library.moveToBottom(color, st.depth, function() Wait.time(function() showScry(color) end, 0.3) end)
-  elseif choice == "grave" then
-    st.looked = st.looked + 1
-    Library.mill(color, 1, st.depth, function(done)
-      if done > 0 then
-        log(color .. " puts a card into the graveyard (surveil)")
-      end
-      Wait.time(function() showScry(color) end, 0.3)
-    end)
+    return
   end
+  local st = scry[color]
+  slot = tonumber(slot)
+  if slot < 1 or slot > st.count then
+    return
+  end
+  st.choices[slot] = choice
+  for i = 1, st.count do
+    if st.choices[i] == nil then
+      renderScry(color)
+      return
+    end
+  end
+  resolveScry(color)
 end
 
 ---------------------------------------------------------------------------
