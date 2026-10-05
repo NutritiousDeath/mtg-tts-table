@@ -234,7 +234,7 @@ function faceFields(card, face) {
 }
 
 function splitTypes(typeLine) {
-  const main = typeLine.split(/\s+—/)[0];
+  const main = typeLine.split(/\s+\u2014/)[0];
   return main.split(/\s+/).filter(Boolean);
 }
 
