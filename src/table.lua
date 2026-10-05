@@ -57,7 +57,7 @@ local SEAT_ORDER = {
 -- Areas in seat-local units: side = along the player's right (+) / left (-)
 -- from the middle of their edge; depth = distance in from the table edge;
 -- w, d = width (sideways) and depth of the area. A card is about 2.2 x 3.1.
--- Areas stay within side -23..27 and depth 3..27 so neighbouring seats'
+-- Areas stay within side -25..27 and depth 3..33 so neighbouring seats'
 -- areas never overlap at the corners (checked for all four seats).
 local REGIONS = {
   -- right column
@@ -66,12 +66,12 @@ local REGIONS = {
   exile = { side = 20, depth = 8.5, w = 6, d = 6.5 },
   -- left: two command zones side by side (commander, partner), each with
   -- its commander tax counter just above it (toward the table center)
-  command1 = { side = -19, depth = 16.75, w = 4.2, d = 5.5 },
-  command2 = { side = -14.5, depth = 16.75, w = 4.2, d = 5.5 },
-  tax1 = { side = -19, depth = 21.6, w = 4.2, d = 2.4 },
-  tax2 = { side = -14.5, depth = 21.6, w = 4.2, d = 2.4 },
-  -- middle
-  battlefield = { side = 2, depth = 19.5, w = 28, d = 14 },
+  command1 = { side = -22.5, depth = 16.75, w = 4.2, d = 5.5 },
+  command2 = { side = -18.1, depth = 16.75, w = 4.2, d = 5.5 },
+  tax1 = { side = -22.5, depth = 21.6, w = 4.2, d = 2.4 },
+  tax2 = { side = -18.1, depth = 21.6, w = 4.2, d = 2.4 },
+  -- middle: from just above the lands row to the tracker's edge
+  battlefield = { side = 0.2, depth = 18.25, w = 31.6, d = 16.5 },
   lands = { side = -3.5, depth = 6.75, w = 39, d = 5.5 },
   -- action tiles in a strip beside the library column (actions.lua)
   act_draw = { side = 25.3, depth = 24.6, w = 3, d = 4.2 },

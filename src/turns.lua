@@ -8,12 +8,13 @@
 
     - Untap: the active player's permanents untap automatically, then the
       table moves on to Upkeep by itself (nobody gets priority in untap).
-    - Draw: the active player draws automatically. Only in a two-player game
+    - Draw: the active player draws automatically, then the table moves on
+      to Main 1 by itself. Only in a two-player game
       does the starting player skip the draw on their first turn (rule
       103.8a); in multiplayer Commander everyone draws (rule 103.8c).
     - Cleanup: passes by itself to the next player's turn.
-    - NEXT STEP (active player): move to the next step.
-      END TURN (active player): jump to the End step; from there, to the next turn.
+    - NEXT STEP / END TURN tiles beside each tracker (actions.lua), active
+      player only: next step / jump to the End step (from there, next turn).
       Hotkeys: "MTG: next step", "MTG: end turn" (TTS Options > Game Keys).
     - Turn order is clockwise (White, Red, Green, Blue), skipping players
       who are out of the game.
@@ -79,11 +80,7 @@ function Turns.xml()
   <Image id="turnBarBg" image="]] .. ART_BASE .. "turnbar_White.png" .. ART_VERSION .. [[" raycastTarget="false" />
   <VerticalLayout padding="22 22 12 12" spacing="6" childForceExpandHeight="false">
     <HorizontalLayout preferredHeight="34" spacing="12" childForceExpandWidth="false">
-      <Text id="turnTitle" fontSize="20" fontStyle="Bold" color="#E6F1FF" alignment="MiddleLeft" flexibleWidth="1">TURN</Text>
-      <Button id="turnNext" onClick="ui_turnNext" preferredWidth="140" color="#0F2A33" textColor="#5AF0FF" fontStyle="Bold"
-              tooltip="Active player: go to the next step">NEXT STEP</Button>
-      <Button id="turnEnd" onClick="ui_turnEnd" preferredWidth="140" color="#141B26" textColor="#E6F1FF" fontStyle="Bold"
-              tooltip="Active player: skip to the end of your turn">END TURN</Button>
+      <Text id="turnTitle" fontSize="20" fontStyle="Bold" color="#E6F1FF" alignment="MiddleCenter" flexibleWidth="1">TURN</Text>
     </HorizontalLayout>
     <HorizontalLayout preferredHeight="22" spacing="4">]] .. table.concat(steps) .. [[</HorizontalLayout>
   </VerticalLayout>
@@ -160,6 +157,18 @@ local function advance()
   enterStep()
 end
 
+-- Move on by itself after a moment, unless someone already moved the turn on.
+local function autoAdvance(delay)
+  local t = turn()
+  local num, idx = t.number, t.stepIndex
+  Wait.time(function()
+    local now = turn()
+    if now.number == num and now.stepIndex == idx and GameState.data.started then
+      advance()
+    end
+  end, delay)
+end
+
 enterStep = function()
   local t = turn()
   local step = Turns.STEPS[t.stepIndex]
@@ -170,7 +179,7 @@ enterStep = function()
   if step.id == "untap" then
     Actions.untapAll(seat, true)
     -- No one gets priority in the untap step.
-    Wait.time(advance, 0.8)
+    autoAdvance(0.8)
   elseif step.id == "draw" then
     local skip = t.number == 1 and #players() == 2 and seat == t.startingSeat
     if skip then
@@ -178,9 +187,11 @@ enterStep = function()
     else
       Actions.draw(seat, 1, "draw step")
     end
+    -- Nothing else normally happens in the draw step: move on to Main 1.
+    autoAdvance(1)
   elseif step.id == "cleanup" then
     -- Discard to 7 comes later in Phase 4; for now cleanup passes on its own.
-    Wait.time(advance, 0.6)
+    autoAdvance(0.6)
   end
 end
 
@@ -202,7 +213,7 @@ function Turns.next(color)
     return
   end
   local id = Turns.STEPS[turn().stepIndex].id
-  if id == "untap" or id == "cleanup" then
+  if id == "untap" or id == "draw" or id == "cleanup" then
     return   -- these move on by themselves
   end
   advance()

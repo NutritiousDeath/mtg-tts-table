@@ -21,7 +21,7 @@ SEAT_RGB = {"White": (205, 212, 230), "Red": (230, 70, 80), "Green": (70, 220, 1
 AREAS = {
     "command1": (4.2, 5.5, "COMMANDER", None, 2.4),
     "command2": (4.2, 5.5, "PARTNER", None, 2.4),
-    "battlefield": (28, 14, "BATTLEFIELD", "battlefield.png", 3.4),
+    "battlefield": (31.6, 16.5, "BATTLEFIELD", "battlefield.png", 3.4),
     "lands": (39, 5.5, "LANDS", "lands.png", 2.6),
     "library": (6, 6.5, "LIBRARY", "library.png", 2.6),
     "graveyard": (6, 6.5, "GRAVEYARD", "graveyard.png", 2.6),
