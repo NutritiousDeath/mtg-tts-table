@@ -19,7 +19,12 @@
     - Turn order is clockwise (White, Red, Green, Blue), skipping players
       who are out of the game.
 
-  Later in Phase 4: Hold windows for other players, discard to 7, overrides.
+    - Hold: NEXT STEP / END TURN wait 3 seconds (shown on the strips) so
+      other players can click their HOLD tile to stop and respond. Clicking
+      NEXT STEP again during the wait goes right away.
+    - Cleanup: discard down to 7 (actions.lua), then the turn passes.
+    - TURN OPTIONS (screen, under Start Game): extra turn, extra combat,
+      skip this step, reverse turn order.
   Other modules can listen for Events "stepStarted" { seat, step, turn }.
 --]]
 
@@ -65,9 +70,28 @@ end
 local ART_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/ui/"
 local ART_VERSION = "?v=2"
 
--- The turn shows on the table strips (below); there is no screen bar.
+-- The turn shows on the table strips (below). The screen only has the
+-- TURN OPTIONS button (under Start Game) and its panel.
 function Turns.xml()
-  return ""
+  local function opt(which, text, tip)
+    return ('<Button onClick="ui_turnOpt(%s)" color="#141B26" textColor="#E6F1FF" fontStyle="Bold" tooltip="%s">%s</Button>')
+      :format(which, tip, text)
+  end
+  return [[
+<Button id="turnOptsToggle" onClick="ui_turnOpts" rectAlignment="UpperLeft" offsetXY="20 -120"
+        width="150" height="40" fontStyle="Bold" color="#2A3346" textColor="#E6F1FF">Turn Options</Button>
+<Panel id="turnOpts" active="false" rectAlignment="UpperLeft" offsetXY="180 -120" width="260" height="250"
+       color="#0B0F17F2" outline="#5AF0FF" outlineSize="2 2">
+  <VerticalLayout padding="12 12 12 12" spacing="8">
+    <Text fontSize="15" fontStyle="Bold" color="#5AF0FF" preferredHeight="22">TURN OPTIONS</Text>]]
+    .. opt("extraTurn", "Extra turn for me", "You take an extra turn after this one")
+    .. opt("extraCombat", "Extra combat", "Active player: one more combat phase this turn")
+    .. opt("skip", "Skip this step", "Active player: move on now, no hold window")
+    .. opt("reverse", "Reverse turn order", "Flip between clockwise and counter-clockwise")
+    .. [[
+  </VerticalLayout>
+</Panel>
+]]
 end
 
 function Turns.render()
@@ -118,7 +142,14 @@ local function renderStrip(color)
   B({ label = "", width = math.floor(th * U), height = math.floor(STRIP_D * U), color = line }, hw, 0)
   -- Title.
   local title = running and ("TURN " .. t.number .. " · " .. string.upper(t.activeSeat)) or "NO GAME RUNNING"
-  B({ label = title, width = 0, height = 0, font_size = running and 300 or 230,
+  local pendingTo, left
+  if Turns.pendingLabel then
+    pendingTo, left = Turns.pendingLabel()
+  end
+  if running and pendingTo then
+    title = pendingTo .. " IN " .. left .. " · HOLD?"
+  end
+  B({ label = title, width = 0, height = 0, font_size = (running and not pendingTo) and 300 or 190,
     font_color = { rgb[1], rgb[2], rgb[3] }, color = { 0, 0, 0, 0 } }, TITLE_X, 0.02)
   -- Step chips: the current one lit in the player's color, done ones dimmed.
   for i, label in ipairs(STRIP_LABELS) do
@@ -142,6 +173,9 @@ function Turns.renderStrips()
 end
 
 function Turns.ensureStrips()
+  if GameState.data.turn then
+    GameState.data.turn.pending = nil   -- a hold countdown doesn't survive a reload
+  end
   for _, obj in ipairs(getObjectsWithTag("TurnStrip")) do
     obj.destruct()
   end
@@ -167,6 +201,22 @@ end
 
 local enterStep
 
+-- Seconds other players get to HOLD before a step changes.
+local HOLD_SECONDS = 3
+
+local function livePlayers()
+  local n = 0
+  for _, c in ipairs(players()) do
+    local p = GameState.player(c)
+    if p and not p.eliminated then
+      n = n + 1
+    end
+  end
+  return n
+end
+
+-- The next player in turn order (clockwise, or the other way when reversed),
+-- skipping players who are out.
 local function nextPlayer(after)
   local list = players()
   local start
@@ -176,8 +226,9 @@ local function nextPlayer(after)
     end
   end
   start = start or 0
+  local dir = turn().reversed and -1 or 1
   for k = 1, #list do
-    local c = list[((start + k - 1) % #list) + 1]
+    local c = list[((start - 1 + dir * k) % #list) + 1]
     local p = GameState.player(c)
     if p and not p.eliminated then
       return c
@@ -192,17 +243,46 @@ function Turns.beginTurn(seat, number)
   t.activeSeat = seat
   t.number = number or ((t.number or 0) + 1)
   t.stepIndex = 1
+  t.pending = nil
   broadcastToAll("Turn " .. t.number .. ": " .. seat, { 0.55, 0.9, 0.6 })
   enterStep()
 end
 
-local function advance()
+-- Who takes the next turn: a queued extra turn first, else the next player.
+local function nextTurn()
   local t = turn()
-  if t.stepIndex >= #Turns.STEPS then
-    Turns.beginTurn(nextPlayer(t.activeSeat))
+  if t.extraTurns and #t.extraTurns > 0 then
+    local seat = table.remove(t.extraTurns, 1)
+    broadcastToAll(seat .. " takes an extra turn.", { 0.55, 0.9, 0.6 })
+    Turns.beginTurn(seat)
     return
   end
-  t.stepIndex = t.stepIndex + 1
+  Turns.beginTurn(nextPlayer(t.activeSeat))
+end
+
+-- Where "next step" goes from here (an extra combat loops End of combat back
+-- to Beginning of combat). peek = don't use up the extra combat.
+local function nextIndex(peek)
+  local t = turn()
+  if Turns.STEPS[t.stepIndex].id == "endcombat" and (t.extraCombats or 0) > 0 then
+    if not peek then
+      t.extraCombats = t.extraCombats - 1
+      broadcastToAll(t.activeSeat .. " gets an extra combat.", INFO)
+    end
+    return STEP_INDEX["combat"]
+  end
+  return t.stepIndex + 1
+end
+
+local function advance()
+  local t = turn()
+  t.pending = nil
+  local i = nextIndex(false)
+  if i > #Turns.STEPS then
+    nextTurn()
+    return
+  end
+  t.stepIndex = i
   enterStep()
 end
 
@@ -212,7 +292,7 @@ local function autoAdvance(delay)
   local num, idx = t.number, t.stepIndex
   Wait.time(function()
     local now = turn()
-    if now.number == num and now.stepIndex == idx and GameState.data.started then
+    if now.number == num and now.stepIndex == idx and GameState.data.started and not now.pending then
       advance()
     end
   end, delay)
@@ -239,8 +319,8 @@ enterStep = function()
     -- Nothing else normally happens in the draw step: move on to Main 1.
     autoAdvance(1)
   elseif step.id == "cleanup" then
-    -- Discard to 7 comes later in Phase 4; for now cleanup passes on its own.
-    autoAdvance(0.6)
+    -- Discard down to 7 first (if needed), then the turn passes.
+    Actions.cleanupDiscard(seat, function() autoAdvance(0.6) end)
   end
 end
 
@@ -257,6 +337,83 @@ local function isActive(color)
   return true
 end
 
+---------------------------------------------------------------------------
+-- Hold: NEXT STEP / END TURN wait HOLD_SECONDS so other players can stop
+-- the turn and respond. Clicking NEXT STEP again during the wait goes now.
+---------------------------------------------------------------------------
+
+local holdToken = 0
+
+-- What the pending move will land on, for the strips.
+function Turns.pendingLabel()
+  local t = turn()
+  if not t.pending then
+    return nil
+  end
+  local i
+  if t.pending.kind == "end" and t.stepIndex < STEP_INDEX["end"] then
+    i = STEP_INDEX["end"]
+  else
+    i = nextIndex(true)
+  end
+  local label = i > #Turns.STEPS and "NEXT TURN" or Turns.STEPS[i].label
+  return label, t.pending.left
+end
+
+local function commit(kind)
+  local t = turn()
+  holdToken = holdToken + 1
+  t.pending = nil
+  if kind == "end" and t.stepIndex < STEP_INDEX["end"] then
+    t.stepIndex = STEP_INDEX["end"]
+    enterStep()
+  else
+    advance()
+  end
+end
+
+local function requestMove(kind)
+  local t = turn()
+  if t.pending then
+    commit(t.pending.kind)      -- clicked again: don't wait
+    return
+  end
+  if livePlayers() <= 1 then
+    commit(kind)
+    return
+  end
+  holdToken = holdToken + 1
+  local mine = holdToken
+  t.pending = { kind = kind, left = HOLD_SECONDS }
+  Turns.render()
+  local function tick()
+    local now = turn()
+    if holdToken ~= mine or not now.pending then
+      return
+    end
+    now.pending.left = now.pending.left - 1
+    if now.pending.left <= 0 then
+      commit(now.pending.kind)
+    else
+      Turns.render()
+      Wait.time(tick, 1)
+    end
+  end
+  Wait.time(tick, 1)
+end
+
+function Turns.hold(color)
+  local t = turn()
+  if not GameState.data.started or not t.pending then
+    broadcastToColor("Nothing to hold right now: HOLD works while the turn is about to move on.", color, WARN)
+    return
+  end
+  holdToken = holdToken + 1
+  t.pending = nil
+  broadcastToAll(color .. " holds! " .. t.activeSeat .. ": click NEXT STEP when everyone is ready.", WARN)
+  Turns.render()
+end
+
 function Turns.next(color)
   if not isActive(color) then
     return
@@ -265,39 +422,99 @@ function Turns.next(color)
   if id == "untap" or id == "draw" or id == "cleanup" then
     return   -- these move on by themselves
   end
-  advance()
+  requestMove("next")
 end
 
 function Turns.endTurn(color)
   if not isActive(color) then
     return
   end
-  local t = turn()
-  local endIndex = STEP_INDEX["end"]
-  if t.stepIndex < endIndex then
-    t.stepIndex = endIndex
-    enterStep()
-  else
-    advance()
+  local id = Turns.STEPS[turn().stepIndex].id
+  if id == "untap" or id == "draw" or id == "cleanup" then
+    return
   end
+  requestMove("end")
+end
+
+---------------------------------------------------------------------------
+-- Turn options (overrides): extra turn, extra combat, skip step, reverse
+---------------------------------------------------------------------------
+
+function Turns.addExtraTurn(color)
+  local t = turn()
+  t.extraTurns = t.extraTurns or {}
+  table.insert(t.extraTurns, color)
+  broadcastToAll(color .. " will take an extra turn after this one.", INFO)
+end
+
+function Turns.addExtraCombat(color)
+  if not isActive(color) then
+    return
+  end
+  local t = turn()
+  t.extraCombats = (t.extraCombats or 0) + 1
+  broadcastToAll(color .. " gets an additional combat phase this turn.", INFO)
+end
+
+function Turns.skipStep(color)
+  if not isActive(color) then
+    return
+  end
+  local id = Turns.STEPS[turn().stepIndex].id
+  if id == "untap" or id == "draw" or id == "cleanup" then
+    return
+  end
+  commit("next")
+end
+
+function Turns.reverse(color)
+  local t = turn()
+  t.reversed = not t.reversed
+  broadcastToAll(color .. " reversed the turn order: now " .. (t.reversed and "counter-clockwise" or "clockwise") .. ".", INFO)
 end
 
 -- Mulligans are done: the starting player's first turn begins.
 Events.on("gameStarted", function(d)
   local t = turn()
   t.startingSeat = d.first
+  t.extraTurns, t.extraCombats, t.reversed, t.pending = {}, 0, false, nil
   Turns.beginTurn(d.first, 1)
 end)
 
-function ui_turnNext(player)
-  Turns.next(player.color)
+local optsOpen = false
+
+function ui_turnOpts(player)
+  optsOpen = not optsOpen
+  if optsOpen then
+    UI.setAttribute("turnOpts", "visibility", player.color)
+    UI.show("turnOpts")
+  else
+    UI.hide("turnOpts")
+  end
 end
 
-function ui_turnEnd(player)
-  Turns.endTurn(player.color)
+function ui_turnOpt(player, which)
+  local c = player.color
+  if not TableSetup.isActive(c) then
+    return
+  end
+  if not GameState.data.started then
+    broadcastToColor("No game running. Use Start Game first.", c, WARN)
+    return
+  end
+  if which == "extraTurn" then
+    Turns.addExtraTurn(c)
+  elseif which == "extraCombat" then
+    Turns.addExtraCombat(c)
+  elseif which == "skip" then
+    Turns.skipStep(c)
+  elseif which == "reverse" then
+    Turns.reverse(c)
+  end
 end
 
 function Turns.registerHotkeys()
   addHotkey("MTG: next step", function(playerColor) Turns.next(playerColor) end)
   addHotkey("MTG: end turn", function(playerColor) Turns.endTurn(playerColor) end)
+  addHotkey("MTG: hold", function(playerColor) Turns.hold(playerColor) end)
 end

@@ -217,6 +217,8 @@ local function toGraveyard(color, card, onDone)
   end, 0.4)
 end
 
+Library.toGraveyard = toGraveyard
+
 -- Mill n cards from the top, one at a time (index = take from that depth
 -- instead of the top; used by surveil).
 function Library.mill(color, n, index, onDone)

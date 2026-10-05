@@ -21,7 +21,7 @@
 Actions = {}
 
 local ART_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/"
-local ART_VERSION = "?v=3"
+local ART_VERSION = "?v=4"
 local TILE_W = 3
 local INFO = { 0.75, 0.8, 0.9 }
 local WARN = { 1, 0.6, 0.2 }
@@ -33,6 +33,7 @@ local ACTIONS = {
   { name = "untap", label = "Untap", tip = "UNTAP\nClick: untap all your tapped permanents" },
   { name = "next", label = "Next step", tip = "NEXT STEP\nYour turn: move to the next step of the turn" },
   { name = "endturn", label = "End turn", tip = "END TURN\nYour turn: skip to the end step\n(from the end step: pass the turn)" },
+  { name = "hold", label = "Hold", tip = "HOLD\nWhile the turn is about to move on (3 second countdown on the strip),\nclick to stop it so you can respond." },
 }
 
 local function tiles()
@@ -157,8 +158,180 @@ function Actions.xml()
   </VerticalLayout>
 </Panel>
 ]]):format(c, c, c, c))
+    table.insert(parts, Actions.discardXml(c))
   end
   return table.concat(parts)
+end
+
+---------------------------------------------------------------------------
+-- Discard to 7 (cleanup step): a private panel showing the hand; pick the
+-- extra cards, then Confirm. "No maximum hand size" skips it.
+---------------------------------------------------------------------------
+
+local MAX_HAND = 7
+local MAX_DISCARD_SLOTS = 16
+local discard = {}   -- [color] = { need, order = { {guid,name,face} }, picks = { [guid]=true }, onDone }
+
+function Actions.discardXml(c)
+  local slots = {}
+  for i = 1, MAX_DISCARD_SLOTS do
+    local id = c .. "_" .. i
+    table.insert(slots, ([[
+<Panel id="dSlot_%s" active="false" color="#1B2333">
+  <Text id="dName_%s" fontSize="11" color="#E6F1FF">-</Text>
+  <Image id="dImg_%s" preserveAspect="true" raycastTarget="false" />
+  <Panel id="dMark_%s" active="false" color="#DB545440" outline="#DB5454" outlineSize="4 4" raycastTarget="false">
+    <Panel height="24" rectAlignment="LowerCenter" color="#DB5454" raycastTarget="false">
+      <Text fontSize="12" fontStyle="Bold" color="#1A0606">DISCARD</Text>
+    </Panel>
+  </Panel>
+  <Button onClick="ui_discardPick(%s)" color="#00000000" />
+</Panel>]]):format(id, id, id, id, id))
+  end
+  return ([[
+<Panel id="discard_%s" visibility="%s" active="false" rectAlignment="LowerCenter" offsetXY="0 230" width="800" height="330"
+       color="#0B0F17F5" outline="#DB5454" outlineSize="2 2" allowDragging="true" returnToOriginalPositionWhenReleased="false">
+  <VerticalLayout padding="16 16 12 12" spacing="8" childForceExpandHeight="false">
+    <Text fontSize="18" fontStyle="Bold" color="#DB5454" alignment="MiddleLeft" preferredHeight="24">CLEANUP · DISCARD TO 7</Text>
+    <Text id="dText_%s" fontSize="14" color="#E6F1FF" alignment="MiddleLeft" preferredHeight="20">Pick cards to discard.</Text>
+    <GridLayout cellSize="92 128" spacing="6 6" constraint="FixedColumnCount" constraintCount="8" childAlignment="UpperCenter" preferredHeight="262">]]
+    .. table.concat(slots) .. [[</GridLayout>
+    <HorizontalLayout spacing="10" preferredHeight="40">
+      <Button onClick="ui_discardConfirm(%s)" color="#DB5454" textColor="#1A0606" fontStyle="Bold">DISCARD</Button>
+      <Button onClick="ui_discardSkip(%s)" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold"
+              tooltip="You have no maximum hand size (Reliquary Tower, Thought Vessel...)">NO MAXIMUM HAND SIZE</Button>
+    </HorizontalLayout>
+  </VerticalLayout>
+</Panel>
+]]):format(c, c, c, c, c)
+end
+
+local function handCards(color)
+  local out = {}
+  for _, obj in ipairs(Player[color].getHandObjects() or {}) do
+    if obj.type == "Card" then
+      table.insert(out, obj)
+    end
+  end
+  return out
+end
+
+local function renderDiscard(color)
+  local st = discard[color]
+  if st == nil then
+    UI.setAttribute("discard_" .. color, "active", "false")
+    return
+  end
+  local picked = 0
+  for _ in pairs(st.picks) do picked = picked + 1 end
+  UI.setAttribute("discard_" .. color, "active", "true")
+  local rows = math.ceil(math.min(#st.order, MAX_DISCARD_SLOTS) / 8)
+  UI.setAttribute("discard_" .. color, "height", 140 + rows * 134)
+  UI.setValue("dText_" .. color, "You have " .. #st.order .. " cards: pick " .. st.need .. " to discard.   "
+    .. picked .. " / " .. st.need)
+  for i = 1, MAX_DISCARD_SLOTS do
+    local id = color .. "_" .. i
+    local e = st.order[i]
+    if e then
+      UI.setAttribute("dSlot_" .. id, "active", "true")
+      UI.setValue("dName_" .. id, e.name)
+      UI.setAttribute("dImg_" .. id, "image", e.face or "")
+      UI.setAttribute("dMark_" .. id, "active", st.picks[e.guid] and "true" or "false")
+    else
+      UI.setAttribute("dSlot_" .. id, "active", "false")
+    end
+  end
+end
+
+-- Called by the turn engine in cleanup. onDone runs when the hand is legal.
+function Actions.cleanupDiscard(color, onDone)
+  local hand = handCards(color)
+  local need = #hand - MAX_HAND
+  if need <= 0 then
+    onDone()
+    return
+  end
+  local order = {}
+  for _, card in ipairs(hand) do
+    local custom = card.getCustomObject()
+    table.insert(order, { guid = card.getGUID(), name = card.getName(), face = custom and custom.face or nil })
+  end
+  discard[color] = { need = need, order = order, picks = {}, onDone = onDone }
+  broadcastToAll(color .. " has " .. #hand .. " cards and must discard " .. need .. ".", WARN)
+  renderDiscard(color)
+end
+
+local function finishDiscard(color)
+  local st = discard[color]
+  discard[color] = nil
+  renderDiscard(color)
+  for _, e in ipairs(st.order) do
+    local card = getObjectFromGUID(e.guid)
+    if card then card.highlightOff() end
+  end
+  if st.onDone then st.onDone() end
+end
+
+function ui_discardPick(player, arg)
+  local color, i = tostring(arg):match("^(%a+)_(%d+)$")
+  local st = color and discard[color]
+  if st == nil or player.color ~= color then
+    return
+  end
+  local e = st.order[tonumber(i)]
+  if e == nil then
+    return
+  end
+  local picked = 0
+  for _ in pairs(st.picks) do picked = picked + 1 end
+  local card = getObjectFromGUID(e.guid)
+  if st.picks[e.guid] then
+    st.picks[e.guid] = nil
+    if card then card.highlightOff() end
+  elseif picked < st.need then
+    st.picks[e.guid] = true
+    if card then card.highlightOn({ 0.86, 0.33, 0.33 }) end
+  else
+    broadcastToColor("You've picked " .. picked .. ". Click a picked card to un-pick it.", color, WARN)
+    return
+  end
+  renderDiscard(color)
+end
+
+function ui_discardConfirm(player, color)
+  local st = discard[color]
+  if st == nil or player.color ~= color then
+    return
+  end
+  local chosen = {}
+  for _, e in ipairs(st.order) do
+    if st.picks[e.guid] then
+      table.insert(chosen, getObjectFromGUID(e.guid))
+    end
+  end
+  if #chosen ~= st.need then
+    broadcastToColor("Pick exactly " .. st.need .. " card" .. (st.need == 1 and "" or "s") .. " first.", color, WARN)
+    return
+  end
+  local s = TableSetup.seat(color)
+  local names = {}
+  for i, card in ipairs(chosen) do
+    table.insert(names, card.getName())
+    card.highlightOff()
+    card.setPosition(TableSetup.slot(color, "graveyard", 2 + i * 0.3))
+    card.setRotation({ 0, s.yaw, 0 })
+    Library.toGraveyard(color, card)
+  end
+  log(color .. " discards " .. table.concat(names, ", ") .. " (cleanup)")
+  finishDiscard(color)
+end
+
+function ui_discardSkip(player, color)
+  if discard[color] == nil or player.color ~= color then
+    return
+  end
+  log(color .. " keeps " .. #discard[color].order .. " cards (no maximum hand size)")
+  finishDiscard(color)
 end
 
 local function closeScry(color)
@@ -282,6 +455,8 @@ local function renderTile(color, a)
       Turns.next(color)
     elseif a.name == "endturn" then
       Turns.endTurn(color)
+    elseif a.name == "hold" then
+      Turns.hold(color)
     end
   end
   -- One invisible button over the whole tile: the click area + tooltip.
