@@ -372,6 +372,7 @@ local LABELS = {
 }
 
 local LINE_HEIGHT = 0.03 -- just above the surface so lines aren't hidden
+local DRAW_OLD_LABELS = false  -- 3D text labels (replaced by the area images)
 
 -- The four corners of an area, closed back to the first point.
 local function outlinePoints(color, name)
@@ -412,23 +413,19 @@ local function clearLabels(state)
   state.labels = {}
 end
 
+-- Areas are drawn as images (zones.lua, Zones.drawIcons): borders, titles and
+-- icons are all part of each image. This only clears the outlines and text
+-- labels earlier versions drew.
 function TableSetup.drawMats()
   local state = GameState.data.table
-  local lines = {}
-
-  for _, color in ipairs(TableSetup.activeSeats()) do
-    local tint = SEAT_TINT[color] or { 0.7, 0.7, 0.7 }
-    for _, name in ipairs(TableSetup.REGION_NAMES) do
-      table.insert(lines, {
-        points = outlinePoints(color, name),
-        color = tint,
-        thickness = 0.12,
-      })
-    end
-  end
-  Global.setVectorLines(lines)
-
+  Global.setVectorLines({})
   clearLabels(state)
+  for _, obj in ipairs(getObjectsWithTag("MatLabel")) do
+    obj.destruct()
+  end
+  if not DRAW_OLD_LABELS then
+    return
+  end
   for _, color in ipairs(TableSetup.activeSeats()) do
     local s = TableSetup.seat(color)
     local tint = SEAT_TINT[color] or { 0.7, 0.7, 0.7 }

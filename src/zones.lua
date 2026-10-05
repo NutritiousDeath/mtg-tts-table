@@ -16,7 +16,8 @@
       { card, name, from = {seat, region} or nil, to = {seat, region} }
   Phase 6 (triggers) listens to this for "dies", "enters the battlefield" etc.
 
-  Icons: each area gets an icon (decals, from the repo's assets/icons folder).
+  Look: each area is one image laid flat on the table (assets/mats, built by
+  tools/make_mat_art.py) with its glowing border, title and icon.
 
   Debug commands: !moves (log every move), !where (card under mouse),
   !zones (what's tracked at your seat).
@@ -35,20 +36,6 @@ local EDGE_MARGIN = 0.6
 
 -- How long to wait after a drop before reading the card's position.
 local SETTLE_DELAY = 0.4
-
--- Icons are served from the public GitHub repo.
-local ICON_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/icons/"
--- Areas with an icon (others, like the tracker, have none).
-local ICON_SIZE = { command1 = 2.4, command2 = 2.4, battlefield = 3.4, lands = 2.6,
-  library = 2.6, graveyard = 2.6, exile = 2.6 }
--- Icon file per area (default: <area>.png). Command zones show the seat's
--- own crown, the same art as the commander damage crowns.
-local function iconFile(color, name)
-  if name == "command1" or name == "command2" then
-    return "tracker_crown_" .. color .. ".png?v=2"
-  end
-  return name .. ".png"
-end
 
 local where = {}     -- card GUID -> { seat, region }
 local showMoves = false
@@ -73,23 +60,28 @@ function Zones.ensure()
   Zones.drawIcons()
 end
 
+-- Each area is drawn as one flat image on the table (tools/make_mat_art.py):
+-- dark plate, glowing border in the seat's color, title and icon. Cards sit
+-- on top of it; areas are still worked out from position (regionAt).
+local MAT_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/mats/"
+local MAT_VERSION = "?v=2"
+local MAT_AREAS = { "command1", "command2", "battlefield", "lands", "library", "graveyard", "exile" }
+local MAT_HEIGHT = 0.012   -- just above the surface, under cards lying on it
+
 function Zones.drawIcons()
   local decals = {}
   for _, color in ipairs(TableSetup.activeSeats()) do
     local s = TableSetup.seat(color)
-    for _, name in ipairs(TableSetup.REGION_NAMES) do
-      if ICON_SIZE[name] then
+    for _, name in ipairs(MAT_AREAS) do
       local r = TableSetup.region(color, name)
-      local size = ICON_SIZE[name]
       table.insert(decals, {
         name = color .. "_" .. name,
-        url = ICON_BASE .. iconFile(color, name),
-        position = { r.center.x, TableSetup.SURFACE_TOP + 0.02, r.center.z },
-        -- Same facing as the mat labels, so icons are upright for the seat.
+        url = MAT_BASE .. "mat_" .. name .. "_" .. color .. ".png" .. MAT_VERSION,
+        position = { r.center.x, TableSetup.SURFACE_TOP + MAT_HEIGHT, r.center.z },
+        -- Upright for the seat (image top toward the table center).
         rotation = { 90, s.angle, 0 },
-        scale = { size, size, 1 },
+        scale = { r.w, r.d, 1 },
       })
-      end
     end
   end
   Global.setDecals(decals)
