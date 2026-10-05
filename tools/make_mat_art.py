@@ -20,8 +20,8 @@ SEAT_RGB = {"White": (205, 212, 230), "Red": (230, 70, 80), "Green": (70, 220, 1
 # area: (width, depth, title, icon file or None for the seat crown, icon size) in table units
 AREAS = {
     "command1": (4.2, 5.5, "COMMANDER", None, 2.4),
-    "command2": (4.2, 5.5, "PARTNER", None, 2.4),
-    "battlefield": (31.6, 16.5, "BATTLEFIELD", "battlefield.png", 3.4),
+    "command2": (4.2, 5.5, "PARTNER|OR BACKGROUND", None, 2.4),
+    "battlefield": (39, 16.5, "BATTLEFIELD", "battlefield.png", 3.4),
     "lands": (39, 5.5, "LANDS", "lands.png", 2.6),
     "library": (6, 6.5, "LIBRARY", "library.png", 2.6),
     "graveyard": (6, 6.5, "GRAVEYARD", "graveyard.png", 2.6),
@@ -46,7 +46,7 @@ def build(area, color):
     rgb = SEAT_RGB[color]
     u = ppu / 100.0                               # style scale
     pad = max(4, int(8 * u))
-    radius = int(min(W, H) * 0.08)
+    radius = int(0.45 * ppu)                      # same corner size on every area
 
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     mask = Image.new("L", (W, H), 0)
@@ -76,13 +76,15 @@ def build(area, color):
     img.alpha_composite(glow)
     img.alpha_composite(border)
 
-    tick = int(min(W, H) * 0.12)
+    tick = int(0.7 * ppu)                         # same corner-tick length on every area
     off = pad + int(14 * u)
     t = ImageDraw.Draw(img)
     for (x0, y0, dx, dy) in [(off, off, 1, 1), (W - off - 1, off, -1, 1), (off, H - off - 1, 1, -1), (W - off - 1, H - off - 1, -1, -1)]:
         t.line([(x0, y0 + dy * tick), (x0, y0), (x0 + dx * tick, y0)], fill=rgb + (190,), width=max(2, int(3 * u)))
 
-    # Title along the top (far edge from the player).
+    # Title along the top (far edge from the player); "MAIN|sub" adds a
+    # smaller second line under it.
+    title, _, sub = title.partition("|")
     tsize = min(0.5 * ppu, (W - 2 * off) / (len(title) * 0.95))
     f = font(tsize)
     ty = off + int(tsize * 0.95)
@@ -90,6 +92,11 @@ def build(area, color):
     ImageDraw.Draw(layer).text((W // 2, ty), title, font=f, fill=rgb + (255,), anchor="mm")
     img.alpha_composite(layer.filter(ImageFilter.GaussianBlur(max(2, 6 * u))))
     ImageDraw.Draw(img).text((W // 2, ty), title, font=f, fill=(235, 245, 255, 255), anchor="mm")
+    if sub:
+        ssize = min(tsize * 0.62, (W - 2 * off) / (len(sub) * 0.9))
+        ty = ty + int(tsize * 0.55 + ssize * 0.75)
+        ImageDraw.Draw(img).text((W // 2, ty), sub, font=font(ssize, 700), fill=rgb + (235,), anchor="mm")
+        ty = ty + int(ssize * 0.3)
 
     # Icon in the middle (a little below center, under the title).
     path = os.path.join(ICONS, icon_file or "tracker_crown_%s.png" % color)

@@ -61,7 +61,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.56 (bigger battlefield)"
+SCRIPT_VERSION = "0.57 (wide battlefield, command zones by tracker)"
 
 function onLoad(saved)
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)
