@@ -42,7 +42,8 @@ local function parseCost(head)
   if prefix == "+" then
     return "+", num
   end
-  if #prefix <= 3 and not prefix:find("[%w%s]") then
+  -- Plain ASCII letter/digit test: TTS's Lua counts letters like "â" as %w.
+  if #prefix <= 3 and not prefix:find("[A-Za-z0-9 ]") then
     return "-", num
   end
   return nil
@@ -173,7 +174,42 @@ function Walkers.handles(obj)
   return not obj.is_face_down and controllerOf(obj) ~= nil and isWalker(obj)
 end
 
+local reported = {}
+
+-- Draw the buttons; an error is shown once in chat instead of losing the
+-- card's other buttons silently.
 function Walkers.decorate(obj)
+  local ok, err = pcall(Walkers.draw, obj)
+  if not ok and not reported[tostring(err)] then
+    reported[tostring(err)] = true
+    printToAll("MTG > Planeswalker buttons failed on " .. tostring(obj.getName()) .. ": " .. tostring(err)
+      .. " (please send this to Claude)", WARN)
+  end
+end
+
+-- Debug (!walker): what the table reads on a planeswalker.
+function Walkers.describe(obj)
+  if obj == nil then
+    return "Hover over a planeswalker first."
+  end
+  local d = cardData(obj)
+  local out = { obj.getName() .. ": planeswalker " .. tostring(isWalker(obj)) .. ", on battlefield of "
+    .. tostring(controllerOf(obj)) .. ", loyalty " .. tostring(Counters.get(obj).loyalty) }
+  for _, line in ipairs(lines(type(d.oracle) == "string" and d.oracle or "")) do
+    local colon = line:find(":", 1, true)
+    local head = colon and line:sub(1, colon - 1) or ""
+    local codes = {}
+    for i = 1, math.min(#head, 6) do
+      table.insert(codes, tostring(head:byte(i)))
+    end
+    local sign, num = parseCost(head)
+    table.insert(out, "  [" .. head .. "] codes " .. table.concat(codes, ",") .. " -> "
+      .. (sign and (sign .. num) or "not a cost"))
+  end
+  return table.concat(out, "\n")
+end
+
+function Walkers.draw(obj)
   if not Walkers.handles(obj) then
     return
   end

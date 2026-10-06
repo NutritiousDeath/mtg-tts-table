@@ -26,6 +26,7 @@
     !search      search your library by name, type or rules text
     !triggers off / on   turn trigger detection off / on
     !triggers card       show the triggers read on the card under your mouse
+    !walker      show the loyalty abilities read on the planeswalker under your mouse
     !log         snapshot every player and save the game log to the Notebook
     !logclear    start a fresh game log
     !rebuild     remove and respawn every table tile (if one looks wrong)
@@ -76,7 +77,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.84 (minus loyalty abilities fix)"
+SCRIPT_VERSION = "0.85 (planeswalker button fixes)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -338,6 +339,12 @@ function onChat(message, sender)
   if message == "!triggers card" then
     local obj = sender.getHoverObject and sender.getHoverObject() or nil
     printToColor(Triggers.describe(obj), sender.color, { 0.7, 0.85, 1 })
+    return false
+  end
+
+  if message == "!walker" then
+    local obj = sender.getHoverObject and sender.getHoverObject() or nil
+    printToColor(Walkers.describe(obj), sender.color, { 0.7, 0.85, 1 })
     return false
   end
 
