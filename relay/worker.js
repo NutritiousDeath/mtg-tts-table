@@ -429,6 +429,13 @@ async function handleArchidekt(id) {
 
 // Same rules as src/archidekt.lua: commander = category with isPremier;
 // a card is left out only if every category it's in has includedInDeck false.
+function archidektIsToken(oc) {
+  if (!oc) return false;
+  const has = (list, v) => Array.isArray(list) && list.includes(v);
+  return has(oc.superTypes, "Token") || has(oc.types, "Emblem") ||
+    ["token", "double_faced_token", "emblem"].includes(oc.layout);
+}
+
 function archidektToDecklist(deck) {
   const premier = new Set();
   const excluded = new Set();
@@ -456,7 +463,10 @@ function archidektToDecklist(deck) {
         if (!excluded.has(c)) inDeck = true;
       }
     }
-    if (!inDeck && !isCommander) continue;
+    // Token cards always come through, even from a category that's not part
+    // of the deck: the importer keeps them out of the library and puts them
+    // on the seat's TOKENS tile.
+    if (!inDeck && !isCommander && !archidektIsToken(card.oracleCard)) continue;
 
     let line = String(entry.quantity || 1) + " " + clean(name);
     const set = card.edition && card.edition.editioncode;

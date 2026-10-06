@@ -4,7 +4,7 @@
   opens a panel only you see. Tokens that were in your imported decklist
   are kept out of the library and listed here first (MY DECK button).
   Type a token ("treasure", "1/1 soldier", "zombie", "food"...) and SEARCH:
-  the relay looks it up on Scryfall (GET /tokens?q=...) and shows up to 12
+  the relay looks it up on Scryfall (GET /tokens?q=...) and shows up to 24
   matching tokens with their pictures. Click one to put it onto your
   battlefield; the - / + buttons set how many copies each click makes.
   Tokens are real cards (tagged "Token") so counters, tapping and the
@@ -13,7 +13,8 @@
 
 Tokens = {}
 
-local MAX_RESULTS = 12
+local MAX_RESULTS = 24
+local COLS = 8
 local INFO = { 0.75, 0.8, 0.9 }
 local WARN = { 1, 0.6, 0.2 }
 
@@ -36,7 +37,7 @@ function Tokens.xml()
 </Panel>]]):format(id, id, id, id, id))
     end
     table.insert(parts, ([[
-<Panel id="tokens_%s" visibility="%s" active="false" rectAlignment="UpperLeft" offsetXY="20 -220" width="980" height="156"
+<Panel id="tokens_%s" visibility="%s" active="false" rectAlignment="UpperLeft" offsetXY="20 -220" width="1260" height="156"
        color="#0B0F17F2" outline="#5AF0FF" outlineSize="2 2" allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="12 12 12 12" spacing="8" childForceExpandHeight="false">
     <HorizontalLayout preferredHeight="26" childForceExpandWidth="false">
@@ -54,7 +55,7 @@ function Tokens.xml()
       <Button onClick="ui_tokenCopies(%s_plus)" preferredWidth="34" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold">+</Button>
     </HorizontalLayout>
     <Text id="tokStatus_%s" fontSize="12" color="#8B98A9" alignment="MiddleLeft" preferredHeight="18">Search for a token, then click it to put it onto your battlefield.</Text>
-    <GridLayout id="tokGrid_%s" active="false" cellSize="146 204" spacing="8 8" constraint="FixedColumnCount" constraintCount="6"
+    <GridLayout id="tokGrid_%s" active="false" cellSize="146 204" spacing="8 8" constraint="FixedColumnCount" constraintCount="8"
                 childAlignment="UpperLeft" preferredHeight="300">]] .. table.concat(slots) .. [[</GridLayout>
   </VerticalLayout>
 </Panel>
@@ -69,7 +70,7 @@ end
 
 local function render(color)
   local list = results[color] or {}
-  local rows = math.ceil(#list / 6)
+  local rows = math.ceil(#list / COLS)
   UI.setAttribute("tokGrid_" .. color, "active", #list > 0 and "true" or "false")
   UI.setAttribute("tokGrid_" .. color, "preferredHeight", rows * 212)
   UI.setAttribute("tokens_" .. color, "height", 156 + rows * 212)
@@ -161,7 +162,15 @@ end
 -- Show the tokens from this seat's imported decklist.
 function Tokens.showDeck(c)
   local p = GameState.player(c)
-  local list = p and p.deckTokens or {}
+  -- One entry per token (the same token listed twice shows once).
+  local list, seen = {}, {}
+  for _, tk in ipairs(p and p.deckTokens or {}) do
+    local key = tostring(tk.image) .. "|" .. tostring(tk.name)
+    if not seen[key] and #list < MAX_RESULTS then
+      seen[key] = true
+      table.insert(list, tk)
+    end
+  end
   results[c] = list
   if #list == 0 then
     status(c, "No tokens were in your imported decklist. Search for one above.")

@@ -64,7 +64,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.67 (decklist tokens on TOKENS tile)"
+SCRIPT_VERSION = "0.68 (all Archidekt tokens, 24-slot token panel)"
 
 function onLoad(saved)
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)
