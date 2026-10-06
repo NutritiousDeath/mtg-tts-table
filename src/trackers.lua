@@ -211,6 +211,19 @@ function Trackers.confirmLoss(color, byColor)
   broadcastToAll(color .. " is out of the game (" .. p.lossFlag .. ").", WARN)
   p.lossFlag = nil
   Trackers.render(color)
+  -- Last player standing: the game is over; save the log.
+  local left = {}
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    local q = player(c)
+    if q and not q.eliminated then
+      table.insert(left, c)
+    end
+  end
+  if #left <= 1 and GameLog then
+    GameLog.add("GAME", "========== GAME OVER ========== winner: " .. tostring(left[1]))
+    GameLog.snapshot("game over")
+    GameLog.write()
+  end
 end
 
 function Trackers.dismissLoss(color, byColor)

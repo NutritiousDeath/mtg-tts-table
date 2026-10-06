@@ -13,7 +13,7 @@
     MILL   click: mill 1 · right-click: mill 3 (top cards face up to graveyard)
     UNTAP  click: untap every tapped permanent on your battlefield and lands
     TOKENS click: open / close your token search panel (tokens.lua)
-    NEXT STEP / END TURN (beside the tracker): your turn only (turns.lua)
+    NEXT STEP / END STEP / END TURN (beside the tracker): your turn only (turns.lua)
 
   Only the seat's own player can use its tiles. Every tile has a tooltip.
   Tile art: assets/mats/action_<name>_<Color>.png (tools/make_mat_art.py).
@@ -22,7 +22,7 @@
 Actions = {}
 
 local ART_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/"
-local ART_VERSION = "?v=5"
+local ART_VERSION = "?v=6"
 local TILE_W = 3
 local INFO = { 0.75, 0.8, 0.9 }
 local WARN = { 1, 0.6, 0.2 }
@@ -34,6 +34,7 @@ local ACTIONS = {
   { name = "untap", label = "Untap", tip = "UNTAP\nClick: untap all your tapped permanents" },
   { name = "tokens", label = "Tokens", tip = "TOKENS\nClick: open token search (only you see it).\nFind a token and click it to put it onto your battlefield." },
   { name = "next", label = "Next step", tip = "NEXT STEP\nYour turn: move to the next step of the turn" },
+  { name = "endstep", label = "End step", tip = "END STEP\nYour turn: go to the end step and stop there\n(for end step triggers). NEXT STEP or END TURN then passes the turn." },
   { name = "endturn", label = "End turn", tip = "END TURN\nYour turn: skip to the end step\n(from the end step: pass the turn)" },
 }
 
@@ -513,6 +514,8 @@ local function renderTile(color, a)
       Turns.next(color)
     elseif a.name == "endturn" then
       Turns.endTurn(color)
+    elseif a.name == "endstep" then
+      Turns.toEndStep(color)
     end
   end
   -- One invisible button over the whole tile: the click area + tooltip.

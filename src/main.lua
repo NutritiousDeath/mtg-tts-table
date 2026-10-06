@@ -23,6 +23,9 @@
     !endturn     end your turn (active player)
     !layout 4    four players, one per side (White, Red, Green, Blue)
     !layout 2    two players facing each other (White, Green)
+    !search      search your library by name, type or rules text
+    !log         snapshot every player and save the game log to the Notebook
+    !logclear    start a fresh game log
     !rebuild     remove and respawn every table tile (if one looks wrong)
     !reset       wipe the game state back to a fresh Commander game
 --]]
@@ -42,6 +45,9 @@ require("src/importer")
 require("src/archidekt")
 require("src/game")
 require("src/dice")
+require("src/mana")
+require("src/libsearch")
+require("src/gamelog")
 require("src/tokens")
 require("src/ui")
 require("src/importcards")
@@ -64,9 +70,10 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.70 (playtest 2: reimport, delete, rounds, top card)"
+SCRIPT_VERSION = "0.71 (Moxfield links, mana chips, library search, game log, end step)"
 
 function onLoad(saved)
+  GameLog.setup()
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)
   local restored = GameState.restore(saved)
   if restored then
@@ -79,6 +86,11 @@ function onLoad(saved)
   Actions.ensure()
   Turns.ensureStrips()
   ImportCards.ensure()
+  ManaChips.ensure()
+  TableSetup.applyBackground()
+  for _, obj in ipairs(getObjects()) do
+    LibSearch.addMenu(obj)
+  end
   TableUI.build()
   Counters.registerHotkeys()
   Turns.registerHotkeys()
@@ -99,6 +111,7 @@ function onObjectSpawn(obj)
   Wait.frames(function()
     if obj ~= nil and not obj.isDestroyed() then
       Counters.setup(obj)
+      LibSearch.addMenu(obj)
     end
   end, 1)
 end
@@ -115,6 +128,7 @@ end
 
 function onObjectDrop(color, obj)
   Zones.onDrop(color, obj)
+  ManaChips.onDrop(obj)
 end
 
 function onObjectEnterZone(zone, obj)
@@ -282,26 +296,47 @@ function onChat(message, sender)
     Trackers.ensureTableDisplay()
     Actions.ensure()
     Turns.ensureStrips()
+    ManaChips.ensure()
     TableUI.build()
     broadcastToAll("Table layout: " .. (layout == "four" and "4 players" or "2 players")
       .. " (" .. table.concat(TableSetup.activeSeats(), ", ") .. ")", { 0.7, 0.85, 1 })
     return false
   end
 
+  if message == "!log" then
+    GameLog.snapshot("requested by " .. tostring(sender.color))
+    if GameLog.write() then
+      broadcastToColor("Game log saved to the Notebook tab \"MTG Game Log\".", sender.color, { 0.7, 0.85, 1 })
+    end
+    return false
+  end
+
+  if message == "!logclear" then
+    GameLog.clear()
+    broadcastToColor("Game log cleared.", sender.color, { 0.7, 0.85, 1 })
+    return false
+  end
+
+  if message == "!search" then
+    LibSearch.open(sender.color)
+    return false
+  end
+
   if message == "!rebuild" then
     -- Tiles are kept between loads (faster); this forces a fresh set.
-    for _, tag in ipairs({ "Tracker", "ActionTile", "TurnStrip", "DeckImporter" }) do
+    for _, tag in ipairs({ "Tracker", "ActionTile", "TurnStrip", "DeckImporter", "ManaTile" }) do
       for _, obj in ipairs(getObjectsWithTag(tag)) do
         obj.destruct()
       end
     end
     local t = GameState.data.table
-    t.trackerTiles, t.taxTiles, t.partnerChips, t.actionTiles, t.turnStrips = {}, {}, {}, {}, {}
+    t.trackerTiles, t.taxTiles, t.partnerChips, t.actionTiles, t.turnStrips, t.manaTiles = {}, {}, {}, {}, {}, {}
     Wait.frames(function()
       Trackers.ensureTableDisplay()
       Actions.ensure()
       Turns.ensureStrips()
       ImportCards.ensure()
+      ManaChips.ensure()
       broadcastToAll("Table tiles rebuilt.", { 0.7, 0.85, 1 })
     end, 3)
     return false

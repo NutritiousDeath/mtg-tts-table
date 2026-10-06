@@ -83,9 +83,12 @@ local REGIONS = {
   act_mill = { side = 25.3, depth = 15.2, w = 3, d = 4.2 },
   act_untap = { side = 25.3, depth = 10.5, w = 3, d = 4.2 },
   act_tokens = { side = 25.3, depth = 5.8, w = 3, d = 4.2 },
+  -- Mana chip dispenser (mana.lua), left of the command zones.
+  mana = { side = -19.8, depth = 30, w = 6.4, d = 4.4 },
   -- turn tiles to the right of the tracker (actions.lua)
-  act_next = { side = 9.2, depth = 31, w = 3, d = 4.2 },
-  act_endturn = { side = 12.8, depth = 31, w = 3, d = 4.2 },
+  act_next = { side = 8.6, depth = 31, w = 3, d = 4.2 },
+  act_endstep = { side = 11.9, depth = 31, w = 3, d = 4.2 },
+  act_endturn = { side = 15.2, depth = 31, w = 3, d = 4.2 },
   -- clickable life / poison / commander damage tracker, in front of the
   -- playmat toward the table center (trackers.lua)
   tracker = { side = 0, depth = 31, w = 14, d = 4.8 },
@@ -145,6 +148,29 @@ function TableSetup.seat(color)
 end
 
 -- An area for a seat: { center = world position, w, d, yaw }, or nil.
+-- Custom background (a 360-degree equirectangular image, 2:1, in the repo).
+-- Empty = leave TTS's background alone. Set when the image is pushed.
+TableSetup.BACKGROUND_URL = ""
+
+function TableSetup.applyBackground()
+  if TableSetup.BACKGROUND_URL ~= "" and Backgrounds and Backgrounds.setCustomURL then
+    pcall(function() Backgrounds.setCustomURL(TableSetup.BACKGROUND_URL) end)
+  end
+end
+
+-- Is a world position inside one of a seat's areas?
+function TableSetup.inRegion(color, name, pos)
+  local s = TableSetup.seat(color)
+  local r = TableSetup.region(color, name)
+  if s == nil or r == nil then
+    return false
+  end
+  local dx, dz = pos.x - r.center.x, pos.z - r.center.z
+  local side = dx * s.right.x + dz * s.right.z
+  local depth = dx * s.inward.x + dz * s.inward.z
+  return math.abs(side) <= r.w / 2 and math.abs(depth) <= r.d / 2
+end
+
 function TableSetup.region(color, name)
   local s = TableSetup.seat(color)
   local r = REGIONS[ALIASES[name] or name]

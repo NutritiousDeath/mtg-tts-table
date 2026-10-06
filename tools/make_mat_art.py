@@ -121,6 +121,7 @@ ACTIONS = {
     "tokens": ("TOKENS", "SEARCH & CREATE"),
     "next": ("NEXT STEP", "YOUR TURN ONLY"),
     "endturn": ("END TURN", "YOUR TURN ONLY"),
+    "endstep": ("END STEP", "YOUR TURN ONLY"),
     "hold": ("HOLD", "STOP TO RESPOND"),
 }
 ACTION_W, ACTION_D, ACTION_PPU = 3.0, 4.2, 200

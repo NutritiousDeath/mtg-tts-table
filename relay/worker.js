@@ -33,7 +33,11 @@
  *      TOKEN  <i>  <name>  <type line>  <image url>  <card JSON template>
  *    or a single line NONE when nothing matches. Templates work like /cards.
  *
- * Only Scryfall card image paths, /cards, /tokens and /archidekt/<id> are
+ * 5. Moxfield decks:  POST /moxfield  (body: the deck JSON TTS downloaded)
+ *    Returns a decklist like /archidekt. Moxfield blocks servers, so TTS
+ *    fetches the deck itself and the relay only converts it.
+ *
+ * Only Scryfall card image paths, /cards, /tokens, /moxfield and /archidekt/<id> are
  * accepted, so this can't be used as a general-purpose proxy.
  */
 
@@ -65,6 +69,20 @@ export default {
     if (url.pathname === "/tokens") {
       try {
         return await handleTokens(url.searchParams.get("q") || "", url.host);
+      } catch (err) {
+        return new Response("ERROR\t" + String(err && err.message ? err.message : err), {
+          status: 500,
+          headers: { "Content-Type": "text/plain" },
+        });
+      }
+    }
+
+    if (url.pathname === "/moxfield") {
+      if (request.method !== "POST") {
+        return new Response("POST only", { status: 405 });
+      }
+      try {
+        return await handleMoxfield(request);
       } catch (err) {
         return new Response("ERROR\t" + String(err && err.message ? err.message : err), {
           status: 500,
@@ -399,6 +417,52 @@ async function handleTokens(q, host) {
 
 function clean(s) {
   return String(s || "").replace(/[\t\r\n]/g, " ");
+}
+
+// ---------------------------------------------------------------------------
+// /moxfield  (POST the deck JSON from api2.moxfield.com)
+// Moxfield blocks servers, so TTS downloads the deck itself and posts the
+// JSON here; this turns it into a decklist (same reply as /archidekt):
+//   "#NAME<tab><deck name>", then Commander / Deck / Tokens sections.
+// Handles both the v2 shape (commanders/mainboard/tokens) and v3 (boards).
+// ---------------------------------------------------------------------------
+
+async function handleMoxfield(request) {
+  const deck = JSON.parse(await request.text());
+  const boards = deck.boards || {};
+  const entries = (board) => {
+    if (!board) return [];
+    const cards = board.cards || board;
+    return Object.values(cards || {}).filter((e) => e && e.card);
+  };
+  const line = (e) => {
+    const c = e.card;
+    let out = String(e.quantity || 1) + " " + clean(c.name);
+    if (c.set) {
+      out += " (" + c.set + ")";
+      if (c.cn) out += " " + c.cn;
+    }
+    return out;
+  };
+  const commanders = entries(boards.commanders || deck.commanders).map(line);
+  const main = entries(boards.mainboard || deck.mainboard).map(line);
+  // Tokens: the deck's own token list (cards the deck makes), one each.
+  const tokenSrc = boards.tokens ? entries(boards.tokens).map((e) => e.card)
+    : (Array.isArray(deck.tokens) ? deck.tokens : []);
+  const seen = new Set();
+  const tokens = [];
+  for (const t of tokenSrc) {
+    if (!t || !t.name) continue;
+    const key = t.name + "|" + (t.set || "") + "|" + (t.cn || "");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    tokens.push("1 " + clean(t.name) + (t.set ? " (" + t.set + ")" + (t.cn ? " " + t.cn : "") : ""));
+  }
+  const out = ["Commander", ...commanders, "", "Deck", ...main];
+  if (tokens.length) out.push("", "Tokens", ...tokens);
+  return new Response("#NAME\t" + clean(deck.name || "Moxfield deck") + "\n" + out.join("\n"), {
+    headers: { "Content-Type": "text/plain; charset=utf-8" },
+  });
 }
 
 // ---------------------------------------------------------------------------

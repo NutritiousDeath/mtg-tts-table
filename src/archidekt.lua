@@ -35,6 +35,54 @@ function Archidekt.isMoxfieldLink(text)
   return text ~= nil and text:find("moxfield%.com/decks/") ~= nil
 end
 
+-- The deck id in a Moxfield link, or nil.
+function Archidekt.moxfieldId(text)
+  return text and text:match("moxfield%.com/decks/([%w_%-]+)")
+end
+
+-- Moxfield link import. Moxfield blocks servers (so the relay can't fetch
+-- it), but answers TTS directly, like other importers do. TTS downloads the
+-- deck JSON and posts it to the relay, which turns it into a decklist (TTS
+-- is too slow to decode that much JSON itself). cb(text, name) or
+-- cb(nil, error).
+function Archidekt.fetchMoxfield(id, cb)
+  local host = Importer and Importer.RELAY_HOST or ""
+  if host == "" then
+    cb(nil, "Moxfield links need the relay. Export the deck from Moxfield (Export > Copy for MTGO) and paste it instead.")
+    return
+  end
+  WebRequest.custom("https://api2.moxfield.com/v2/decks/all/" .. id .. "/", "GET", true, nil, {
+    ["User-Agent"] = "MTG-TTS-Table/1.0",
+    ["Accept"] = "application/json",
+    ["Referer"] = "https://www.moxfield.com/",
+  }, function(req)
+    if req.is_error or req.response_code ~= 200 or req.text == nil or req.text == "" then
+      local code = tostring(req.response_code)
+      local why = (req.response_code == 404) and "Moxfield couldn't find that deck (is it public?)."
+        or ("Moxfield refused the request (" .. code .. "). Export the deck from Moxfield (Export > Copy for MTGO) and paste it instead.")
+      cb(nil, why)
+      return
+    end
+    WebRequest.custom("https://" .. host .. "/moxfield", "POST", true, req.text, {
+      ["Content-Type"] = "application/json",
+      ["Accept"] = "text/plain",
+    }, function(r2)
+      if r2.is_error or r2.response_code ~= 200 then
+        cb(nil, "Couldn't read the Moxfield deck (relay " .. tostring(r2.response_code)
+          .. "). Has the relay been updated? You can also paste an MTGO export instead.")
+        return
+      end
+      local text, name = r2.text, nil
+      local nl = string.find(text, "\n", 1, true)
+      if nl and string.sub(text, 1, 6) == "#NAME\t" then
+        name = string.sub(text, 7, nl - 1)
+        text = string.sub(text, nl + 1)
+      end
+      cb(text, name)
+    end)
+  end)
+end
+
 -- Build decklist text from a decoded Archidekt deck. Returns text, deckName.
 function Archidekt.toDecklist(deck)
   local premier, excluded = {}, {}

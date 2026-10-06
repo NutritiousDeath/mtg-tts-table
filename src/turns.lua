@@ -367,7 +367,7 @@ function Turns.pendingLabel()
     return nil
   end
   local i
-  if t.pending.kind == "end" and t.stepIndex < STEP_INDEX["end"] then
+  if (t.pending.kind == "end" or t.pending.kind == "endstep") and t.stepIndex < STEP_INDEX["end"] then
     i = STEP_INDEX["end"]
   else
     i = nextIndex(true)
@@ -401,6 +401,14 @@ local function commit(kind)
   t.pending = nil
   t.resume = nil
   hideAllPrompts()
+  if kind == "endstep" then
+    -- END STEP: go to the end step and stop there (end step triggers).
+    if t.stepIndex < STEP_INDEX["end"] then
+      t.stepIndex = STEP_INDEX["end"]
+      enterStep()
+    end
+    return
+  end
   if kind == "end" then
     -- END TURN runs the rest of the turn on its own: end step, cleanup, next.
     t.autoThrough = true
@@ -451,7 +459,7 @@ function Turns.respond(color, hasResponse)
     t.resume = p.kind
     t.pending = nil
     hideAllPrompts()
-    local again = p.kind == "end" and "END TURN" or "NEXT STEP"
+    local again = p.kind == "end" and "END TURN" or (p.kind == "endstep" and "END STEP") or "NEXT STEP"
     broadcastToAll(color .. " has a response! " .. t.activeSeat .. ": click " .. again .. " when it's done.", WARN)
     Turns.render()
     return
@@ -513,7 +521,25 @@ function Turns.next(color)
     return   -- these move on by themselves
   end
   -- Carrying on after a response to END TURN: still end the turn.
-  requestMove(turn().resume == "end" and "end" or "next")
+  local resume = turn().resume
+  requestMove((resume == "end" or resume == "endstep") and resume or "next")
+end
+
+-- END STEP tile: go to the end step (after responses) and stop there.
+function Turns.toEndStep(color)
+  if not isActive(color) then
+    return
+  end
+  local t = turn()
+  local id = Turns.STEPS[t.stepIndex].id
+  if id == "untap" or id == "draw" or id == "cleanup" then
+    return
+  end
+  if t.stepIndex >= STEP_INDEX["end"] then
+    broadcastToColor("You're already in the end step. NEXT STEP or END TURN passes the turn.", color, WARN)
+    return
+  end
+  requestMove("endstep")
 end
 
 function Turns.endTurn(color)

@@ -49,7 +49,7 @@ local function importPanel(color)
        allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="16 16 16 16" spacing="10" childForceExpandHeight="false">
     <Text fontSize="22" fontStyle="Bold" alignment="MiddleLeft" preferredHeight="32">Import Commander Deck</Text>
-    <Text fontSize="13" alignment="MiddleLeft" preferredHeight="36" color="#8B98A9">Paste an Archidekt deck link, or a decklist (plain text, or a Moxfield / Archidekt export). The commander is found from a "Commander" header, a [Commander] / *CMDR* tag, or Moxfield's MTGO export.</Text>
+    <Text fontSize="13" alignment="MiddleLeft" preferredHeight="36" color="#8B98A9">Paste an Archidekt or Moxfield deck link, or a decklist (plain text, or a Moxfield / Archidekt export). The commander is found from a "Commander" header, a [Commander] / *CMDR* tag, or Moxfield's MTGO export.</Text>
     <InputField onValueChanged="ui_deckText"
                 lineType="MultiLineNewline"
                 characterLimit="0"
@@ -72,7 +72,7 @@ function TableUI.build()
     table.insert(panels, importPanel(color))
   end
   local xml = HEADER .. table.concat(panels) .. GameFlow.xml() .. Turns.xml() .. Actions.xml()
-    .. Dice.xml() .. Tokens.xml()
+    .. Dice.xml() .. Tokens.xml() .. LibSearch.xml()
   -- Remember every element that's shown to one seat only (see
   -- TableUI.refreshVisibility).
   TableUI.privateIds = {}
@@ -149,8 +149,20 @@ function ui_importDeck(player)
   end
   local text = pastedText[color]
 
-  if Archidekt.isMoxfieldLink(text) then
-    broadcastToColor("Moxfield blocks importing by link. In Moxfield: Export > Copy for MTGO (or MTGA), then paste the list here.", color, { 1, 0.6, 0.2 })
+  local moxId = Archidekt.moxfieldId(text)
+  if moxId then
+    closeImport(color)
+    broadcastToColor("Fetching Moxfield deck " .. moxId .. "...", color, { 0.7, 0.85, 1 })
+    Archidekt.fetchMoxfield(moxId, function(list, nameOrError)
+      if list == nil then
+        broadcastToColor(nameOrError, color, { 1, 0.3, 0.3 })
+        return
+      end
+      if nameOrError then
+        broadcastToColor("Moxfield: " .. nameOrError, color, { 0.7, 0.85, 1 })
+      end
+      Importer.importDeck(color, list)
+    end)
     return
   end
 

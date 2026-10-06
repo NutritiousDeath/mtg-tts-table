@@ -263,6 +263,17 @@ function Zones.describeObject(obj)
     obj.getName(), p.x, p.y, p.z, describe(Zones.regionAt(p)), loc and describe(loc) or "nothing yet")
 end
 
+-- Loose cards tracked in each of a seat's areas (piles count as one).
+function Zones.countsFor(color)
+  local counts = {}
+  for _, loc in pairs(where) do
+    if loc.seat == color then
+      counts[loc.region] = (counts[loc.region] or 0) + 1
+    end
+  end
+  return counts
+end
+
 function Zones.report(color)
   local counts = {}
   for _, loc in pairs(where) do
