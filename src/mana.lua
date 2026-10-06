@@ -1,21 +1,24 @@
 --[[
   mana.lua
-  Reusable mana chips. Each seat has a MANA tile left of its command zones
-  showing six chips (W U B R G and colorless C):
-    click a chip       take 1 of that color
-    right-click        take 3
-  Chips land just in front of the tile and stack by color. To put chips
-  away, drop them back on any MANA tile, or right-click a chip > Return chip
-  (works for everyone, no promotion needed).
+  Mana counters. Each seat has a MANA tile left of its command zones showing
+  six colors (W U B R G and colorless C). One chip per color counts that
+  mana with a number on it:
+    MANA tile: click a color   +1 (puts that color's chip out the first time)
+               right-click     -1
+    the chip:  click +1, right-click -1
+  Mana pools empty when the step changes (the rules do this too), so chips
+  go back to 0 on their own. To put a chip away, drop it on any MANA tile
+  or right-click it > Return chip (no promotion needed).
   Art: assets/mana/ (tools/make_mana_art.py).
 --]]
 
 ManaChips = {}
 
 local ART_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/mana/"
-local ART_VERSION = "?v=1"
+local ART_VERSION = "?v=2"
 local TILE_W = 6.4
-local CHIP_W = 1.05
+local CHIP_W = 1.6
+local NUMBER_DZ = 0.07   -- the dark center sits a little below the middle
 local INFO = { 0.75, 0.8, 0.9 }
 
 -- Same order and spots as tools/make_mana_art.py (x right, z toward the player).
@@ -54,40 +57,114 @@ local function chipMenu(obj)
   obj.addContextMenuItem("Return chip", function() ManaChips.returnChip(obj) end)
 end
 
--- Spawn n chips of a color in front of a seat's MANA tile, stacked.
-function ManaChips.take(color, key, n)
+-- A chip remembers its seat, color and count in its memo: "Red|G|3".
+local function chipInfo(obj)
+  local seat, key, n = tostring(obj.memo or ""):match("^(%a+)|(%a)|(%-?%d+)$")
+  return seat, key, tonumber(n) or 0
+end
+
+local function setCount(obj, n)
+  local seat, key = chipInfo(obj)
+  n = math.max(0, n)
+  obj.memo = tostring(seat) .. "|" .. tostring(key) .. "|" .. n
+  ManaChips.renderChip(obj)
+end
+
+-- The chip for a seat's color, if it's on the table.
+local function findChip(color, key)
+  for _, obj in ipairs(getObjectsWithTag("ManaChip")) do
+    local seat, k = chipInfo(obj)
+    if seat == color and k == key and not obj.isDestroyed() then
+      return obj
+    end
+  end
+  return nil
+end
+
+-- Draw the count on a chip (click +1, right-click -1).
+function ManaChips.renderChip(obj)
+  if obj == nil or obj.isDestroyed() then
+    return
+  end
+  local seat, key, n = chipInfo(obj)
+  local c = BY_KEY[key or ""]
+  obj.clearButtons()
+  if seat == nil or c == nil then
+    return
+  end
+  local fn = "manachip_" .. obj.getGUID()
+  _G[fn] = function(o, playerColor, alt)
+    if playerColor ~= seat then
+      broadcastToColor("That's " .. seat .. "'s mana.", playerColor, { 1, 0.6, 0.2 })
+      return
+    end
+    local _, _, cur = chipInfo(o)
+    setCount(o, cur + (alt and -1 or 1))
+  end
+  obj.setName(c.name .. ": " .. n)
+  Trackers.tileButton(obj, { label = tostring(n), click_function = fn,
+    tooltip = string.upper(c.name) .. ": " .. n .. "\nClick +1, right-click -1\nDrop on a MANA tile to put it away",
+    width = 700, height = 700, font_size = 330, color = { 0, 0, 0, 0 },
+    font_color = { 1, 1, 1 }, hover_color = { 1, 1, 1, 0.08 }, press_color = { 1, 1, 1, 0.16 } }, 0, NUMBER_DZ)
+end
+
+-- Put a seat's chip for a color out with a starting count.
+local function spawnChip(color, key, n)
   local c = BY_KEY[key]
   local r = TableSetup.region(color, "mana")
   local s = TableSetup.seat(color)
   if c == nil or r == nil then
     return
   end
-  -- In front of the tile, toward the battlefield, under this chip's column.
-  local depthOff = -(r.d / 2 + 0.9)
+  -- In front of the tile, toward the battlefield, under this color's column.
+  local depthOff = -(r.d / 2 + 1.1)
   local px = r.center.x + s.right.x * c.x + s.inward.x * depthOff
   local pz = r.center.z + s.right.z * c.x + s.inward.z * depthOff
-  for i = 1, n do
-    local obj = spawnObject({
-      type = "Custom_Token",
-      position = { px, TableSetup.SURFACE_TOP + 0.6 + i * 0.25, pz },
-      rotation = { 0, s.yaw, 0 },
-      sound = false,
-      callback_function = function(o)
-        o.setName(c.name)
-        o.addTag("ManaChip")
-        chipMenu(o)
-        Wait.condition(function()
-          local b = o.getBoundsNormalized()
-          local w = b and b.size and b.size.x or 0
-          if w > 0.05 then
-            local k = CHIP_W / (w / o.getScale().x)
-            o.setScale({ k, 1, k })
-          end
-        end, function() return o.isDestroyed() or not o.loading_custom end, 10)
-      end,
-    })
-    obj.setCustomObject({ image = chipUrl(key), thickness = 0.15, merge_distance = 5, stackable = true })
+  local obj = spawnObject({
+    type = "Custom_Token",
+    position = { px, TableSetup.SURFACE_TOP + 0.6, pz },
+    rotation = { 0, s.yaw, 0 },
+    sound = false,
+    callback_function = function(o)
+      o.addTag("ManaChip")
+      o.memo = color .. "|" .. key .. "|" .. n
+      chipMenu(o)
+      Wait.condition(function()
+        local b = o.getBoundsNormalized()
+        local w = b and b.size and b.size.x or 0
+        if w > 0.05 then
+          local k = CHIP_W / (w / o.getScale().x)
+          o.setScale({ k, 1, k })
+        end
+        ManaChips.renderChip(o)
+      end, function() return o.isDestroyed() or not o.loading_custom end, 10)
+    end,
+  })
+  obj.setCustomObject({ image = chipUrl(key), thickness = 0.15, merge_distance = 5, stackable = false })
+end
+
+-- MANA tile click: +delta on that color (puts the chip out if needed).
+function ManaChips.add(color, key, delta)
+  local chip = findChip(color, key)
+  if chip then
+    local _, _, n = chipInfo(chip)
+    setCount(chip, n + delta)
+  elseif delta > 0 then
+    spawnChip(color, key, delta)
   end
+end
+
+-- Mana empties between steps: every chip back to 0. True if any changed.
+function ManaChips.emptyAll()
+  local any = false
+  for _, obj in ipairs(getObjectsWithTag("ManaChip")) do
+    local _, _, n = chipInfo(obj)
+    if n ~= 0 then
+      any = true
+      setCount(obj, 0)
+    end
+  end
+  return any
 end
 
 local function renderTile(color)
@@ -104,10 +181,10 @@ local function renderTile(color)
         broadcastToColor("Those are " .. color .. "'s mana chips.", playerColor, { 1, 0.6, 0.2 })
         return
       end
-      ManaChips.take(color, c.key, alt and 3 or 1)
+      ManaChips.add(color, c.key, alt and -1 or 1)
     end
     Trackers.tileButton(tile, { label = "", click_function = fn,
-      tooltip = string.upper(c.name) .. "\nClick: take 1 chip\nRight-click: take 3\nDrop chips back here to put them away",
+      tooltip = string.upper(c.name) .. "\nClick: +1 (puts the chip out)\nRight-click: -1\nDrop a chip back here to put it away",
       width = 440, height = 440, color = { 0, 0, 0, 0 }, hover_color = { 1, 1, 1, 0.1 },
       press_color = { 1, 1, 1, 0.2 } }, c.x, c.z)
   end
@@ -121,9 +198,10 @@ function ManaChips.ensure()
       draw = function() renderTile(color) end })
   end
   Trackers.syncTiles("ManaTile", { { registry = tiles(), wanted = wanted } })
-  -- Chips already on the table (after a load) get their menu back.
+  -- Chips already on the table (after a load) get their menu and number back.
   for _, obj in ipairs(getObjectsWithTag("ManaChip")) do
     chipMenu(obj)
+    ManaChips.renderChip(obj)
   end
 end
 
@@ -140,3 +218,10 @@ function ManaChips.onDrop(obj)
     end
   end
 end
+
+-- The rules empty every mana pool when a step ends.
+Events.on("stepStarted", function()
+  if ManaChips.emptyAll() then
+    printToAll("MTG > Mana pools emptied (new step).", INFO)
+  end
+end)

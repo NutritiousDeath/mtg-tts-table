@@ -70,7 +70,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.71 (Moxfield links, mana chips, library search, game log, end step)"
+SCRIPT_VERSION = "0.72 (numbered mana chips)"
 
 function onLoad(saved)
   GameLog.setup()

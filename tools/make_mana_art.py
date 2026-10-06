@@ -27,7 +27,7 @@ def font(px):
     return f
 
 
-def chip(letter, rim, face, size=256):
+def chip(letter, rim, face, size=256, counter=True):
     S = size
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
@@ -50,12 +50,17 @@ def chip(letter, rim, face, size=256):
         a = k * math.pi / 4
         cx, cy = S / 2 + math.cos(a) * (S / 2 - 11), S / 2 + math.sin(a) * (S / 2 - 11)
         d.ellipse([cx - 6, cy - 6, cx + 6, cy + 6], fill=rim + (255,))
-    # Letter with glow.
-    f = font(S * 0.46)
+    # Letter with glow. On the table chip the letter sits small at the top
+    # and the middle stays dark for the count (drawn live by mana.lua).
+    if counter:
+        f, pos = font(S * 0.17), (S / 2, S * 0.25)
+        ImageDraw.Draw(img).ellipse([S * 0.3, S * 0.34, S * 0.7, S * 0.74], fill=(8, 10, 16, 255))
+    else:
+        f, pos = font(S * 0.46), (S / 2, S / 2 + 4)
     t = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    ImageDraw.Draw(t).text((S / 2, S / 2 + 4), letter, font=f, fill=rim + (255,), anchor="mm")
-    img.alpha_composite(t.filter(ImageFilter.GaussianBlur(6)))
-    ImageDraw.Draw(img).text((S / 2, S / 2 + 4), letter, font=f, fill=(245, 250, 255, 255), anchor="mm")
+    ImageDraw.Draw(t).text(pos, letter, font=f, fill=rim + (255,), anchor="mm")
+    img.alpha_composite(t.filter(ImageFilter.GaussianBlur(max(2, S // 50))))
+    ImageDraw.Draw(img).text(pos, letter, font=f, fill=(245, 250, 255, 255), anchor="mm")
     return img
 
 
@@ -84,7 +89,7 @@ def tile():
     img.alpha_composite(border)
     ImageDraw.Draw(img).text((W / 2, 22), "MANA", font=font(22), fill=(90, 240, 255, 255), anchor="mm")
     for (key, letter, rim, face), (_, x, z) in zip(CHIPS, CHIP_SLOTS):
-        c = chip(letter, rim, face, 128)
+        c = chip(letter, rim, face, 128, counter=False)
         cx, cy = W / 2 + x * PPU, H / 2 + z * PPU
         img.alpha_composite(c, (int(cx - 64), int(cy - 64)))
     return img
