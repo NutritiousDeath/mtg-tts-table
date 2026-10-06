@@ -48,6 +48,7 @@ require("src/dice")
 require("src/mana")
 require("src/libsearch")
 require("src/gamelog")
+require("src/stack")
 require("src/tokens")
 require("src/ui")
 require("src/importcards")
@@ -70,7 +71,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.72 (numbered mana chips)"
+SCRIPT_VERSION = "0.73 (the stack)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -87,6 +88,7 @@ function onLoad(saved)
   Turns.ensureStrips()
   ImportCards.ensure()
   ManaChips.ensure()
+  Stack.ensure()
   TableSetup.applyBackground()
   for _, obj in ipairs(getObjects()) do
     LibSearch.addMenu(obj)
@@ -123,10 +125,12 @@ end
 
 -- Card movement tracking (zones.lua).
 function onObjectPickUp(color, obj)
+  Stack.onPickUp(color, obj)
   Zones.onPickUp(color, obj)
 end
 
 function onObjectDrop(color, obj)
+  Stack.onDrop(color, obj)
   Zones.onDrop(color, obj)
   ManaChips.onDrop(obj)
 end

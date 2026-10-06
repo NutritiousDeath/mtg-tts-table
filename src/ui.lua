@@ -72,7 +72,7 @@ function TableUI.build()
     table.insert(panels, importPanel(color))
   end
   local xml = HEADER .. table.concat(panels) .. GameFlow.xml() .. Turns.xml() .. Actions.xml()
-    .. Dice.xml() .. Tokens.xml() .. LibSearch.xml()
+    .. Dice.xml() .. Tokens.xml() .. LibSearch.xml() .. Stack.xml()
   -- Remember every element that's shown to one seat only (see
   -- TableUI.refreshVisibility).
   TableUI.privateIds = {}
@@ -88,6 +88,7 @@ function TableUI.build()
   Wait.time(function()
     GameFlow.refreshUI()
     Turns.render()
+    Stack.render()
   end, 1)
 end
 

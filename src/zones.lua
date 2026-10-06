@@ -94,6 +94,10 @@ end
 -- The area containing a world position: { seat, region }, or a "table"
 -- location if it's outside every area.
 function Zones.regionAt(pos)
+  -- The STACK mat in the middle of the table (stack.lua).
+  if Stack and Stack.contains(pos) then
+    return { seat = nil, region = "stack" }
+  end
   for _, color in ipairs(TableSetup.activeSeats()) do
     local s = TableSetup.seat(color)
     for _, name in ipairs(TRACKED_REGIONS) do

@@ -2,7 +2,7 @@
   dice.lua
   Dice roller: "Roll Dice" (screen, top left) opens a panel only you see.
   Pick a die (d4 d6 d8 d10 d12 d20) and how many, then ROLL: real dice drop
-  into the middle of the table (the open space between the four playmats),
+  into the middle of the table (beside the STACK mat),
   tumble, and when they stop the result is announced to everyone:
       "Red rolled 2d6: 3 + 5 = 8"
   Your dice are tinted your seat color and stay until your next roll (or
@@ -14,7 +14,9 @@ Dice = {}
 local TYPES = { 4, 6, 8, 10, 12, 20 }
 local MAX_DICE = 10
 local DROP_HEIGHT = 7
-local SPREAD = 4            -- dice land within this distance of the center
+local SPREAD = 2.5          -- dice land within this distance of LAND
+-- Beside the STACK mat in the middle of the table (stack.lua), not on it.
+local LAND = { x = 9, z = 0 }
 local INFO = { 0.75, 0.8, 0.9 }
 local SEAT_TINT = {
   White = { 0.85, 0.87, 0.92 }, Red = { 0.86, 0.33, 0.33 },
@@ -93,7 +95,7 @@ function Dice.roll(color, count, sides)
     local r = math.random() * SPREAD
     local obj = spawnObject({
       type = "Die_" .. sides,
-      position = { math.cos(a) * r, TableSetup.SURFACE_TOP + DROP_HEIGHT + i * 0.6, math.sin(a) * r },
+      position = { LAND.x + math.cos(a) * r, TableSetup.SURFACE_TOP + DROP_HEIGHT + i * 0.6, LAND.z + math.sin(a) * r },
       rotation = { math.random(0, 359), math.random(0, 359), math.random(0, 359) },
       scale = { 1.3, 1.3, 1.3 },
       sound = i == 1,

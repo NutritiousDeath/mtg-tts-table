@@ -247,6 +247,9 @@ function Counters.setup(obj)
   obj.addContextMenuItem("Clear counters", function() Counters.clear(obj) end)
   -- Anyone can delete a card this way (TTS normally needs a promoted player).
   obj.addContextMenuItem("Delete card", function(playerColor) Counters.deleteCard(obj, playerColor) end)
+  if Stack then
+    Stack.addCardMenu(obj)
+  end
   Counters.render(obj)
 end
 

@@ -298,7 +298,8 @@ local function autoAdvance(delay)
   local num, idx = t.number, t.stepIndex
   Wait.time(function()
     local now = turn()
-    if now.number == num and now.stepIndex == idx and GameState.data.started and not now.pending then
+    if now.number == num and now.stepIndex == idx and GameState.data.started and not now.pending
+        and (Stack == nil or Stack.isEmpty()) then
       advance()
     end
   end, delay)
@@ -335,6 +336,15 @@ enterStep = function()
   end
 end
 
+-- Nothing moves on while spells or abilities wait on the stack.
+local function stackBusy(color)
+  if Stack and not Stack.isEmpty() then
+    broadcastToColor("Resolve the stack first (" .. Stack.size() .. " on it).", color, WARN)
+    return true
+  end
+  return false
+end
+
 local function isActive(color)
   local t = turn()
   if not GameState.data.started then
@@ -366,6 +376,9 @@ function Turns.pendingLabel()
   if not t.pending then
     return nil
   end
+  if t.pending.kind == "ask" then
+    return t.pending.label or "GO ON", t.pending.queue[t.pending.at]
+  end
   local i
   if (t.pending.kind == "end" or t.pending.kind == "endstep") and t.stepIndex < STEP_INDEX["end"] then
     i = STEP_INDEX["end"]
@@ -390,17 +403,34 @@ local function promptNext()
   local p = t.pending
   hideAllPrompts()
   local who = p.queue[p.at]
-  local to = Turns.pendingLabel()
-  UI.setValue("respondText_" .. who, t.activeSeat .. " wants to move to " .. to .. ".\nAny responses?")
+  if p.kind == "ask" then
+    UI.setValue("respondText_" .. who, tostring(p.text) .. "\nAny responses?")
+  else
+    local to = Turns.pendingLabel()
+    UI.setValue("respondText_" .. who, t.activeSeat .. " wants to move to " .. to .. ".\nAny responses?")
+  end
   showPrompt(who, true)
   Turns.render()
 end
 
+-- What runs when everyone passes on an "ask" (e.g. resolving the stack).
+-- Kept out of GameState: functions can't be saved.
+local pendingAction = nil
+
 local function commit(kind)
   local t = turn()
   t.pending = nil
-  t.resume = nil
   hideAllPrompts()
+  if kind == "ask" then
+    local action = pendingAction
+    pendingAction = nil
+    Turns.render()
+    if action then
+      action()
+    end
+    return
+  end
+  t.resume = nil
   if kind == "endstep" then
     -- END STEP: go to the end step and stop there (end step triggers).
     if t.stepIndex < STEP_INDEX["end"] then
@@ -423,6 +453,10 @@ end
 
 local function requestMove(kind)
   local t = turn()
+  if t.pending and t.pending.kind == "ask" then
+    broadcastToColor("Waiting for answers on: " .. tostring(t.pending.text), t.activeSeat, WARN)
+    return
+  end
   if t.pending then
     broadcastToAll(t.activeSeat .. " moves on without waiting.", INFO)
     commit(t.pending.kind)
@@ -445,11 +479,65 @@ local function requestMove(kind)
   promptNext()
 end
 
+-- The stack just emptied: a step that moves on by itself (untap, draw, or
+-- the end step during END TURN) carries on.
+function Turns.onStackEmpty()
+  local t = turn()
+  if not GameState.data.started or t.stepIndex == nil then
+    return
+  end
+  local id = Turns.STEPS[t.stepIndex].id
+  if id == "untap" or id == "draw" or (id == "end" and t.autoThrough) then
+    autoAdvance(0.6)
+  end
+end
+
+-- Ask everyone else (in turn order after `from`) for responses before
+-- something happens, with the same pop-up as NEXT STEP. onAllPass runs
+-- when every player answers NO RESPONSE. `label` shows on the turn strips
+-- ("RESOLVE? WAITING ON RED"). Asking again while it's waiting goes now.
+function Turns.ask(from, text, label, onAllPass)
+  local t = turn()
+  if t.pending then
+    if t.pending.kind == "ask" and t.pending.from == from then
+      broadcastToAll(from .. " goes ahead without waiting.", INFO)
+      commit("ask")
+    else
+      broadcastToColor("Wait for the current question to be answered first.", from, WARN)
+    end
+    return
+  end
+  local queue, c = {}, from
+  for _ = 1, #players() do
+    c = nextPlayer(c)
+    if c == from then
+      break
+    end
+    table.insert(queue, c)
+  end
+  pendingAction = onAllPass
+  if #queue == 0 then
+    commit("ask")
+    return
+  end
+  t.pending = { kind = "ask", queue = queue, at = 1, from = from, text = text, label = label }
+  promptNext()
+end
+
 -- A player answered their pop-up.
 function Turns.respond(color, hasResponse)
   local t = turn()
   local p = t.pending
   if p == nil then
+    return
+  end
+  if hasResponse and p.kind == "ask" then
+    t.pending = nil
+    pendingAction = nil
+    hideAllPrompts()
+    broadcastToAll(color .. " has a response! Put it on the stack. " .. tostring(p.from)
+      .. " can try again when it's done.", WARN)
+    Turns.render()
     return
   end
   if hasResponse then
@@ -513,7 +601,7 @@ function Turns.respondXml()
 end
 
 function Turns.next(color)
-  if not isActive(color) then
+  if not isActive(color) or stackBusy(color) then
     return
   end
   local id = Turns.STEPS[turn().stepIndex].id
@@ -527,7 +615,7 @@ end
 
 -- END STEP tile: go to the end step (after responses) and stop there.
 function Turns.toEndStep(color)
-  if not isActive(color) then
+  if not isActive(color) or stackBusy(color) then
     return
   end
   local t = turn()
@@ -543,7 +631,7 @@ function Turns.toEndStep(color)
 end
 
 function Turns.endTurn(color)
-  if not isActive(color) then
+  if not isActive(color) or stackBusy(color) then
     return
   end
   local id = Turns.STEPS[turn().stepIndex].id
