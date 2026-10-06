@@ -74,7 +74,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.76 (trigger fix: long rules text)"
+SCRIPT_VERSION = "0.77 (table underside fix)"
 
 function onLoad(saved)
   GameLog.setup()

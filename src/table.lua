@@ -369,7 +369,7 @@ end
 -- towers and stone legs (tools/make_table_model.py). One locked custom model,
 -- kept between loads; replaced when its files change version.
 local FRAME_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/table/"
-local FRAME_VERSION = "?v=2"
+local FRAME_VERSION = "?v=3"
 
 function TableSetup.ensureFrame()
   local state = GameState.data.table

@@ -81,7 +81,17 @@ def frustum(cx, cz, h0, h1, y0, y1):
     hi = [(cx - h1, y1, cz - h1), (cx + h1, y1, cz - h1), (cx + h1, y1, cz + h1), (cx - h1, y1, cz + h1)]
     for i in range(4):
         j = (i + 1) % 4
-        quad(lo[i], hi[i], hi[j], lo[j])
+        if y1 > y0:
+            quad(lo[i], hi[i], hi[j], lo[j])
+        else:
+            # Built downward: reverse the winding so the faces point outward
+            # (TTS hides back faces; inside-out sides looked like thin slivers).
+            quad(lo[j], hi[j], hi[i], lo[i])
+
+
+def cap_bottom(cx, cz, h, y):
+    """Flat square facing down (closes the bottom of a column)."""
+    quad((cx - h, y, cz - h), (cx + h, y, cz - h), (cx + h, y, cz + h), (cx - h, y, cz + h))
 
 
 # --- Rim: four slabs around the surface, raised a little above it, with an
@@ -138,6 +148,8 @@ for sx in (-1, 1):
     for sz in (-1, 1):
         # buttress legs under each corner
         frustum(sx * 40, sz * 40, 3.0, 2.0, bot - 1.5, bot - 26)
+        cap_bottom(sx * 40, sz * 40, 2.0, bot - 26)
+cap_bottom(0, 0, 22, bot - 30)
 
 # --- Write OBJ (y up, like TTS).
 os.makedirs(OUT, exist_ok=True)
