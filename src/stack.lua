@@ -144,7 +144,7 @@ function Stack.render()
     local it = r <= shown and list[i] or nil
     UI.setAttribute("stackRow_" .. r, "active", it and "true" or "false")
     if it then
-      local tag = it.kind == "ability" and " (ability)" or ""
+      local tag = it.trigger and " (trigger)" or (it.kind == "ability" and " (ability)" or "")
       UI.setValue("stackText_" .. r, (r == 1 and "TOP  " or (i .. ".  ")) .. it.name .. tag .. "  -  " .. it.controller)
     end
   end
@@ -170,6 +170,7 @@ function Stack.pushCard(obj, controller, from)
   controller = controller or "?"
   table.insert(items(), { guid = obj.getGUID(), kind = "card", name = obj.getName(), controller = controller })
   log(controller .. " casts " .. obj.getName() .. " (on the stack).")
+  Events.emit("spellCast", { card = obj, controller = controller })
   -- A commander cast from its command zone: its tax goes up by 2.
   if from and from.region == "command" then
     for _, color in ipairs(TableSetup.activeSeats()) do
@@ -186,7 +187,12 @@ end
 
 -- An ability (from a card, or a trigger in Phase 6) goes on the stack as a
 -- card-sized item showing the source card's art. text = its rules text.
-function Stack.pushAbility(controller, sourceName, text, image, onReady)
+-- An ability (from a card, or a trigger found by triggers.lua) goes on the
+-- stack as a card-sized item showing the source card's art.
+-- text = its rules text; opts.trigger = true labels it TRIGGER.
+function Stack.pushAbility(controller, sourceName, text, image, opts)
+  opts = opts or {}
+  local label = opts.trigger and "TRIGGER" or "ABILITY"
   local pos = { MAT.x, TableSetup.SURFACE_TOP + 1, MAT.z }
   local obj = spawnObject({
     type = "Custom_Token",
@@ -194,11 +200,9 @@ function Stack.pushAbility(controller, sourceName, text, image, onReady)
     rotation = { 0, MAT_YAW, 0 },
     sound = false,
     callback_function = function(o)
-      o.setName(sourceName .. " (ability)")
+      o.setName(sourceName .. (opts.trigger and " (trigger)" or " (ability)"))
       o.setDescription(text or "")
       o.addTag("StackAbility")
-      table.insert(items(), { guid = o.getGUID(), kind = "ability", name = sourceName, controller = controller,
-        text = text })
       Wait.condition(function()
         local b = o.getBoundsNormalized()
         local w = b and b.size and b.size.x or 0
@@ -206,19 +210,25 @@ function Stack.pushAbility(controller, sourceName, text, image, onReady)
           local k = ABILITY_W / (w / o.getScale().x)
           o.setScale({ k, 1, k })
         end
-        Trackers.tileButton(o, { label = "ABILITY", click_function = "trk_noop",
+        Trackers.tileButton(o, { label = label, click_function = "trk_noop",
           tooltip = sourceName .. "\n" .. tostring(text or ""), width = 900, height = 160, font_size = 120,
           color = { 0.04, 0.06, 0.1, 0.9 }, font_color = { 0.35, 0.95, 1 } }, 0, -1.3)
         Stack.layout()
-        if onReady then
-          onReady(o)
-        end
       end, function() return o.isDestroyed() or not o.loading_custom end, 10)
     end,
   })
   obj.setCustomObject({ image = (image and image ~= "") and image or (ART_BASE .. "ability.png" .. ART_VERSION),
     thickness = 0.1, merge_distance = 5, stackable = false })
-  log(controller .. " puts " .. sourceName .. "'s ability on the stack.")
+  -- On the list right away (not when the picture has loaded), so the turn
+  -- can't move on in the meantime.
+  table.insert(items(), { guid = obj.getGUID(), kind = "ability", name = sourceName, controller = controller,
+    text = text, trigger = opts.trigger })
+  Stack.render()
+  if opts.trigger then
+    log(sourceName .. " triggers (" .. controller .. "): " .. tostring(text or ""))
+  else
+    log(controller .. " puts " .. sourceName .. "'s ability on the stack.")
+  end
 end
 
 -- Take item i off the list (the object itself is handled by the caller).

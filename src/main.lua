@@ -24,6 +24,8 @@
     !layout 4    four players, one per side (White, Red, Green, Blue)
     !layout 2    two players facing each other (White, Green)
     !search      search your library by name, type or rules text
+    !triggers off / on   turn trigger detection off / on
+    !triggers card       show the triggers read on the card under your mouse
     !log         snapshot every player and save the game log to the Notebook
     !logclear    start a fresh game log
     !rebuild     remove and respawn every table tile (if one looks wrong)
@@ -49,6 +51,7 @@ require("src/mana")
 require("src/libsearch")
 require("src/gamelog")
 require("src/stack")
+require("src/triggers")
 require("src/tokens")
 require("src/ui")
 require("src/importcards")
@@ -71,7 +74,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.74 (CAST mats)"
+SCRIPT_VERSION = "0.75 (trigger detection)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -319,6 +322,19 @@ function onChat(message, sender)
   if message == "!logclear" then
     GameLog.clear()
     broadcastToColor("Game log cleared.", sender.color, { 0.7, 0.85, 1 })
+    return false
+  end
+
+  if message == "!triggers off" or message == "!triggers on" then
+    Triggers.setEnabled(message == "!triggers on")
+    broadcastToAll("Trigger detection " .. (message == "!triggers on" and "ON" or "OFF") .. " (by " .. sender.color .. ").",
+      { 0.7, 0.85, 1 })
+    return false
+  end
+
+  if message == "!triggers card" then
+    local obj = sender.getHoverObject and sender.getHoverObject() or nil
+    printToColor(Triggers.describe(obj), sender.color, { 0.7, 0.85, 1 })
     return false
   end
 

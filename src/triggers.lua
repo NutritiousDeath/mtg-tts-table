@@ -1,0 +1,427 @@
+--[[
+  triggers.lua
+  Phase 6: trigger detection. The table reads each permanent's rules text
+  (stored in GM Notes by the importer) and, when something happens that a
+  card's trigger is waiting for, puts that trigger on the stack (stack.lua),
+  labelled TRIGGER, for the players to resolve. Wrong ones come off with the
+  X on the stack panel; anything missed can be added with right-click >
+  "Ability to stack".
+
+  What it watches (cards on a battlefield or lands area, face up):
+    steps     "at the beginning of your / each / each opponent's upkeep",
+              draw step, end step, beginning of combat, first main phase
+    enters    "when ~ enters"; "whenever [another] [nontoken] creature /
+              land / artifact / enchantment / permanent [you control] enters"
+              (landfall included)
+    dies      "when ~ dies"; "whenever [another] [nontoken] creature
+              [you control / an opponent controls] dies"
+    casting   "whenever you cast a [creature / noncreature / instant or
+              sorcery / artifact / enchantment] spell", "whenever an
+              opponent casts a [noncreature...] spell"
+    drawing   "whenever you / an opponent / a player draws a card"
+    also      "~ or another creature dies / enters", cumulative upkeep
+  Not yet: attack and block triggers (Phase 7, combat).
+
+  Several triggers at once go on the stack active player first, then the
+  others in turn order (so the last player's resolve first), like the rules.
+  !triggers off / !triggers on   turn it off / on for the table.
+--]]
+
+Triggers = {}
+
+local INFO = { 0.75, 0.8, 0.9 }
+
+local function enabled()
+  return not (GameState.data and GameState.data.triggersOff)
+end
+
+function Triggers.setEnabled(on)
+  GameState.data.triggersOff = not on
+end
+
+---------------------------------------------------------------------------
+-- Reading a card
+---------------------------------------------------------------------------
+
+local cache = {}   -- [guid .. name] = { abilities }, rebuilt when a card changes
+
+local function cardData(obj)
+  local notes = obj.getGMNotes() or ""
+  if notes == "" then
+    return nil
+  end
+  local ok, d = pcall(function() return JSON.decode(notes) end)
+  if ok and type(d) == "table" then
+    return d
+  end
+  return nil
+end
+
+local function plainFind(s, needle)
+  return s:find(needle, 1, true) ~= nil
+end
+
+-- Lowercase, with the card's own name (and its short name before a comma,
+-- "Kasla" for "Kasla, the Broken Halo") and "this creature" etc. as "~".
+local function normalize(text, name)
+  local t = " " .. text:lower() .. " "
+  local function swap(n)
+    if n and #n > 1 then
+      local esc = n:lower():gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1")
+      t = t:gsub(esc, "~")
+    end
+  end
+  swap(name)
+  swap(name and name:match("^([^,]+),"))
+  for _, w in ipairs({ "creature", "permanent", "artifact", "enchantment", "land", "planeswalker", "card", "token", "vehicle" }) do
+    t = t:gsub("this " .. w, "~")
+  end
+  t = t:gsub("enters the battlefield", "enters")
+  return t
+end
+
+-- Card type words used in trigger subjects.
+local SUBJECTS = { "creature", "land", "artifact", "enchantment", "permanent", "planeswalker" }
+
+-- Parse one paragraph of rules text into a trigger, or nil.
+local function parseTrigger(p)
+  -- Steps.
+  local stepWho = {
+    { "at the beginning of your upkeep", "upkeep", "you" },
+    { "at the beginning of each opponent's upkeep", "upkeep", "opp" },
+    { "at the beginning of each player's upkeep", "upkeep", "each" },
+    { "at the beginning of each upkeep", "upkeep", "each" },
+    { "at the beginning of your draw step", "draw", "you" },
+    { "at the beginning of each player's draw step", "draw", "each" },
+    { "at the beginning of each draw step", "draw", "each" },
+    { "at the beginning of your precombat main phase", "main1", "you" },
+    { "at the beginning of your first main phase", "main1", "you" },
+    { "at the beginning of combat on your turn", "combat", "you" },
+    { "at the beginning of each combat", "combat", "each" },
+    { "at the beginning of your end step", "end", "you" },
+    { "at the beginning of each opponent's end step", "end", "opp" },
+    { "at the beginning of each player's end step", "end", "each" },
+    { "at the beginning of each end step", "end", "each" },
+    { "at the beginning of the end step", "end", "each" },
+  }
+  for _, sw in ipairs(stepWho) do
+    if plainFind(p, sw[1]) then
+      return { kind = "step", step = sw[2], who = sw[3] }
+    end
+  end
+  -- "Whenever ~ or another creature [you control] dies / enters".
+  for _, verb in ipairs({ "dies", "enters" }) do
+    local subj = p:match("whenever ~ or another ([%a ]-) " .. verb)
+    if subj then
+      local word
+      for _, w in ipairs(SUBJECTS) do
+        if subj:find(w, 1, true) then
+          word = w
+        end
+      end
+      return { kind = verb, orSelf = true, another = true, subject = word or "permanent",
+        nontoken = subj:find("nontoken", 1, true) ~= nil, mine = subj:find("you control", 1, true) ~= nil,
+        theirs = subj:find("an opponent controls", 1, true) ~= nil }
+    end
+  end
+  -- Cumulative upkeep is an upkeep trigger.
+  if plainFind(p, "cumulative upkeep") then
+    return { kind = "step", step = "upkeep", who = "you" }
+  end
+  -- Drawing.
+  if plainFind(p, "whenever an opponent draws a card") then
+    return { kind = "draw", who = "opp" }
+  end
+  if plainFind(p, "whenever you draw a card") then
+    return { kind = "draw", who = "you" }
+  end
+  if plainFind(p, "whenever a player draws a card") then
+    return { kind = "draw", who = "each" }
+  end
+  -- Enters.
+  if plainFind(p, "when ~ enters") or plainFind(p, "whenever ~ enters") or plainFind(p, "when ~ and ") and plainFind(p, " enter") then
+    return { kind = "enters", self = true }
+  end
+  for _, subj in ipairs(SUBJECTS) do
+    for _, other in ipairs({ "another ", "a ", "an " }) do
+      for _, nontoken in ipairs({ "nontoken ", "" }) do
+        local head = "whenever " .. other .. nontoken .. subj
+        local s = p:find(head, 1, true)
+        if s then
+          local rest = p:sub(s + #head, s + #head + 40)
+          if rest:sub(1, 7) == " enters" or rest:find("^ you control enters") or rest:find("^ an opponent controls enters") then
+            return { kind = "enters", subject = subj, another = other == "another ", nontoken = nontoken ~= "",
+              mine = rest:find("^ you control") ~= nil, theirs = rest:find("^ an opponent controls") ~= nil }
+          end
+          if rest:sub(1, 5) == " dies" or rest:find("^ you control dies") or rest:find("^ an opponent controls dies") then
+            return { kind = "dies", subject = subj, another = other == "another ", nontoken = nontoken ~= "",
+              mine = rest:find("^ you control") ~= nil, theirs = rest:find("^ an opponent controls") ~= nil }
+          end
+        end
+      end
+    end
+  end
+  -- Dies (self).
+  if plainFind(p, "when ~ dies") or plainFind(p, "whenever ~ dies") then
+    return { kind = "dies", self = true }
+  end
+  -- Casting.
+  local oppType = p:match("whenever an opponent casts an? ([%a ]-) spell")
+  if oppType then
+    return { kind = "cast", who = "opp", spellType = oppType ~= "" and oppType or nil }
+  end
+  if plainFind(p, "whenever an opponent casts a spell") then
+    return { kind = "cast", who = "opp" }
+  end
+  local castType = p:match("whenever you cast an? ([%a ]-) spell")
+  if castType then
+    return { kind = "cast", who = "you", spellType = castType }
+  end
+  if plainFind(p, "whenever you cast a spell") then
+    return { kind = "cast", who = "you" }
+  end
+  return nil
+end
+
+-- A card's triggered abilities: { { trig, text } } (text = original wording).
+local function abilitiesOf(obj)
+  local d = cardData(obj)
+  if d == nil or type(d.oracle) ~= "string" or d.oracle == "" then
+    return {}
+  end
+  local key = obj.getGUID() .. "|" .. tostring(d.name)
+  if cache[key] then
+    return cache[key]
+  end
+  local list = {}
+  for para in (d.oracle .. "\n"):gmatch("(.-)\n") do
+    if para ~= "" then
+      local trig = parseTrigger(normalize(para, d.name))
+      if trig then
+        table.insert(list, { trig = trig, text = para })
+      end
+    end
+  end
+  cache[key] = list
+  return list
+end
+
+local function typesOf(obj)
+  local d = cardData(obj)
+  local t = {}
+  for _, name in ipairs(d and d.types or {}) do
+    t[name:lower()] = true
+  end
+  return t
+end
+
+local function matchesSubject(obj, trig)
+  if trig.subject == nil or trig.subject == "permanent" then
+    return true
+  end
+  return typesOf(obj)[trig.subject] == true
+end
+
+local function isToken(obj)
+  return obj.hasTag("Token") or typesOf(obj).token == true
+end
+
+local function faceOf(obj)
+  local face = ""
+  pcall(function()
+    for _, d in pairs(obj.getData().CustomDeck or {}) do
+      face = d.FaceURL
+      break
+    end
+  end)
+  return face
+end
+
+-- Every face-up card on a battlefield or lands area: { obj, controller }.
+local function permanents()
+  local list = {}
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" and not obj.is_face_down and obj.held_by_color == nil then
+      local loc = Zones.regionAt(obj.getPosition())
+      if loc.seat and (loc.region == "battlefield" or loc.region == "lands") then
+        table.insert(list, { obj = obj, controller = loc.seat })
+      end
+    end
+  end
+  return list
+end
+
+---------------------------------------------------------------------------
+-- Putting found triggers on the stack (active player first)
+---------------------------------------------------------------------------
+
+local function turnOrder()
+  local t = GameState.data.turn or {}
+  local order = {}
+  local seats = TableSetup.activeSeats()
+  local start = 1
+  for i, c in ipairs(seats) do
+    if c == t.activeSeat then
+      start = i
+    end
+  end
+  for k = 0, #seats - 1 do
+    table.insert(order, seats[((start - 1 + k) % #seats) + 1])
+  end
+  return order
+end
+
+local function pushAll(found)
+  if #found == 0 then
+    return
+  end
+  for _, seat in ipairs(turnOrder()) do
+    for _, f in ipairs(found) do
+      if f.controller == seat then
+        Stack.pushAbility(f.controller, f.obj.getName(), f.text, faceOf(f.obj), { trigger = true })
+      end
+    end
+  end
+end
+
+---------------------------------------------------------------------------
+-- Events
+---------------------------------------------------------------------------
+
+-- A step began.
+Events.on("stepStarted", function(d)
+  if not enabled() or not GameState.data.started or d.step == "untap" or d.step == "cleanup" then
+    return
+  end
+  local found = {}
+  for _, p in ipairs(permanents()) do
+    for _, a in ipairs(abilitiesOf(p.obj)) do
+      local t = a.trig
+      if t.kind == "step" and t.step == d.step then
+        local mine = p.controller == d.seat
+        if t.who == "each" or (t.who == "you" and mine) or (t.who == "opp" and not mine) then
+          table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
+        end
+      end
+    end
+  end
+  pushAll(found)
+end)
+
+local IN_PLAY = { battlefield = true, lands = true }
+
+-- Something entered or left the battlefield.
+Events.on("cardMoved", function(d)
+  if not enabled() or not GameState.data.started or d.card == nil or d.from == nil or d.to == nil then
+    return
+  end
+  local card = d.card
+  if card.isDestroyed() or card.is_face_down then
+    return
+  end
+  -- A card drawn: library -> hand.
+  if d.from.region == "library" and d.to.region == "hand" and d.to.seat then
+    local found = {}
+    for _, p in ipairs(permanents()) do
+      for _, a in ipairs(abilitiesOf(p.obj)) do
+        local t = a.trig
+        if t.kind == "draw" then
+          local mine = p.controller == d.to.seat
+          if t.who == "each" or (t.who == "you" and mine) or (t.who == "opp" and not mine) then
+            table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
+          end
+        end
+      end
+    end
+    pushAll(found)
+    return
+  end
+  local entering = IN_PLAY[d.to.region] and not IN_PLAY[d.from.region]
+  local dying = IN_PLAY[d.from.region] and d.to.region == "graveyard" and typesOf(card).creature
+  if not entering and not dying then
+    return
+  end
+  local kind = entering and "enters" or "dies"
+  local cardController = entering and d.to.seat or d.from.seat
+  local found = {}
+  -- The card's own "when ~ enters / dies".
+  for _, a in ipairs(abilitiesOf(card)) do
+    if a.trig.kind == kind and (a.trig.self or a.trig.orSelf) then
+      table.insert(found, { obj = card, controller = cardController, text = a.text })
+    end
+  end
+  -- Other permanents watching for it.
+  for _, p in ipairs(permanents()) do
+    if p.obj ~= card then
+      for _, a in ipairs(abilitiesOf(p.obj)) do
+        local t = a.trig
+        if t.kind == kind and not t.self and matchesSubject(card, t)
+            and not (t.nontoken and isToken(card))
+            and not (t.mine and cardController ~= p.controller)
+            and not (t.theirs and cardController == p.controller) then
+          table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
+        end
+      end
+    end
+  end
+  -- "Whenever a creature dies" on a creature that died with it isn't
+  -- checked (it's already in the graveyard): add those by hand.
+  pushAll(found)
+end)
+
+-- A spell was cast (put on the stack).
+local function spellMatches(card, spellType)
+  if spellType == nil then
+    return true
+  end
+  local t = typesOf(card)
+  if spellType == "noncreature" then
+    return not t.creature
+  end
+  if spellType == "instant or sorcery" then
+    return t.instant or t.sorcery
+  end
+  local first = spellType:match("^(%a+)")
+  return first ~= nil and t[first] == true
+end
+
+Events.on("spellCast", function(d)
+  if not enabled() or not GameState.data.started or d.card == nil then
+    return
+  end
+  local found = {}
+  for _, p in ipairs(permanents()) do
+    for _, a in ipairs(abilitiesOf(p.obj)) do
+      local t = a.trig
+      if t.kind == "cast" then
+        local mine = p.controller == d.controller
+        if ((t.who == "you" and mine) or (t.who == "opp" and not mine)) and spellMatches(d.card, t.spellType) then
+          table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
+        end
+      end
+    end
+  end
+  pushAll(found)
+end)
+
+-- Debug (!triggers card): what the table reads on the card under the mouse.
+function Triggers.describe(obj)
+  if obj == nil then
+    return "Hover over a card first."
+  end
+  local list = abilitiesOf(obj)
+  if #list == 0 then
+    return obj.getName() .. ": no triggers found."
+  end
+  local lines = {}
+  for _, a in ipairs(list) do
+    local t = a.trig
+    table.insert(lines, "- " .. t.kind .. (t.step and (" " .. t.step .. " (" .. t.who .. ")") or "")
+      .. (t.self and " (itself)" or "") .. (t.subject and (" " .. t.subject) or "")
+      .. ": " .. a.text)
+  end
+  return obj.getName() .. ":\n" .. table.concat(lines, "\n")
+end
+
+Triggers.parse = parseTrigger
+Triggers.normalize = normalize
