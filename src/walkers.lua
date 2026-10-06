@@ -22,7 +22,31 @@ Walkers = {}
 
 local INFO = { 0.75, 0.8, 0.9 }
 local WARN = { 1, 0.6, 0.2 }
-local MINUS = "\226\136\146"   -- the "−" sign Scryfall uses in loyalty costs
+-- A loyalty cost before the colon: "+1", "0", "−3", "−X". Scryfall's minus is
+-- the "−" character, which TTS's Lua sees as one character (not the 3 bytes
+-- standard Lua sees), so any short non-alphanumeric prefix counts as minus.
+-- Returns sign ("+", "-" or ""), number text; nil if it isn't a cost.
+local function parseCost(head)
+  head = head:gsub("^%s+", ""):gsub("%s+$", "")
+  local num = head:match("([%dX]+)$")
+  if num == nil or (num ~= "X" and tonumber(num) == nil) then
+    return nil
+  end
+  local prefix = head:sub(1, #head - #num)
+  if prefix == "" then
+    if num == "0" then
+      return "", num
+    end
+    return nil
+  end
+  if prefix == "+" then
+    return "+", num
+  end
+  if #prefix <= 3 and not prefix:find("[%w%s]") then
+    return "-", num
+  end
+  return nil
+end
 
 local function cardData(obj)
   local notes = obj.getGMNotes and obj.getGMNotes() or ""
@@ -66,13 +90,8 @@ function Walkers.abilities(obj)
   for _, line in ipairs(lines(oracle)) do
     local colon = line:find(":", 1, true)
     if colon and colon <= 8 then
-      local head = line:sub(1, colon - 1)
-      local plain = head
-      if head:sub(1, #MINUS) == MINUS then
-        plain = "-" .. head:sub(#MINUS + 1)
-      end
-      local sign, num = plain:match("^([%+%-]?)(%w+)$")
-      if sign and (tonumber(num) or num == "X") and (sign ~= "" or num == "0") then
+      local sign, num = parseCost(line:sub(1, colon - 1))
+      if sign then
         local n = tonumber(num)
         local cost = n and (sign == "-" and -n or n) or nil
         table.insert(list, { label = sign .. num, cost = cost, text = line:sub(colon + 1):gsub("^%s+", "") })
@@ -140,8 +159,7 @@ local function shieldRows(obj)
     acc = acc + weights[i]
     local colon = para:find(":", 1, true)
     if colon and colon <= 8 then
-      local head = para:sub(1, colon - 1)
-      if head:sub(1, #MINUS) == MINUS or head:sub(1, 1) == "+" or head:sub(1, 1) == "-" or head == "0" then
+      if parseCost(para:sub(1, colon - 1)) then
         abil = abil + 1
         rows[abil] = center
       end

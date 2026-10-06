@@ -76,7 +76,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.83 (loyalty buttons on the card)"
+SCRIPT_VERSION = "0.84 (minus loyalty abilities fix)"
 
 function onLoad(saved)
   GameLog.setup()
