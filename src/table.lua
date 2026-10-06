@@ -150,7 +150,7 @@ end
 -- An area for a seat: { center = world position, w, d, yaw }, or nil.
 -- Custom background (a 360-degree equirectangular image, 2:1, in the repo).
 -- Empty = leave TTS's background alone. Set when the image is pushed.
-TableSetup.BACKGROUND_URL = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/background/background.jpg?v=1"
+TableSetup.BACKGROUND_URL = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/background/background.jpg?v=2"
 
 function TableSetup.applyBackground()
   if TableSetup.BACKGROUND_URL ~= "" and Backgrounds and Backgrounds.setCustomURL then
