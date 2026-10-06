@@ -71,8 +71,19 @@ function TableUI.build()
   for _, color in ipairs(TableSetup.activeSeats()) do
     table.insert(panels, importPanel(color))
   end
-  UI.setXml(HEADER .. table.concat(panels) .. GameFlow.xml() .. Turns.xml() .. Actions.xml()
-    .. Dice.xml() .. Tokens.xml())
+  local xml = HEADER .. table.concat(panels) .. GameFlow.xml() .. Turns.xml() .. Actions.xml()
+    .. Dice.xml() .. Tokens.xml()
+  -- Remember every element that's shown to one seat only (see
+  -- TableUI.refreshVisibility).
+  TableUI.privateIds = {}
+  for tag in xml:gmatch("<%a+[^>]*>") do
+    local id = tag:match('%sid="([^"]+)"')
+    local vis = tag:match('%svisibility="([^"]+)"')
+    if id and vis then
+      table.insert(TableUI.privateIds, { id, vis })
+    end
+  end
+  UI.setXml(xml)
   -- The new XML takes a moment to load before it can be changed.
   Wait.time(function()
     GameFlow.refreshUI()
@@ -83,6 +94,16 @@ end
 ---------------------------------------------------------------------------
 -- XML event handlers (must be global; XML calls them by name)
 ---------------------------------------------------------------------------
+
+-- A player who joins (or changes seat) after the UI was built doesn't always
+-- get the seat-only panels (import, dice, tokens, scry...) until their
+-- visibility is set again, so the import panel never showed for them.
+-- Re-apply it for every seat-only element.
+function TableUI.refreshVisibility()
+  for _, pair in ipairs(TableUI.privateIds or {}) do
+    UI.setAttribute(pair[1], "visibility", pair[2])
+  end
+end
 
 local importOpen = {}   -- [color] = true while that player's panel is open
 

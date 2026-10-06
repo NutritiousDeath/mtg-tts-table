@@ -245,7 +245,23 @@ function Counters.setup(obj)
     end, true)
   end
   obj.addContextMenuItem("Clear counters", function() Counters.clear(obj) end)
+  -- Anyone can delete a card this way (TTS normally needs a promoted player).
+  obj.addContextMenuItem("Delete card", function(playerColor) Counters.deleteCard(obj, playerColor) end)
   Counters.render(obj)
+end
+
+-- Delete a card for a player (right-click "Delete card" or the hotkey).
+-- Done by the table's script, so it works without being promoted. Said in
+-- chat so everyone sees it.
+function Counters.deleteCard(obj, playerColor)
+  if obj == nil or obj.isDestroyed() or obj.type ~= "Card" then
+    return
+  end
+  printToAll("MTG > " .. tostring(playerColor) .. " deleted " .. obj.getName() .. ".", { 0.75, 0.8, 0.9 })
+  if Zones and Zones.forget then
+    Zones.forget(obj.getGUID())
+  end
+  obj.destruct()
 end
 
 -- Debug (!counters): what's stored on a card.
@@ -268,6 +284,9 @@ function Counters.registerHotkeys()
     { "MTG: counter +1", "other", 1 },
     { "MTG: counter -1", "other", -1 },
   }
+  addHotkey("MTG: delete card", function(playerColor, hovered)
+    Counters.deleteCard(hovered, playerColor)
+  end)
   for _, k in ipairs(keys) do
     addHotkey(k[1], function(playerColor, hovered)
       Counters.change(hovered, k[2], k[3], playerColor)

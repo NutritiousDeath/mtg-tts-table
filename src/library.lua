@@ -38,6 +38,10 @@ local function isToken(obj)
   return obj.hasTag ~= nil and obj.hasTag("Token")
 end
 
+local function hasKey(t, k)
+  return t[k] ~= nil or t[tostring(k)] ~= nil or (tonumber(k) ~= nil and t[tonumber(k)] ~= nil)
+end
+
 local function regionOf(obj)
   return Zones.regionAt(obj.getPosition())
 end
@@ -59,12 +63,98 @@ function Library.find(color)
   return best
 end
 
-function Library.count(color)
-  local lib = Library.find(color)
-  if lib == nil then
-    return 0
+-- Every pile (deck or lone card) in a seat's library area, top first
+-- (highest on the table first).
+local function libraryPiles(color)
+  local list = {}
+  for _, obj in ipairs(getObjects()) do
+    if isPile(obj) and obj.held_by_color == nil and not isToken(obj) then
+      local loc = regionOf(obj)
+      if loc.seat == color and loc.region == "library" then
+        table.insert(list, obj)
+      end
+    end
   end
-  return lib.type == "Deck" and #lib.getObjects() or 1
+  table.sort(list, function(a, b) return a.getPosition().y > b.getPosition().y end)
+  return list
+end
+
+-- Cards counted across every pile in the library area.
+function Library.count(color)
+  local n = 0
+  for _, obj in ipairs(libraryPiles(color)) do
+    n = n + (obj.type == "Deck" and #obj.getObjects() or 1)
+  end
+  return n
+end
+
+-- A card put on top of the library sometimes stays a separate pile instead
+-- of joining the deck (then a draw took the card under it). Before drawing,
+-- milling, scrying or putting on the bottom, any loose piles in the library
+-- area are joined into one deck, keeping them on top in the order they sit
+-- (highest = top). onDone(deck or nil) runs once it's one pile.
+function Library.consolidate(color, onDone)
+  local piles = libraryPiles(color)
+  if #piles <= 1 then
+    if onDone then onDone(piles[1]) end
+    return
+  end
+  -- The biggest pile is the library; everything above it goes on top.
+  local main, mainCount = nil, -1
+  for _, obj in ipairs(piles) do
+    local c = obj.type == "Deck" and #obj.getObjects() or 1
+    if c > mainCount then
+      main, mainCount = obj, c
+    end
+  end
+  local objs, ids, custom = {}, {}, {}
+  local function addCard(cd)
+    table.insert(objs, cd)
+    table.insert(ids, cd.CardID)
+    for k, v in pairs(cd.CustomDeck or {}) do
+      if not hasKey(custom, k) then
+        custom[k] = v
+      end
+    end
+  end
+  local function addPile(obj)
+    local d = obj.getData()
+    if obj.type == "Deck" then
+      for _, cd in ipairs(d.ContainedObjects or {}) do
+        addCard(cd)
+      end
+      for k, v in pairs(d.CustomDeck or {}) do
+        if not hasKey(custom, k) then
+          custom[k] = v
+        end
+      end
+    else
+      addCard(d)
+    end
+  end
+  for _, obj in ipairs(piles) do
+    if obj ~= main then
+      addPile(obj)
+    end
+  end
+  addPile(main)
+  local data = main.type == "Deck" and main.getData() or {
+    Name = "Deck", Nickname = color .. " Library",
+    Transform = { posX = 0, posY = 0, posZ = 0, rotX = 0, rotY = 180, rotZ = 180, scaleX = 1, scaleY = 1, scaleZ = 1 },
+  }
+  data.ContainedObjects, data.DeckIDs, data.CustomDeck = objs, ids, custom
+  local pos, rot = main.getPosition(), main.getRotation()
+  for _, obj in ipairs(piles) do
+    if Zones.forget then
+      Zones.forget(obj.getGUID())
+    end
+    obj.destruct()
+  end
+  spawnObjectData({ data = data, position = pos, rotation = { rot.x, rot.y, 180 },
+    callback_function = function(obj)
+      obj.setName(color .. " Library")
+      if onDone then onDone(obj) end
+    end })
 end
 
 -- Commander card GUIDs of every seat (never shuffled into a library).
@@ -124,14 +214,14 @@ function Library.returnCards(color, objs)
   return moved
 end
 
-local function hasKey(t, k)
-  return t[k] ~= nil or t[tostring(k)] ~= nil or (tonumber(k) ~= nil and t[tonumber(k)] ~= nil)
-end
-
 -- Put cards on the bottom of the library. TTS can only add to the top of a
 -- deck, so the deck is rebuilt from its data with the cards added at the end
 -- (the end of a deck's card list is its bottom).
 function Library.putOnBottom(color, cards, onDone)
+  if #libraryPiles(color) > 1 then
+    Library.consolidate(color, function() Library.putOnBottom(color, cards, onDone) end)
+    return
+  end
   local lib = Library.find(color)
   if lib == nil or lib.type ~= "Deck" then
     -- No deck to rebuild (empty or a single card): just add on top.
@@ -193,10 +283,18 @@ function Library.pileIn(color, region, except)
   return nil
 end
 
-function Library.draw(color, n)
+function Library.draw(color, n, onDone)
+  if #libraryPiles(color) > 1 then
+    Library.consolidate(color, function()
+      local drawn = Library.draw(color, n)
+      if onDone then onDone(drawn) end
+    end)
+    return 0
+  end
   local lib = Library.find(color)
   if lib == nil then
     broadcastToColor("Your library is empty.", color, { 1, 0.6, 0.2 })
+    if onDone then onDone(0) end
     return 0
   end
   local count = lib.type == "Deck" and #lib.getObjects() or 1
@@ -207,6 +305,7 @@ function Library.draw(color, n)
     local hand = Player[color].getHandTransform()
     lib.setPositionSmooth(hand.position, false, true)
   end
+  if onDone then onDone(n) end
   return n
 end
 
@@ -229,6 +328,10 @@ Library.toGraveyard = toGraveyard
 -- Mill n cards from the top, one at a time (index = take from that depth
 -- instead of the top; used by surveil).
 function Library.mill(color, n, index, onDone)
+  if #libraryPiles(color) > 1 then
+    Library.consolidate(color, function() Library.mill(color, n, index, onDone) end)
+    return
+  end
   local s = TableSetup.seat(color)
   local done = 0
   local function step()

@@ -778,6 +778,39 @@ function Importer.fixTokenWarnings(deck, deckTokens)
   deck.warnings = keep
 end
 
+-- Re-importing replaces the seat's deck: remove the cards from the last
+-- import first (library, graveyard, exile, command zones, battlefield,
+-- lands, hand and the old commanders, tokens included). Called only once the
+-- new deck is ready to spawn, so a failed import leaves the old deck alone.
+function Importer.clearSeat(color)
+  local p = GameState.player(color)
+  local mark = {}
+  for _, g in pairs(p and p.commanders or {}) do
+    mark[g] = true
+  end
+  local ok, handObjs = pcall(function() return Player[color].getHandObjects() end)
+  for _, o in ipairs(ok and handObjs or {}) do
+    mark[o.getGUID()] = true
+  end
+  local n = 0
+  for _, obj in ipairs(getObjects()) do
+    if (obj.type == "Card" or obj.type == "Deck") and obj.held_by_color == nil then
+      local g = obj.getGUID()
+      local loc = Zones.regionAt(obj.getPosition())
+      if mark[g] or loc.seat == color then
+        n = n + (obj.type == "Deck" and #obj.getObjects() or 1)
+        if Zones.forget then
+          Zones.forget(g)
+        end
+        obj.destruct()
+      end
+    end
+  end
+  if n > 0 then
+    broadcastToAll(color .. "'s previous deck was removed (" .. n .. " cards) for the new import.", { 0.7, 0.85, 1 })
+  end
+end
+
 -- Shared with tokens.lua (token search spawns cards the same way).
 Importer.RELAY_HOST = RELAY_HOST
 Importer.splitPlain = splitPlain
@@ -903,6 +936,7 @@ function Importer.importDeck(color, text)
 
   local function spawnDeck(cards, fixed, swap, noImage)
     progress("Building deck...")
+    Importer.clearSeat(color)
     local byName, bySetNum = indexCards(cards)
     local missing = {}
     local mainCards = {}
@@ -1049,6 +1083,7 @@ function Importer.importDeck(color, text)
   -- Fast path: the relay looks cards up and builds them; Lua only joins text.
   local function spawnFromTemplates(results)
     progress("Building deck...")
+    Importer.clearSeat(color)
     local missing, fixed = results.missing, results.fixed
     local player = GameState.player(color)
     local deckPos, cmdrPos, yaw, labelPos = seatSpots(color)

@@ -64,7 +64,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.69 (Tokens & Extras to TOKENS tile)"
+SCRIPT_VERSION = "0.70 (playtest 2: reimport, delete, rounds, top card)"
 
 function onLoad(saved)
   print("MTG > Scripts loaded: version " .. SCRIPT_VERSION)
@@ -101,6 +101,11 @@ function onObjectSpawn(obj)
       Counters.setup(obj)
     end
   end, 1)
+end
+
+-- Someone joined the game: make sure they get their seat-only panels.
+function onPlayerConnect(player)
+  Wait.time(function() TableUI.refreshVisibility() end, 1)
 end
 
 -- Card movement tracking (zones.lua).
@@ -141,6 +146,8 @@ end
 -- Someone sat down or switched seats: only the layout's seats are allowed;
 -- otherwise face their camera toward their seat.
 function onPlayerChangeColor(color)
+  -- Seat-only panels (import etc.) for someone who just sat down.
+  Wait.time(function() TableUI.refreshVisibility() end, 0.5)
   if color == "Grey" or color == "Black" then
     return
   end

@@ -61,10 +61,11 @@ end
 ---------------------------------------------------------------------------
 
 function Actions.draw(color, n, reason)
-  local drawn = Library.draw(color, n)
-  if drawn > 0 then
-    log(color .. " draws " .. drawn .. (reason and (" (" .. reason .. ")") or ""))
-  end
+  Library.draw(color, n, function(drawn)
+    if drawn > 0 then
+      log(color .. " draws " .. drawn .. (reason and (" (" .. reason .. ")") or ""))
+    end
+  end)
 end
 
 function Actions.mill(color, n)
@@ -391,6 +392,16 @@ end
 
 -- SCRY tile clicked: open with the top card, or add the next card.
 function Actions.openScry(color)
+  if scry[color] == nil and Library.find(color) and Library.count(color) > 0 then
+    -- Join any card left on top of the library into it first, so the viewer
+    -- shows the real top card.
+    local ready = false
+    Library.consolidate(color, function() ready = true end)
+    if not ready then
+      Wait.condition(function() Actions.openScry(color) end, function() return ready end, 5)
+      return
+    end
+  end
   local total = Library.count(color)
   local st = scry[color]
   if st == nil then

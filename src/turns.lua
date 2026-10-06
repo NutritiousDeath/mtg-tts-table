@@ -226,13 +226,22 @@ local function nextPlayer(after)
 end
 
 -- Start a seat's turn at the untap step.
-function Turns.beginTurn(seat, number)
+-- Start a seat's turn at the untap step. The turn NUMBER counts trips
+-- around the table (turn 1 = everyone's first turn): it only goes up when
+-- play gets back to the player who went first (newRound = true).
+function Turns.beginTurn(seat, number, newRound)
   local t = turn()
   t.activeSeat = seat
-  t.number = number or ((t.number or 0) + 1)
+  if number then
+    t.number = number
+  elseif newRound then
+    t.number = (t.number or 0) + 1
+  end
+  t.taken = (t.taken or 0) + 1   -- turns taken in the game, by anyone
   t.stepIndex = 1
   t.pending = nil
   t.autoThrough = nil
+  t.resume = nil
   broadcastToAll("Turn " .. t.number .. ": " .. seat, { 0.55, 0.9, 0.6 })
   enterStep()
 end
@@ -246,7 +255,15 @@ local function nextTurn()
     Turns.beginTurn(seat)
     return
   end
-  Turns.beginTurn(nextPlayer(t.activeSeat))
+  -- A new round starts when play gets back to whoever went first (or, if
+  -- they're out, the next player still in after them).
+  local anchor = t.startingSeat
+  local ap = anchor and GameState.player(anchor)
+  if ap == nil or ap.eliminated then
+    anchor = nextPlayer(anchor)
+  end
+  local seat = nextPlayer(t.activeSeat)
+  Turns.beginTurn(seat, nil, seat == anchor)
 end
 
 -- Where "next step" goes from here (an extra combat loops End of combat back
@@ -299,7 +316,9 @@ enterStep = function()
     -- No one gets priority in the untap step.
     autoAdvance(0.8)
   elseif step.id == "draw" then
-    local skip = t.number == 1 and #players() == 2 and seat == t.startingSeat
+    -- Two players: whoever goes first skips their first draw (the game's
+    -- very first turn).
+    local skip = (t.taken or 1) == 1 and #players() == 2 and seat == t.startingSeat
     if skip then
       broadcastToAll(seat .. " skips the first draw (two-player rule).", INFO)
     else
@@ -380,6 +399,7 @@ end
 local function commit(kind)
   local t = turn()
   t.pending = nil
+  t.resume = nil
   hideAllPrompts()
   if kind == "end" then
     -- END TURN runs the rest of the turn on its own: end step, cleanup, next.
@@ -425,9 +445,14 @@ function Turns.respond(color, hasResponse)
     return
   end
   if hasResponse then
+    -- Remember what the active player was doing: after an END TURN is
+    -- answered with a response, the next NEXT STEP / END TURN click carries
+    -- on ending the turn (it doesn't start walking through the steps).
+    t.resume = p.kind
     t.pending = nil
     hideAllPrompts()
-    broadcastToAll(color .. " has a response! " .. t.activeSeat .. ": click NEXT STEP when it's done.", WARN)
+    local again = p.kind == "end" and "END TURN" or "NEXT STEP"
+    broadcastToAll(color .. " has a response! " .. t.activeSeat .. ": click " .. again .. " when it's done.", WARN)
     Turns.render()
     return
   end
@@ -487,7 +512,8 @@ function Turns.next(color)
   if id == "untap" or id == "draw" or id == "cleanup" then
     return   -- these move on by themselves
   end
-  requestMove("next")
+  -- Carrying on after a response to END TURN: still end the turn.
+  requestMove(turn().resume == "end" and "end" or "next")
 end
 
 function Turns.endTurn(color)
@@ -543,6 +569,7 @@ Events.on("gameStarted", function(d)
   local t = turn()
   t.startingSeat = d.first
   t.extraTurns, t.extraCombats, t.reversed, t.pending = {}, 0, false, nil
+  t.taken = 0
   Turns.beginTurn(d.first, 1)
 end)
 
