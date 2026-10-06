@@ -71,7 +71,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.73 (the stack)"
+SCRIPT_VERSION = "0.74 (CAST mats)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -301,6 +301,7 @@ function onChat(message, sender)
     Actions.ensure()
     Turns.ensureStrips()
     ManaChips.ensure()
+    Stack.ensure()
     TableUI.build()
     broadcastToAll("Table layout: " .. (layout == "four" and "4 players" or "2 players")
       .. " (" .. table.concat(TableSetup.activeSeats(), ", ") .. ")", { 0.7, 0.85, 1 })
@@ -328,19 +329,23 @@ function onChat(message, sender)
 
   if message == "!rebuild" then
     -- Tiles are kept between loads (faster); this forces a fresh set.
-    for _, tag in ipairs({ "Tracker", "ActionTile", "TurnStrip", "DeckImporter", "ManaTile" }) do
+    for _, tag in ipairs({ "Tracker", "ActionTile", "TurnStrip", "DeckImporter", "ManaTile", "CastZone" }) do
       for _, obj in ipairs(getObjectsWithTag(tag)) do
         obj.destruct()
       end
     end
     local t = GameState.data.table
     t.trackerTiles, t.taxTiles, t.partnerChips, t.actionTiles, t.turnStrips, t.manaTiles = {}, {}, {}, {}, {}, {}
+    if GameState.data.stack then
+      GameState.data.stack.castTiles = {}
+    end
     Wait.frames(function()
       Trackers.ensureTableDisplay()
       Actions.ensure()
       Turns.ensureStrips()
       ImportCards.ensure()
       ManaChips.ensure()
+      Stack.ensure()
       broadcastToAll("Table tiles rebuilt.", { 0.7, 0.85, 1 })
     end, 3)
     return false

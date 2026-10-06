@@ -85,6 +85,8 @@ local REGIONS = {
   act_tokens = { side = 25.3, depth = 5.8, w = 3, d = 4.2 },
   -- Mana chip dispenser (mana.lua), left of the command zones.
   mana = { side = -19.8, depth = 30, w = 6.4, d = 4.4 },
+  -- CAST mat above the tracker: a card dropped here goes onto the stack.
+  castzone = { side = 0, depth = 35.3, w = 13, d = 3.0 },
   -- turn tiles to the right of the tracker (actions.lua)
   act_next = { side = 8.6, depth = 31, w = 3, d = 4.2 },
   act_endstep = { side = 11.9, depth = 31, w = 3, d = 4.2 },

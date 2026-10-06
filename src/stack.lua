@@ -2,7 +2,8 @@
   stack.lua
   Phase 5: the stack. A STACK mat sits in the middle of the table.
 
-    Casting: drop a card on the mat. It goes on top of the stack, laid out
+    Casting: drop a card on the mat, or on your own CAST mat just above your
+      life tracker (easier to reach). It goes on top of the stack, laid out
       newest lowest on the mat (on top of the others) and locked in place.
       A commander cast from its command zone this way raises its tax by 2.
     Abilities: right-click a card on the battlefield > "Ability to stack"
@@ -339,9 +340,24 @@ end
 local dropper = {}
 
 function Stack.onDrop(color, obj)
-  if obj ~= nil and color ~= nil then
-    dropper[obj.getGUID()] = color
+  if obj == nil or color == nil then
+    return
   end
+  dropper[obj.getGUID()] = color
+  -- Dropped on a seat's CAST mat: put it on the stack in the middle. Where
+  -- it came from (for commander tax) is known from when it was picked up.
+  local from = Zones.locationOf(obj)
+  Wait.time(function()
+    if obj.isDestroyed() or obj.held_by_color or obj.type ~= "Card" then
+      return
+    end
+    for _, seat in ipairs(TableSetup.activeSeats()) do
+      if TableSetup.inRegion(seat, "castzone", obj.getPosition()) then
+        Stack.pushCard(obj, color, from)
+        return
+      end
+    end
+  end, 0.5)
 end
 
 -- Picking a card up off the mat takes it off the stack.
@@ -368,8 +384,21 @@ Events.on("cardMoved", function(d)
   end
 end)
 
+-- Each seat's CAST mat above its tracker.
+local function ensureCastMats()
+  local reg = data()
+  reg.castTiles = reg.castTiles or {}
+  local wanted = {}
+  for _, color in ipairs(TableSetup.activeSeats()) do
+    table.insert(wanted, { key = color, color = color, region = "castzone", name = "Cast (" .. color .. ")",
+      url = ART_BASE .. "cast_" .. color .. ".png" .. ART_VERSION, width = 13, draw = function() end })
+  end
+  Trackers.syncTiles("CastZone", { { registry = reg.castTiles, wanted = wanted } })
+end
+
 -- The mat itself: one image tile in the middle of the table.
 function Stack.ensure()
+  ensureCastMats()
   local reg = data()
   reg.mat = reg.mat
   local mat = reg.mat and getObjectFromGUID(reg.mat)

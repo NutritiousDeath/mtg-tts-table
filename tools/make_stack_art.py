@@ -64,6 +64,34 @@ def mat():
     return img
 
 
+# Per-seat CAST mat above the tracker: 13 x 3 table units at 60 px per unit,
+# bordered in the seat's color. A card dropped on it goes onto the stack.
+SEAT_RGB = {"White": (220, 225, 235), "Red": (235, 80, 80), "Green": (70, 205, 110), "Blue": (80, 150, 245)}
+
+
+def castzone(color):
+    PPU = 60
+    W, H = int(13 * PPU), int(3 * PPU)
+    rgb = SEAT_RGB[color]
+    img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, W - 1, H - 1], radius=28, fill=255)
+    fill = Image.new("RGBA", (W, H))
+    d = ImageDraw.Draw(fill)
+    for y in range(H):
+        t = y / H
+        d.line([(0, y), (W, y)], fill=(int(9 + 7 * t), int(12 + 8 * t), int(20 + 12 * t), 255))
+    img.paste(fill, (0, 0), mask)
+    b = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(b).rounded_rectangle([7, 7, W - 8, H - 8], radius=22, outline=rgb + (255,), width=5)
+    img.alpha_composite(b.filter(ImageFilter.GaussianBlur(7)))
+    img.alpha_composite(b)
+    glow_text(img, (150, H / 2), "CAST", font(64), color=rgb)
+    ImageDraw.Draw(img).text((290, H / 2 - 22), "DROP A SPELL HERE", font=font(26, 700), fill=(230, 240, 250, 255), anchor="lm")
+    ImageDraw.Draw(img).text((290, H / 2 + 22), "IT GOES ON THE STACK  >>>", font=font(22, 600), fill=rgb + (230,), anchor="lm")
+    return img
+
+
 # Ability plate, card sized (2.5 x 3.5 at 100 px per unit).
 def ability():
     W, H = 250, 350
@@ -79,4 +107,8 @@ if __name__ == "__main__":
     for name, fn in (("stack_mat", mat), ("ability", ability)):
         p = os.path.join(OUT, name + ".png")
         fn().save(p)
+        print(p)
+    for color in SEAT_RGB:
+        p = os.path.join(OUT, "cast_%s.png" % color)
+        castzone(color).save(p)
         print(p)
