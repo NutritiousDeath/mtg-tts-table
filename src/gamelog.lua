@@ -97,8 +97,12 @@ local function restore()
   pcall(function()
     for _, tab in ipairs(Notes.getNotebookTabs() or {}) do
       if tab.title == TAB_TITLE and tab.body and tab.body ~= "" then
-        for line in (tab.body .. "\n"):gmatch("(.-)\n") do
-          table.insert(lines, line)
+        -- Split by hand: TTS's Lua can't run (.-) patterns on long text.
+        local body, i = tab.body, 1
+        while i <= #body do
+          local j = body:find("\n", i, true) or (#body + 1)
+          table.insert(lines, body:sub(i, j - 1))
+          i = j + 1
         end
       end
     end

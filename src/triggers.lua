@@ -61,6 +61,37 @@ local function plainFind(s, needle)
   return s:find(needle, 1, true) ~= nil
 end
 
+-- Text between `head` and the next `tail` (plain text, no patterns), or nil.
+-- TTS's Lua can't run "lazy" patterns like (.-) on long rules text ("pattern
+-- too complex"), so these helpers do it with plain searches.
+local function between(s, head, tail)
+  local a = s:find(head, 1, true)
+  if not a then
+    return nil
+  end
+  local from = a + #head
+  local b = s:find(tail, from, true)
+  if not b then
+    return nil
+  end
+  return s:sub(from, b - 1)
+end
+
+-- Split text into lines without patterns.
+local function lines(text)
+  local out, i = {}, 1
+  while i <= #text do
+    local j = text:find("\n", i, true)
+    if not j then
+      table.insert(out, text:sub(i))
+      break
+    end
+    table.insert(out, text:sub(i, j - 1))
+    i = j + 1
+  end
+  return out
+end
+
 -- Lowercase, with the card's own name (and its short name before a comma,
 -- "Kasla" for "Kasla, the Broken Halo") and "this creature" etc. as "~".
 local function normalize(text, name)
@@ -72,7 +103,10 @@ local function normalize(text, name)
     end
   end
   swap(name)
-  swap(name and name:match("^([^,]+),"))
+  local comma = name and name:find(",", 1, true)
+  if comma then
+    swap(name:sub(1, comma - 1))
+  end
   for _, w in ipairs({ "creature", "permanent", "artifact", "enchantment", "land", "planeswalker", "card", "token", "vehicle" }) do
     t = t:gsub("this " .. w, "~")
   end
@@ -111,7 +145,10 @@ local function parseTrigger(p)
   end
   -- "Whenever ~ or another creature [you control] dies / enters".
   for _, verb in ipairs({ "dies", "enters" }) do
-    local subj = p:match("whenever ~ or another ([%a ]-) " .. verb)
+    local subj = between(p, "whenever ~ or another ", " " .. verb)
+    if subj and #subj > 40 then
+      subj = nil
+    end
     if subj then
       local word
       for _, w in ipairs(SUBJECTS) do
@@ -166,15 +203,17 @@ local function parseTrigger(p)
     return { kind = "dies", self = true }
   end
   -- Casting.
-  local oppType = p:match("whenever an opponent casts an? ([%a ]-) spell")
-  if oppType then
+  local oppType = between(p, "whenever an opponent casts a", " spell")
+  oppType = oppType and oppType:gsub("^n? ", "") or nil
+  if oppType and #oppType < 30 then
     return { kind = "cast", who = "opp", spellType = oppType ~= "" and oppType or nil }
   end
   if plainFind(p, "whenever an opponent casts a spell") then
     return { kind = "cast", who = "opp" }
   end
-  local castType = p:match("whenever you cast an? ([%a ]-) spell")
-  if castType then
+  local castType = between(p, "whenever you cast a", " spell")
+  castType = castType and castType:gsub("^n? ", "") or nil
+  if castType and #castType < 30 and castType ~= "" then
     return { kind = "cast", who = "you", spellType = castType }
   end
   if plainFind(p, "whenever you cast a spell") then
@@ -194,7 +233,7 @@ local function abilitiesOf(obj)
     return cache[key]
   end
   local list = {}
-  for para in (d.oracle .. "\n"):gmatch("(.-)\n") do
+  for _, para in ipairs(lines(d.oracle)) do
     if para ~= "" then
       local trig = parseTrigger(normalize(para, d.name))
       if trig then

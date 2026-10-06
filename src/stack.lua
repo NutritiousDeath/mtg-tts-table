@@ -73,7 +73,13 @@ end
 -- Card types from the card's GM Notes (written by the importer).
 local function typesOf(obj)
   local notes = obj and obj.getGMNotes() or ""
-  local list = notes:match('"types":%[(.-)%]') or ""
+  -- Plain search (TTS's Lua can't run (.-) patterns on long text).
+  local list = ""
+  local a = notes:find('"types":[', 1, true)
+  if a then
+    local b = notes:find("]", a, true)
+    list = b and notes:sub(a + 9, b - 1) or ""
+  end
   local t = {}
   for name in list:gmatch('"(%a+)"') do
     t[name] = true
@@ -508,8 +514,14 @@ function Stack.addCardMenu(obj)
         break
       end
     end)
-    local text = obj.getGMNotes():match('"oracle":"(.-)","') or obj.getDescription()
-    text = tostring(text):gsub("\\n", "\n")
+    -- Rules text from GM Notes (decoded; patterns can't scan long text).
+    local text = obj.getDescription()
+    pcall(function()
+      local d = JSON.decode(obj.getGMNotes())
+      if type(d) == "table" and type(d.oracle) == "string" and d.oracle ~= "" then
+        text = d.oracle
+      end
+    end)
     Stack.pushAbility(playerColor, obj.getName(), text, face)
   end)
 end
