@@ -367,7 +367,7 @@ end
 -- towers and stone legs (tools/make_table_model.py). One locked custom model,
 -- kept between loads; replaced when its files change version.
 local FRAME_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/table/"
-local FRAME_VERSION = "?v=1"
+local FRAME_VERSION = "?v=2"
 
 function TableSetup.ensureFrame()
   local state = GameState.data.table
@@ -399,10 +399,11 @@ function TableSetup.ensureFrame()
       state.frame = o.getGUID()
     end,
   })
-  -- convex = false: collide with the real shape (a convex hull would cover
-  -- the play area). Only allowed because the frame is locked.
+  -- The frame is only for looks. TTS wrapped its full shape (spires and
+  -- all) in one invisible box that cards landed on, so its collider is a
+  -- tiny cube far under the table instead: cards rest on the real surface.
   obj.setCustomObject({ mesh = mesh, diffuse = FRAME_BASE .. "stone.png" .. FRAME_VERSION,
-    type = 0, material = 1, convex = false })
+    collider = FRAME_BASE .. "collider.obj" .. FRAME_VERSION, type = 0, material = 1 })
 end
 
 -- Moody lighting to match the dark background: a dimmer, cold key light

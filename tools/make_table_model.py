@@ -3,6 +3,9 @@ play surface, spired pillars at the corners, and a pedestal going down into
 the mist. Writes assets/table/frame.obj and assets/table/stone.png (a
 tileable dark stone texture with faint cyan cracks). Units are TTS units;
 the play surface's top is at y = 1.0 and the model sits around it.
+The frame has no real collision: table.lua gives it assets/table/collider.obj,
+a tiny cube far below the table (TTS turned the full shape into one big
+invisible box that cards landed on).
 Run: python tools/make_table_model.py"""
 import math
 import os
