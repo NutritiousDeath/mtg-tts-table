@@ -127,12 +127,24 @@ local function wrapChat()
     GameLog.add("MSG", msg)
     return pAll(msg, ...)
   end
+  -- TTS errors on a private message to an empty seat (solo tests play seats
+  -- nobody sits in), so those go to everyone instead.
+  local function seated(color)
+    local ok, yes = pcall(function() return Player[color].seated end)
+    return ok and yes
+  end
   broadcastToColor = function(msg, color, ...)
     GameLog.add("TO " .. tostring(color), msg)
+    if not seated(color) then
+      return bAll(msg, ...)
+    end
     return bColor(msg, color, ...)
   end
   printToColor = function(msg, color, ...)
     GameLog.add("TO " .. tostring(color), msg)
+    if not seated(color) then
+      return pAll(msg, ...)
+    end
     return pColor(msg, color, ...)
   end
 end

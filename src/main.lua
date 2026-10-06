@@ -79,7 +79,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.86 (solo test mode)"
+SCRIPT_VERSION = "0.87 (solo: messages to empty seats)"
 
 function onLoad(saved)
   GameLog.setup()
