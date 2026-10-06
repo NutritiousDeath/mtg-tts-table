@@ -20,7 +20,14 @@
               opponent casts a [noncreature...] spell"
     drawing   "whenever you / an opponent / a player draws a card"
     also      "~ or another creature dies / enters", cumulative upkeep
-  Not yet: attack and block triggers (Phase 7, combat).
+    combat    (combat.lua calls these) "whenever ~ attacks", "attacks or
+              blocks", "enters or attacks", "whenever ~ blocks / becomes
+              blocked", "whenever a creature you control attacks" (each),
+              "one or more creatures you control attack" / "whenever you
+              attack" (once), "attacks alone" (exalted), "whenever a
+              creature attacks you", "whenever ~ deals combat damage to a
+              player", "a creature you control deals combat damage to a
+              player", "one or more creatures you control deal combat damage"
 
   Several triggers at once go on the stack active player first, then the
   others in turn order (so the last player's resolve first), like the rules.
@@ -222,6 +229,46 @@ local function parseTrigger(p)
   return nil
 end
 
+-- Combat triggers in one paragraph (a paragraph can have several, like
+-- "attacks or blocks"). Returns a list.
+local function parseCombat(p)
+  local out = {}
+  local function add(t)
+    table.insert(out, t)
+  end
+  if plainFind(p, "whenever ~ attacks") or plainFind(p, "whenever ~ enters or attacks")
+      or plainFind(p, "~ enters the battlefield or attacks") or plainFind(p, "whenever ~ and at least") then
+    add({ kind = "attacks", self = true })
+  end
+  if plainFind(p, "~ attacks or blocks") or plainFind(p, "whenever ~ blocks") then
+    add({ kind = "blocks", self = true })
+  end
+  if plainFind(p, "whenever ~ becomes blocked") or plainFind(p, "~ blocks or becomes blocked") then
+    add({ kind = "blocked", self = true })
+  end
+  if plainFind(p, "attacks alone") then
+    if plainFind(p, "whenever a creature you control attacks alone") then
+      add({ kind = "attacks", mine = true, alone = true })
+    end
+  elseif plainFind(p, "whenever a creature you control attacks") or plainFind(p, "whenever a nontoken creature you control attacks") then
+    add({ kind = "attacks", mine = true })
+  elseif plainFind(p, "whenever one or more creatures you control attack") or plainFind(p, "whenever you attack") then
+    add({ kind = "attacks", mine = true, once = true })
+  end
+  if plainFind(p, "whenever a creature attacks you") or plainFind(p, "whenever one or more creatures attack you") then
+    add({ kind = "attacks", targetsMe = true, once = plainFind(p, "one or more") })
+  end
+  if plainFind(p, "whenever ~ deals combat damage to a player") or plainFind(p, "whenever ~ deals combat damage to an opponent") then
+    add({ kind = "combatDamage", self = true })
+  elseif plainFind(p, "whenever a creature you control deals combat damage to a player")
+      or plainFind(p, "whenever a creature you control deals combat damage to an opponent") then
+    add({ kind = "combatDamage", mine = true })
+  elseif plainFind(p, "whenever one or more creatures you control deal combat damage to a player") then
+    add({ kind = "combatDamage", mine = true, once = true })
+  end
+  return out
+end
+
 -- A card's triggered abilities: { { trig, text } } (text = original wording).
 local function abilitiesOf(obj)
   local d = cardData(obj)
@@ -235,9 +282,49 @@ local function abilitiesOf(obj)
   local list = {}
   for _, para in ipairs(lines(d.oracle)) do
     if para ~= "" then
-      local trig = parseTrigger(normalize(para, d.name))
+      local norm = normalize(para, d.name)
+      local trig = parseTrigger(norm)
       if trig then
         table.insert(list, { trig = trig, text = para })
+      end
+      for _, ct in ipairs(parseCombat(norm)) do
+        table.insert(list, { trig = ct, text = para })
+      end
+    end
+  end
+  -- Keyword attack triggers (Scryfall rules text often has no reminder
+  -- text for these, so they're read from the keyword list).
+  local KEYWORD_TRIGGERS = {
+    annihilator = { kind = "attacks", self = true },
+    ["battle cry"] = { kind = "attacks", self = true },
+    melee = { kind = "attacks", self = true },
+    myriad = { kind = "attacks", self = true },
+    mentor = { kind = "attacks", self = true },
+    training = { kind = "attacks", self = true },
+    rampage = { kind = "blocked", self = true },
+    afflict = { kind = "blocked", self = true },
+    flanking = { kind = "blocked", self = true },
+    exalted = { kind = "attacks", mine = true, alone = true },
+  }
+  for _, kw in ipairs(type(d.keywords) == "table" and d.keywords or {}) do
+    local k = tostring(kw):lower()
+    if KEYWORD_TRIGGERS[k] then
+      -- The keyword's own line in the rules text (e.g. "Annihilator 2").
+      local text = tostring(kw)
+      for _, para in ipairs(lines(d.oracle)) do
+        if para:lower():sub(1, #k) == k then
+          text = para
+        end
+      end
+      local already = false
+      for _, e in ipairs(list) do
+        if e.text == text then
+          already = true
+        end
+      end
+      if not already then
+        local trig = KEYWORD_TRIGGERS[k]
+        table.insert(list, { trig = trig, text = text })
       end
     end
   end
@@ -443,6 +530,123 @@ Events.on("spellCast", function(d)
   pushAll(found)
 end)
 
+---------------------------------------------------------------------------
+-- Combat (called by combat.lua)
+---------------------------------------------------------------------------
+
+-- Attackers were declared: list of { obj, controller, target = defending seat }.
+function Triggers.onAttack(list)
+  if not enabled() or not GameState.data.started then
+    return
+  end
+  local found = {}
+  local attackerOf = {}
+  for _, at in ipairs(list) do
+    attackerOf[at.obj.getGUID()] = true
+    for _, a in ipairs(abilitiesOf(at.obj)) do
+      if a.trig.kind == "attacks" and a.trig.self then
+        table.insert(found, { obj = at.obj, controller = at.controller, text = a.text })
+      end
+    end
+  end
+  for _, p in ipairs(permanents()) do
+    for _, a in ipairs(abilitiesOf(p.obj)) do
+      local t = a.trig
+      if t.kind == "attacks" and t.mine then
+        local mineCount = 0
+        for _, at in ipairs(list) do
+          if at.controller == p.controller then
+            mineCount = mineCount + 1
+          end
+        end
+        if t.alone then
+          if #list == 1 and mineCount == 1 then
+            table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
+          end
+        elseif t.once then
+          if mineCount > 0 then
+            table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
+          end
+        else
+          for _ = 1, mineCount do
+            table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
+          end
+        end
+      elseif t.kind == "attacks" and t.targetsMe then
+        local n = 0
+        for _, at in ipairs(list) do
+          if at.target == p.controller then
+            n = n + 1
+          end
+        end
+        for _ = 1, (t.once and math.min(n, 1) or n) do
+          table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
+        end
+      end
+    end
+  end
+  pushAll(found)
+end
+
+-- Blocks locked in: list of { obj = blocker, controller, attacker, attackerController }.
+function Triggers.onBlock(list)
+  if not enabled() or not GameState.data.started then
+    return
+  end
+  local found, blockedDone = {}, {}
+  for _, b in ipairs(list) do
+    for _, a in ipairs(abilitiesOf(b.obj)) do
+      if a.trig.kind == "blocks" and a.trig.self then
+        table.insert(found, { obj = b.obj, controller = b.controller, text = a.text })
+      end
+    end
+    local att = b.attacker
+    if att and not att.isDestroyed() and not blockedDone[att.getGUID()] then
+      blockedDone[att.getGUID()] = true
+      for _, a in ipairs(abilitiesOf(att)) do
+        if a.trig.kind == "blocked" and a.trig.self then
+          table.insert(found, { obj = att, controller = b.attackerController, text = a.text })
+        end
+      end
+    end
+  end
+  pushAll(found)
+end
+
+-- Creatures dealt combat damage to players: list of { obj, controller, seat }.
+function Triggers.onCombatDamage(list)
+  if not enabled() or not GameState.data.started then
+    return
+  end
+  local found = {}
+  for _, h in ipairs(list) do
+    if not h.obj.isDestroyed() then
+      for _, a in ipairs(abilitiesOf(h.obj)) do
+        if a.trig.kind == "combatDamage" and a.trig.self then
+          table.insert(found, { obj = h.obj, controller = h.controller, text = a.text })
+        end
+      end
+    end
+  end
+  for _, p in ipairs(permanents()) do
+    for _, a in ipairs(abilitiesOf(p.obj)) do
+      local t = a.trig
+      if t.kind == "combatDamage" and t.mine then
+        local n = 0
+        for _, h in ipairs(list) do
+          if h.controller == p.controller then
+            n = n + 1
+          end
+        end
+        for _ = 1, (t.once and math.min(n, 1) or n) do
+          table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
+        end
+      end
+    end
+  end
+  pushAll(found)
+end
+
 -- Debug (!triggers card): what the table reads on the card under the mouse.
 function Triggers.describe(obj)
   if obj == nil then
@@ -456,11 +660,13 @@ function Triggers.describe(obj)
   for _, a in ipairs(list) do
     local t = a.trig
     table.insert(lines, "- " .. t.kind .. (t.step and (" " .. t.step .. " (" .. t.who .. ")") or "")
-      .. (t.self and " (itself)" or "") .. (t.subject and (" " .. t.subject) or "")
+      .. (t.self and " (itself)" or "") .. (t.mine and " (yours)" or "") .. (t.once and " (once)" or "")
+      .. (t.alone and " (alone)" or "") .. (t.subject and (" " .. t.subject) or "")
       .. ": " .. a.text)
   end
   return obj.getName() .. ":\n" .. table.concat(lines, "\n")
 end
 
 Triggers.parse = parseTrigger
+Triggers.parseCombat = parseCombat
 Triggers.normalize = normalize

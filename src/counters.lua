@@ -130,6 +130,9 @@ function Counters.render(obj)
     table.insert(lines, tostring(c.other))
   end
   if #lines == 0 then
+    if Combat then
+      Combat.decorate(obj)
+    end
     return
   end
   obj.createButton({
@@ -148,6 +151,9 @@ function Counters.render(obj)
     font_color = { 1, 1, 1 },
     color = { 0, 0, 0, 0.8 },
   })
+  if Combat then
+    Combat.decorate(obj)
+  end
 end
 
 ---------------------------------------------------------------------------
@@ -173,6 +179,9 @@ function Counters.clear(obj)
   end
   obj.memo = ""
   obj.clearButtons()
+  if Combat then
+    Combat.decorate(obj)
+  end
 end
 
 ---------------------------------------------------------------------------
@@ -249,6 +258,9 @@ function Counters.setup(obj)
   obj.addContextMenuItem("Delete card", function(playerColor) Counters.deleteCard(obj, playerColor) end)
   if Stack then
     Stack.addCardMenu(obj)
+  end
+  if Combat then
+    Combat.addCardMenu(obj)
   end
   Counters.render(obj)
 end

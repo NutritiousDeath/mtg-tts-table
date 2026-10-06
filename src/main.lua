@@ -52,6 +52,7 @@ require("src/libsearch")
 require("src/gamelog")
 require("src/stack")
 require("src/triggers")
+require("src/combat")
 require("src/tokens")
 require("src/ui")
 require("src/importcards")
@@ -74,7 +75,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.77 (table underside fix)"
+SCRIPT_VERSION = "0.80 (Phase 7: combat assistant)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -107,6 +108,7 @@ function onLoad(saved)
       TableSetup.lookAtSeat(color)
     end
     GameFlow.restore()
+    Combat.restore()
   end, 1)
 end
 

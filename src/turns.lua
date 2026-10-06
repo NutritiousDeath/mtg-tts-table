@@ -277,6 +277,10 @@ local function nextIndex(peek)
     end
     return STEP_INDEX["combat"]
   end
+  -- No attackers: skip blockers and damage (combat.lua).
+  if Turns.STEPS[t.stepIndex].id == "attackers" and Combat and Combat.skipToEnd() then
+    return STEP_INDEX["endcombat"]
+  end
   return t.stepIndex + 1
 end
 
@@ -407,7 +411,9 @@ local function promptNext()
     UI.setValue("respondText_" .. who, tostring(p.text) .. "\nAny responses?")
   else
     local to = Turns.pendingLabel()
-    UI.setValue("respondText_" .. who, t.activeSeat .. " wants to move to " .. to .. ".\nAny responses?")
+    local note = Combat and Combat.promptNote and Combat.promptNote()
+    UI.setValue("respondText_" .. who, t.activeSeat .. " wants to move to " .. to .. "."
+      .. (note and ("\n" .. note) or "") .. "\nAny responses?")
   end
   showPrompt(who, true)
   Turns.render()
@@ -485,6 +491,9 @@ function Turns.onStackEmpty()
   local t = turn()
   if not GameState.data.started or t.stepIndex == nil then
     return
+  end
+  if Combat and Combat.onStackEmpty then
+    Combat.onStackEmpty()
   end
   local id = Turns.STEPS[t.stepIndex].id
   if id == "untap" or id == "draw" or (id == "end" and t.autoThrough) then
@@ -584,11 +593,11 @@ function Turns.respondXml()
   local parts = {}
   for _, c in ipairs(TableSetup.activeSeats()) do
     table.insert(parts, ([[
-<Panel id="respond_%s" visibility="%s" active="false" rectAlignment="MiddleCenter" offsetXY="0 140" width="440" height="190"
+<Panel id="respond_%s" visibility="%s" active="false" rectAlignment="MiddleCenter" offsetXY="0 140" width="460" height="214"
        color="#0B0F17F5" outline="#5AF0FF" outlineSize="2 2">
   <VerticalLayout padding="16 16 14 14" spacing="10" childForceExpandHeight="false">
     <Text fontSize="20" fontStyle="Bold" color="#5AF0FF" preferredHeight="26">RESPONSES?</Text>
-    <Text id="respondText_%s" fontSize="15" color="#E6F1FF" preferredHeight="46">-</Text>
+    <Text id="respondText_%s" fontSize="15" color="#E6F1FF" preferredHeight="70">-</Text>
     <HorizontalLayout spacing="12" preferredHeight="48">
       <Button onClick="ui_respond(%s_no)" color="#00B3A4" textColor="#06130B" fontStyle="Bold" fontSize="16">NO RESPONSE</Button>
       <Button onClick="ui_respond(%s_yes)" color="#DB5454" textColor="#1A0606" fontStyle="Bold" fontSize="16">I HAVE A RESPONSE</Button>
@@ -607,6 +616,11 @@ function Turns.next(color)
   local id = Turns.STEPS[turn().stepIndex].id
   if id == "untap" or id == "draw" or id == "cleanup" then
     return   -- these move on by themselves
+  end
+  -- Combat (combat.lua): NEXT STEP in ATTACK declares the attack first;
+  -- in DAMAGE it waits for the damage panel.
+  if Combat and Combat.onNext(color) then
+    return
   end
   -- Carrying on after a response to END TURN: still end the turn.
   local resume = turn().resume
