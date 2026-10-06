@@ -728,7 +728,8 @@ function Importer.tokenInfo(tpl)
   }
 end
 
--- Tell the player which tokens from their list were kept out of the library.
+-- Tell the player which tokens from their list were kept out of the library
+-- (they're on the seat's TOKENS tile, under MY DECK).
 function Importer.announceTokens(color, deckTokens)
   if #deckTokens == 0 then
     return
@@ -739,6 +740,33 @@ function Importer.announceTokens(color, deckTokens)
   end
   broadcastToColor(#deckTokens .. " token" .. (#deckTokens == 1 and "" or "s") .. " in your list kept out of the library: "
     .. table.concat(names, ", ") .. ". Click your TOKENS tile to create them.", color, { 0.7, 0.85, 1 })
+end
+
+-- The deck checks counted the tokens as deck cards: fix the size warning and
+-- drop singleton warnings for tokens.
+function Importer.fixTokenWarnings(deck, deckTokens)
+  if #deckTokens == 0 then
+    return
+  end
+  local tokenCards, isTokenName = 0, {}
+  for _, tk in ipairs(deckTokens) do
+    tokenCards = tokenCards + math.max(1, tk.count or 1)
+    isTokenName[tk.name] = true
+  end
+  local keep = {}
+  for _, msg in ipairs(deck.warnings) do
+    local size = tonumber(msg:match("^Deck has (%d+) cards%."))
+    local single = msg:match("^(.-) x%d+: Commander is singleton")
+    if size then
+      local real = size - tokenCards
+      if real ~= 100 then
+        table.insert(keep, "Deck has " .. real .. " cards (not counting tokens). Commander decks need exactly 100.")
+      end
+    elseif not (single and isTokenName[single]) then
+      table.insert(keep, msg)
+    end
+  end
+  deck.warnings = keep
 end
 
 -- Shared with tokens.lua (token search spawns cards the same way).
@@ -892,7 +920,7 @@ function Importer.importDeck(color, text)
       if card and (typeLine:sub(1, 6) == "Token " or typeLine:sub(1, 6) == "Emblem") then
         -- Tokens / emblems in the list go to the TOKENS tile, not the library.
         local json = JSON.encode(buildCard(card, false))
-        table.insert(deckTokens, { name = card.name, typeLine = typeLine,
+        table.insert(deckTokens, { name = card.name, typeLine = typeLine, count = e.count,
           image = json:match('"FaceURL":"([^"]+)"') or "", tpl = json })
       elseif card then
         for _ = 1, e.count do
@@ -917,6 +945,7 @@ function Importer.importDeck(color, text)
       end
       player.deckTokens = deckTokens
     end
+    Importer.fixTokenWarnings(deck, deckTokens)
     Importer.announceTokens(color, deckTokens)
 
     progress("Spawning " .. #mainCards .. " cards...")
@@ -1012,6 +1041,8 @@ function Importer.importDeck(color, text)
       local t = results.cards[i]
       local tokenInfo = t and not e.commander and Importer.tokenInfo(t.card)
       if tokenInfo then
+        tokenInfo.count = e.count
+        tokenInfo.entry = t.entry
         -- Tokens (and emblems) in the list don't go in the library: they're
         -- kept for the seat's TOKENS tile, ready to create when needed.
         table.insert(deckTokens, tokenInfo)
@@ -1063,6 +1094,7 @@ function Importer.importDeck(color, text)
     if player then
       player.deckTokens = deckTokens
     end
+    Importer.fixTokenWarnings(deck, deckTokens)
     Importer.announceTokens(color, deckTokens)
 
     progress("Spawning " .. #mainCards .. " cards...")

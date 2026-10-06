@@ -32,6 +32,12 @@ local function isPile(obj)
   return obj ~= nil and not obj.isDestroyed() and (obj.type == "Deck" or obj.type == "Card")
 end
 
+-- Tokens (tagged "Token") are never library cards: Start Game / mulligans
+-- leave them where they are.
+local function isToken(obj)
+  return obj.hasTag ~= nil and obj.hasTag("Token")
+end
+
 local function regionOf(obj)
   return Zones.regionAt(obj.getPosition())
 end
@@ -81,7 +87,8 @@ function Library.gatherTable(color)
   local found, seen = {}, {}
   local libGuid = lib and lib.getGUID()
   local function add(obj)
-    if isPile(obj) and obj.getGUID() ~= libGuid and not skip[obj.getGUID()] and not seen[obj.getGUID()] then
+    if isPile(obj) and not isToken(obj) and obj.getGUID() ~= libGuid and not skip[obj.getGUID()]
+        and not seen[obj.getGUID()] then
       seen[obj.getGUID()] = true
       table.insert(found, obj)
     end
