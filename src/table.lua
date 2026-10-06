@@ -363,6 +363,64 @@ local function spawnSurface(state)
   })
 end
 
+-- The 3D frame around the play surface: a gothic stone rim, spired corner
+-- towers and stone legs (tools/make_table_model.py). One locked custom model,
+-- kept between loads; replaced when its files change version.
+local FRAME_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/table/"
+local FRAME_VERSION = "?v=1"
+
+function TableSetup.ensureFrame()
+  local state = GameState.data.table
+  local mesh = FRAME_BASE .. "frame.obj" .. FRAME_VERSION
+  local frame = state.frame and getObjectFromGUID(state.frame)
+  local co = frame and frame.getCustomObject()
+  if frame and co and co.mesh == mesh then
+    frame.setLock(true)
+    return
+  end
+  if frame then
+    frame.destruct()
+  end
+  for _, obj in ipairs(getObjectsWithTag("TableFrame")) do
+    obj.destruct()
+  end
+  local obj = spawnObject({
+    type = "Custom_Model",
+    position = { 0, 0, 0 },
+    rotation = { 0, 0, 0 },
+    scale = { 1, 1, 1 },
+    sound = false,
+    callback_function = function(o)
+      o.setLock(true)
+      o.setPosition({ 0, 0, 0 })
+      o.interactable = false
+      o.setName("Table Frame")
+      o.addTag("TableFrame")
+      state.frame = o.getGUID()
+    end,
+  })
+  -- convex = false: collide with the real shape (a convex hull would cover
+  -- the play area). Only allowed because the frame is locked.
+  obj.setCustomObject({ mesh = mesh, diffuse = FRAME_BASE .. "stone.png" .. FRAME_VERSION,
+    type = 0, material = 1, convex = false })
+end
+
+-- Moody lighting to match the dark background: a dimmer, cold key light
+-- and a blue-violet ambient glow.
+function TableSetup.applyLighting()
+  pcall(function()
+    Lighting.light_intensity = 0.9
+    Lighting.setLightColor({ r = 0.78, g = 0.84, b = 1.0 })
+    Lighting.ambient_type = 1
+    Lighting.setAmbientSkyColor({ r = 0.30, g = 0.28, b = 0.46 })
+    Lighting.setAmbientEquatorColor({ r = 0.16, g = 0.18, b = 0.28 })
+    Lighting.setAmbientGroundColor({ r = 0.05, g = 0.05, b = 0.08 })
+    Lighting.ambient_intensity = 1.1
+    Lighting.reflection_intensity = 0.6
+    Lighting.apply()
+  end)
+end
+
 -- Make sure the table exists and matches the current layout. Safe to call
 -- every load: the surface is only created once.
 function TableSetup.ensure()
@@ -377,6 +435,8 @@ function TableSetup.ensure()
   if not (state.surface and getObjectFromGUID(state.surface)) then
     spawnSurface(state)
   end
+  TableSetup.ensureFrame()
+  TableSetup.applyLighting()
 
   applyHandZones()
   TableSetup.drawMats()
