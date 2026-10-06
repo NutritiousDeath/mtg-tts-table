@@ -712,6 +712,22 @@ local function fillTemplate(tpl, id1, id2)
   return s
 end
 
+-- A relay card template that's a token or emblem: { name, typeLine, image,
+-- tpl } for the token panel; nil for a normal card. (The description starts
+-- with the type line, e.g. "Token Artifact — Treasure".)
+function Importer.tokenInfo(tpl)
+  local typeLine = tpl:match('"Description":"([^"\\]*)')
+  if typeLine == nil or not (typeLine:sub(1, 6) == "Token " or typeLine:sub(1, 6) == "Emblem") then
+    return nil
+  end
+  return {
+    name = tpl:match('"Nickname":"([^"]*)"') or "Token",
+    typeLine = typeLine,
+    image = tpl:match('"FaceURL":"([^"]+)"') or "",
+    tpl = tpl,
+  }
+end
+
 -- Shared with tokens.lua (token search spawns cards the same way).
 Importer.RELAY_HOST = RELAY_HOST
 Importer.splitPlain = splitPlain
@@ -969,8 +985,16 @@ function Importer.importDeck(color, text)
 
     local commanderJson, mainCards, deckIds, deckEntries = {}, {}, {}, {}
     local commanderList = {}
+    local deckTokens = {}
     for i, e in ipairs(entries) do
       local t = results.cards[i]
+      local tokenInfo = t and not e.commander and Importer.tokenInfo(t.card)
+      if tokenInfo then
+        -- Tokens (and emblems) in the list don't go in the library: they're
+        -- kept for the seat's TOKENS tile, ready to create when needed.
+        table.insert(deckTokens, tokenInfo)
+        t = nil
+      end
       if t then
         local copies = e.commander and 1 or e.count
         for _ = 1, copies do
@@ -1012,6 +1036,18 @@ function Importer.importDeck(color, text)
         end
         broadcastToAll(color .. " - " .. table.concat(bits, " · "), { 0.7, 0.85, 1 })
       end
+    end
+
+    if player then
+      player.deckTokens = deckTokens
+    end
+    if #deckTokens > 0 then
+      local names = {}
+      for _, tk in ipairs(deckTokens) do
+        table.insert(names, tk.name)
+      end
+      broadcastToColor(#deckTokens .. " token" .. (#deckTokens == 1 and "" or "s") .. " in your list kept out of the library: "
+        .. table.concat(names, ", ") .. ". Click your TOKENS tile to create them.", color, { 0.7, 0.85, 1 })
     end
 
     progress("Spawning " .. #mainCards .. " cards...")

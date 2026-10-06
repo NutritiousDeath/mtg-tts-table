@@ -1,7 +1,8 @@
 --[[
   tokens.lua
   Token search: the TOKENS tile on your side of the table (below UNTAP)
-  opens a panel only you see.
+  opens a panel only you see. Tokens that were in your imported decklist
+  are kept out of the library and listed here first (MY DECK button).
   Type a token ("treasure", "1/1 soldier", "zombie", "food"...) and SEARCH:
   the relay looks it up on Scryfall (GET /tokens?q=...) and shows up to 12
   matching tokens with their pictures. Click one to put it onto your
@@ -46,6 +47,8 @@ function Tokens.xml()
       <InputField onValueChanged="ui_tokenText" onEndEdit="ui_tokenSubmit" fontSize="16" flexibleWidth="1"
                   placeholder="treasure, 1/1 soldier, zombie, food..." />
       <Button onClick="ui_tokenSearch" preferredWidth="110" color="#00B3A4" textColor="#06130B" fontStyle="Bold">SEARCH</Button>
+      <Button onClick="ui_tokenDeck(%s)" preferredWidth="100" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold"
+              tooltip="Tokens from your imported decklist">MY DECK</Button>
       <Button onClick="ui_tokenCopies(%s_minus)" preferredWidth="34" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold">-</Button>
       <Text id="tokCopies_%s" preferredWidth="70" fontSize="14" fontStyle="Bold" color="#E6F1FF">x1</Text>
       <Button onClick="ui_tokenCopies(%s_plus)" preferredWidth="34" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold">+</Button>
@@ -55,7 +58,7 @@ function Tokens.xml()
                 childAlignment="UpperLeft" preferredHeight="300">]] .. table.concat(slots) .. [[</GridLayout>
   </VerticalLayout>
 </Panel>
-]]):format(c, c, c, c, c, c, c, c))
+]]):format(c, c, c, c, c, c, c, c, c))
   end
   return table.concat(parts)
 end
@@ -155,13 +158,39 @@ end
 -- XML handlers
 ---------------------------------------------------------------------------
 
--- Open / close a seat's token panel (the TOKENS tile calls this).
+-- Show the tokens from this seat's imported decklist.
+function Tokens.showDeck(c)
+  local p = GameState.player(c)
+  local list = p and p.deckTokens or {}
+  results[c] = list
+  if #list == 0 then
+    status(c, "No tokens were in your imported decklist. Search for one above.")
+  else
+    status(c, "From your decklist: click one to put it onto your battlefield.")
+  end
+  render(c)
+end
+
+-- Open / close a seat's token panel (the TOKENS tile calls this). The first
+-- time, it opens on the decklist's tokens if there are any.
 function Tokens.toggle(c)
   open[c] = not open[c]
   UI.setAttribute("tokens_" .. c, "active", open[c] and "true" or "false")
   if open[c] then
-    render(c)
+    local p = GameState.player(c)
+    if results[c] == nil and p and p.deckTokens and #p.deckTokens > 0 then
+      Tokens.showDeck(c)
+    else
+      render(c)
+    end
   end
+end
+
+function ui_tokenDeck(player, c)
+  if c ~= player.color then
+    return
+  end
+  Tokens.showDeck(c)
 end
 
 function ui_tokensClose(player, c)
