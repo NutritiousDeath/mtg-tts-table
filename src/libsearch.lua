@@ -42,7 +42,7 @@ function LibSearch.xml()
               tooltip="Close and shuffle your library">CLOSE + SHUFFLE</Button>
     </HorizontalLayout>
     <HorizontalLayout spacing="8" preferredHeight="38" childForceExpandWidth="false">
-      <InputField onValueChanged="ui_libText" onEndEdit="ui_libSubmit" fontSize="16" flexibleWidth="1"
+      <InputField id="lsInput_%s" onValueChanged="ui_libText" onEndEdit="ui_libSubmit" fontSize="16" flexibleWidth="1"
                   placeholder="name, type or rules text: forest, creature elf, scry, draw a card... (empty = whole library)" />
       <Button onClick="ui_libSearch(%s)" preferredWidth="110" color="#00B3A4" textColor="#06130B" fontStyle="Bold">SEARCH</Button>
     </HorizontalLayout>
@@ -51,7 +51,7 @@ function LibSearch.xml()
                 childAlignment="UpperLeft" preferredHeight="204">]] .. table.concat(slots) .. [[</GridLayout>
   </VerticalLayout>
 </Panel>
-]]):format(c, c, c, c, c, c))
+]]):format(c, c, c, c, c, c, c))
   end
   return table.concat(parts)
 end
@@ -151,15 +151,25 @@ function LibSearch.run(color)
   render(color, guids, faces, #entries, #matches)
 end
 
-function LibSearch.open(color)
+-- preset: search words to start with (effects.lua fills in "basic land"
+-- etc.); note: a line telling the player what to do.
+function LibSearch.open(color, preset, note)
   if not TableSetup.isActive(color) then
     return
   end
   open[color] = true
   searched[color] = false
+  query[color] = preset or query[color]
+  if preset then
+    UI.setAttribute("lsInput_" .. color, "text", preset)
+  end
   UI.setAttribute("libsearch_" .. color, "active", "true")
   printToAll("MTG > " .. color .. " is searching their library.", INFO)
   LibSearch.run(color)
+  if note then
+    status(color, note)
+    broadcastToColor(note, color, { 0.35, 0.95, 1 })
+  end
 end
 
 function LibSearch.close(color, quiet)

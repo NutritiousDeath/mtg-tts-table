@@ -250,7 +250,7 @@ end
 local function nextTurn()
   local t = turn()
   if t.extraTurns and #t.extraTurns > 0 then
-    local seat = table.remove(t.extraTurns, 1)
+    local seat = t.extraTurns[1] and table.remove(t.extraTurns, 1)
     broadcastToAll(seat .. " takes an extra turn.", { 0.55, 0.9, 0.6 })
     Turns.beginTurn(seat)
     return

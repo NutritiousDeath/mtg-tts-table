@@ -111,6 +111,31 @@ function Effects.parse(text)
       add("draw", "you", num(word))
     end
   end
+  -- "search your library for a basic land card, put it onto the battlefield":
+  -- opens the library search with the card type filled in.
+  local a = t:find("search your library for ", 1, true)
+  if a then
+    local rest = t:sub(a + 24)
+    local stop = rest:find(" card", 1, true) or rest:find(",", 1, true) or 40
+    local phrase = rest:sub(1, stop - 1)
+    local q
+    for _, ty in ipairs({ "land", "creature", "artifact", "enchantment", "planeswalker", "instant", "sorcery", "equipment", "aura" }) do
+      if phrase:find(ty, 1, true) and q == nil then
+        q = ty
+      end
+    end
+    if q and phrase:find("basic", 1, true) then
+      q = "basic " .. q
+    end
+    if q == nil then
+      -- A card name or subtype ("a forest", "an elf"): first word after the article.
+      q = phrase:gsub("^up to %w+ ", ""):gsub("^an? ", ""):match("^(%a+)") or ""
+    end
+    local where = rest:find("onto the battlefield", 1, true) and "battlefield"
+      or (rest:find("into your hand", 1, true) and "hand") or "hand"
+    table.insert(actions, { what = "search", who = "you", n = 1, query = q, where = where,
+      tapped = rest:find("battlefield tapped", 1, true) ~= nil, phrase = phrase })
+  end
   if #actions == 0 then
     return nil, "nothing it can apply on its own"
   end
@@ -137,6 +162,9 @@ local function describe(a, target, controller)
   local who = a.who == "you" and (controller or "you") or (a.who == "opponents" and "each opponent")
     or (a.who == "all" and "each player") or tostring(target or a.who)
   local you = who == "you"
+  if a.what == "search" then
+    return who .. (you and " search " or " searches ") .. "the library for " .. tostring(a.phrase)
+  end
   if a.what == "gain" then
     return who .. (you and " gain " or " gains ") .. a.n .. " life"
   elseif a.what == "lose" then
@@ -174,6 +202,11 @@ local function apply(it, plan, target)
           Trackers.changeLife(seat, -a.n, it.name)
         elseif a.what == "draw" then
           Actions.draw(seat, a.n, it.name)
+        elseif a.what == "search" then
+          local how = a.where == "battlefield"
+            and ("RIGHT-click the card to put it onto the battlefield" .. (a.tapped and " (then tap it)" or ""))
+            or "click the card to put it into your hand"
+          LibSearch.open(seat, a.query, it.name .. ": " .. how .. ", then CLOSE + SHUFFLE.")
         end
       end
     end
@@ -217,7 +250,8 @@ local function render()
 end
 
 local function nextQuestion()
-  current = table.remove(queue, 1)
+  -- (TTS's Lua errors on table.remove of an empty list.)
+  current = #queue > 0 and table.remove(queue, 1) or nil
   if current == nil then
     -- All answered: a step that moves on by itself (draw, upkeep via END
     -- TURN...) can carry on now.
