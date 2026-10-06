@@ -359,6 +359,15 @@ local function isActive(color)
     broadcastToColor("It's " .. tostring(t.activeSeat) .. "'s turn.", color, WARN)
     return false
   end
+  -- The turn lost track of its step (seen once, cause unknown): put it back
+  -- at Main 1 instead of erroring, and say so.
+  if type(t.stepIndex) ~= "number" or Turns.STEPS[t.stepIndex] == nil then
+    printToAll("MTG > Turn state had no step (" .. tostring(t.stepIndex) .. "); resuming " .. tostring(t.activeSeat)
+      .. "'s turn at MAIN 1. Please tell Claude what happened just before this.", WARN)
+    t.stepIndex = STEP_INDEX["main1"]
+    t.pending = nil
+    Turns.render()
+  end
   return true
 end
 

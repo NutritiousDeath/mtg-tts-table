@@ -133,7 +133,9 @@ function Counters.render(obj)
       table.insert(lines, st.power .. "/" .. st.toughness)
     end
   end
-  if c.loyalty ~= 0 then
+  -- Planeswalkers on the battlefield show loyalty on their loyalty box
+  -- (walkers.lua) instead.
+  if c.loyalty ~= 0 and not (Walkers and Walkers.handles(obj)) then
     table.insert(lines, "Loyalty")
     table.insert(lines, tostring(c.loyalty))
   end

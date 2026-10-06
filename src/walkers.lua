@@ -2,9 +2,10 @@
   walkers.lua
   Planeswalker loyalty abilities as buttons on the card.
 
-  Every planeswalker on a battlefield gets one button per loyalty ability
-  ("+1", "-3", "0", "-X"...) down its right edge, read from the card's rules
-  text (GM Notes). The tooltip shows the ability's text.
+  Every planeswalker on a battlefield gets a button on each printed loyalty
+  cost shield ("+1", "-3", "0", "-X"...), read from the card's rules text
+  (GM Notes); the tooltip shows the ability's text. Its loyalty box (bottom
+  right) shows the current loyalty: click +1, right-click -1.
 
     Click        activate: pays the loyalty cost (counter on the card) and
                  puts the ability on the stack (stack.lua).
@@ -100,39 +101,108 @@ local function usedThisTurn(obj)
   return used[obj.getGUID()] ~= nil and used[obj.getGUID()] == t.taken
 end
 
-function Walkers.decorate(obj)
-  if obj.is_face_down or controllerOf(obj) == nil or not isWalker(obj) then
-    return
+-- Card face in local units (TTS card at scale 1): x to the right, z toward
+-- the bottom of the card. Positions below are fractions of the card image,
+-- measured on a Scryfall planeswalker (Wrenn and Seven, 4 abilities); the
+-- 3-ability frame's text box starts lower.
+local HALF_W, HALF_H = 1.05, 1.47
+local SHIELD_X = 0.075         -- loyalty cost shields, from the left edge
+local LOYALTY_X, LOYALTY_Y = 0.877, 0.915   -- loyalty box, bottom right
+local CHARS_PER_LINE = 48
+
+local function at(fx, fy)
+  return (fx - 0.5) * 2 * HALF_W, (fy - 0.5) * 2 * HALF_H
+end
+
+-- Where each loyalty ability's shield is (fraction of card height). The
+-- text box is split between the paragraphs by how many lines each takes,
+-- like the printed frame. Four or more paragraphs use the tall frame.
+local function shieldRows(obj)
+  local d = cardData(obj)
+  local paras = {}
+  for _, line in ipairs(lines(type(d.oracle) == "string" and d.oracle or "")) do
+    if line ~= "" then
+      table.insert(paras, line)
+    end
   end
-  local list = Walkers.abilities(obj)
-  if #list == 0 then
+  local top = #paras >= 4 and 0.545 or 0.615
+  local bottom = 0.89
+  local weights, total = {}, 0
+  for i, para in ipairs(paras) do
+    local w = math.ceil(#para / CHARS_PER_LINE) + 2
+    weights[i] = w
+    total = total + w
+  end
+  local rows, acc = {}, 0
+  local abil = 0
+  for i, para in ipairs(paras) do
+    local center = top + (bottom - top) * (acc + weights[i] / 2) / math.max(total, 1)
+    acc = acc + weights[i]
+    local colon = para:find(":", 1, true)
+    if colon and colon <= 8 then
+      local head = para:sub(1, colon - 1)
+      if head:sub(1, #MINUS) == MINUS or head:sub(1, 1) == "+" or head:sub(1, 1) == "-" or head == "0" then
+        abil = abil + 1
+        rows[abil] = center
+      end
+    end
+  end
+  return rows
+end
+
+-- Loyalty buttons are drawn here, so the counters label skips loyalty.
+function Walkers.handles(obj)
+  return not obj.is_face_down and controllerOf(obj) ~= nil and isWalker(obj)
+end
+
+function Walkers.decorate(obj)
+  if not Walkers.handles(obj) then
     return
   end
   local used = usedThisTurn(obj)
-  -- Down the card's right edge, spread over its lower two thirds.
-  local top, bottom = -0.35, 1.25
-  local step = #list > 1 and math.min(0.55, (bottom - top) / (#list - 1)) or 0
+  -- Each cost button sits on its printed shield.
+  local list = Walkers.abilities(obj)
+  local rows = shieldRows(obj)
   for i, a in ipairs(list) do
-    local plus = a.cost and a.cost > 0
-    local zero = a.cost == 0
-    local bg = plus and { 0.1, 0.45, 0.3, 0.95 } or (zero and { 0.25, 0.3, 0.4, 0.95 } or { 0.5, 0.1, 0.16, 0.95 })
-    if used then
-      bg = { 0.15, 0.17, 0.2, 0.9 }
-    end
+    local x, z = at(SHIELD_X, rows[i] or (0.6 + 0.1 * i))
     obj.createButton({
       click_function = "walker_click_" .. i,
       function_owner = Global,
       label = a.label,
       tooltip = a.label .. ": " .. a.text .. (used and "\n(Already used a loyalty ability this turn)" or "")
         .. "\nClick: activate. Right-click: activate anyway (skip the checks).",
-      position = { 1.38, 0.3, top + step * (i - 1) },
+      position = { x, 0.3, z },
       rotation = { 0, 0, 0 },
-      width = 300,
-      height = 210,
-      font_size = 150,
-      font_color = { 1, 1, 1 },
-      color = bg,
+      width = 125,
+      height = 95,
+      font_size = 62,
+      font_color = used and { 0.5, 0.52, 0.56 } or { 1, 1, 1 },
+      color = { 0.07, 0.07, 0.09, 0.95 },
     })
+  end
+  -- The loyalty box shows the current loyalty. Click +1, right-click -1.
+  local x, z = at(LOYALTY_X, LOYALTY_Y)
+  obj.createButton({
+    click_function = "walker_loyalty",
+    function_owner = Global,
+    label = tostring(Counters.get(obj).loyalty),
+    tooltip = "Loyalty " .. Counters.get(obj).loyalty .. "\nClick: +1. Right-click: -1.",
+    position = { x, 0.3, z },
+    rotation = { 0, 0, 0 },
+    width = 150,
+    height = 120,
+    font_size = 100,
+    font_color = { 1, 1, 1 },
+    color = { 0.07, 0.07, 0.09, 0.97 },
+  })
+end
+
+function walker_loyalty(obj, color, alt)
+  if obj and not obj.isDestroyed() then
+    Counters.change(obj, "loyalty", alt and -1 or 1, color)
+    if Counters.get(obj).loyalty <= 0 then
+      broadcastToAll(obj.getName() .. " has 0 loyalty: put it into its owner's graveyard.", WARN)
+    end
   end
 end
 

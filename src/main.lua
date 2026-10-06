@@ -76,7 +76,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.81 (combat + planeswalker buttons)"
+SCRIPT_VERSION = "0.83 (loyalty buttons on the card)"
 
 function onLoad(saved)
   GameLog.setup()
