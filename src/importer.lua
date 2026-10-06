@@ -715,11 +715,15 @@ end
 -- A relay card template that's a token or emblem: { name, typeLine, image,
 -- tpl } for the token panel; nil for a normal card. (The description starts
 -- with the type line, e.g. "Token Artifact — Treasure".)
-function Importer.tokenInfo(tpl)
+-- force = true: treat it as a token anyway (it came from the list's Tokens
+-- section, e.g. a Monarch or Initiative card).
+function Importer.tokenInfo(tpl, force)
   local typeLine = tpl:match('"Description":"([^"\\]*)')
-  if typeLine == nil or not (typeLine:sub(1, 6) == "Token " or typeLine:sub(1, 6) == "Emblem") then
+  local isToken = typeLine ~= nil and (typeLine:sub(1, 6) == "Token " or typeLine:sub(1, 6) == "Emblem")
+  if not isToken and not force then
     return nil
   end
+  typeLine = typeLine or ""
   return {
     name = tpl:match('"Nickname":"([^"]*)"') or "Token",
     typeLine = typeLine,
@@ -750,8 +754,13 @@ function Importer.fixTokenWarnings(deck, deckTokens)
   end
   local tokenCards, isTokenName = 0, {}
   for _, tk in ipairs(deckTokens) do
-    tokenCards = tokenCards + math.max(1, tk.count or 1)
-    isTokenName[tk.name] = true
+    if tk.fromMain then
+      tokenCards = tokenCards + math.max(1, tk.count or 1)
+      isTokenName[tk.name] = true
+    end
+  end
+  if tokenCards == 0 then
+    return
   end
   local keep = {}
   for _, msg in ipairs(deck.warnings) do
@@ -872,6 +881,9 @@ function Importer.importDeck(color, text)
   for _, e in ipairs(deck.main) do
     table.insert(entries, e)
   end
+  for _, e in ipairs(deck.tokens or {}) do
+    table.insert(entries, e)
+  end
   if #entries == 0 then
     broadcastToColor("No cards found in that list.", color, { 1, 0.3, 0.3 })
     return
@@ -914,13 +926,20 @@ function Importer.importDeck(color, text)
     end
 
     local deckTokens = {}
+    local list = {}
     for _, e in ipairs(deck.main) do
+      table.insert(list, e)
+    end
+    for _, e in ipairs(deck.tokens or {}) do
+      table.insert(list, e)
+    end
+    for _, e in ipairs(list) do
       local card = resolve(e)
       local typeLine = card and tostring(card.type_line or "") or ""
-      if card and (typeLine:sub(1, 6) == "Token " or typeLine:sub(1, 6) == "Emblem") then
+      if card and (e.token or typeLine:sub(1, 6) == "Token " or typeLine:sub(1, 6) == "Emblem") then
         -- Tokens / emblems in the list go to the TOKENS tile, not the library.
         local json = JSON.encode(buildCard(card, false))
-        table.insert(deckTokens, { name = card.name, typeLine = typeLine, count = e.count,
+        table.insert(deckTokens, { name = card.name, typeLine = typeLine, count = e.count, fromMain = not e.token,
           image = json:match('"FaceURL":"([^"]+)"') or "", tpl = json })
       elseif card then
         for _ = 1, e.count do
@@ -1039,10 +1058,11 @@ function Importer.importDeck(color, text)
     local deckTokens = {}
     for i, e in ipairs(entries) do
       local t = results.cards[i]
-      local tokenInfo = t and not e.commander and Importer.tokenInfo(t.card)
+      local tokenInfo = t and not e.commander and Importer.tokenInfo(t.card, e.token)
       if tokenInfo then
         tokenInfo.count = e.count
         tokenInfo.entry = t.entry
+        tokenInfo.fromMain = not e.token   -- counted in the deck size check
         -- Tokens (and emblems) in the list don't go in the library: they're
         -- kept for the seat's TOKENS tile, ready to create when needed.
         table.insert(deckTokens, tokenInfo)

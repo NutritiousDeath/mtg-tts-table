@@ -37,7 +37,9 @@ local SECTIONS = {
   ["maybeboard"] = "skip",
   ["considering"] = "skip",
   ["companion"] = "skip",
-  ["tokens"] = "skip",
+  ["tokens"] = "tokens",
+  ["tokens & extras"] = "tokens",
+  ["extras"] = "tokens",
   ["about"] = "skip",
 }
 
@@ -143,6 +145,7 @@ function DeckParser.parse(text)
   local deck = {
     commanders = {},
     main = {},
+    tokens = {},     -- a "Tokens" section: for the TOKENS tile, not the library
     warnings = {},
     errors = {},
     total = 0,
@@ -178,6 +181,9 @@ function DeckParser.parse(text)
           table.insert(deck.commanders, entry)
         elseif section == "sideboard" then
           table.insert(sideboard, entry)
+        elseif section == "tokens" then
+          entry.token = true
+          table.insert(deck.tokens, entry)
         else
           entry.block = block
           sawCard = true
@@ -193,6 +199,8 @@ function DeckParser.parse(text)
 
   deck.commanders = mergeDuplicates(deck.commanders)
   deck.main = mergeDuplicates(deck.main)
+  -- deck.tokens is not merged: two different tokens can share a name
+  -- (a white Soldier and a red/white Soldier with haste).
   deck.total = countCards(deck.commanders) + countCards(deck.main)
   return deck
 end

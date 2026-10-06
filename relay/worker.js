@@ -447,6 +447,7 @@ function archidektToDecklist(deck) {
 
   const commanders = [];
   const main = [];
+  const tokens = [];   // "Tokens & Extras" etc.: go to the seat's TOKENS tile
   for (const entry of deck.cards || []) {
     // Cards removed from an Archidekt deck stay in its data, marked deleted.
     if (entry.deletedAt) continue;
@@ -456,17 +457,20 @@ function archidektToDecklist(deck) {
     const cats = entry.categories || [];
     let isCommander = false;
     let inDeck = true;
+    let tokenCategory = false;
     if (cats.length > 0) {
       inDeck = false;
       for (const c of cats) {
         if (premier.has(c)) isCommander = true;
         if (!excluded.has(c)) inDeck = true;
+        if (/token|extra/i.test(c)) tokenCategory = true;
       }
     }
-    // Token cards always come through, even from a category that's not part
-    // of the deck: the importer keeps them out of the library and puts them
-    // on the seat's TOKENS tile.
-    if (!inDeck && !isCommander && !archidektIsToken(card.oracleCard)) continue;
+    // Cards outside the deck are skipped, except tokens: anything in a
+    // "Tokens & Extras"-style category, or a token card in any other
+    // excluded category, goes to the TOKENS tile (never the library).
+    const toTokens = !inDeck && !isCommander && (tokenCategory || archidektIsToken(card.oracleCard));
+    if (!inDeck && !isCommander && !toTokens) continue;
 
     let line = String(entry.quantity || 1) + " " + clean(name);
     const set = card.edition && card.edition.editioncode;
@@ -474,8 +478,10 @@ function archidektToDecklist(deck) {
       line += " (" + set + ")";
       if (card.collectorNumber) line += " " + card.collectorNumber;
     }
-    (isCommander ? commanders : main).push(line);
+    (isCommander ? commanders : toTokens ? tokens : main).push(line);
   }
 
-  return ["Commander", ...commanders, "", "Deck", ...main].join("\n");
+  const out = ["Commander", ...commanders, "", "Deck", ...main];
+  if (tokens.length) out.push("", "Tokens", ...tokens);
+  return out.join("\n");
 }
