@@ -48,8 +48,9 @@ local function items()
   return d.items
 end
 
+-- Empty = nothing on the stack and no triggers waiting to be ordered.
 function Stack.isEmpty()
-  return #items() == 0
+  return #items() == 0 and not (Triggers and Triggers.isOrdering and Triggers.isOrdering())
 end
 
 function Stack.size()

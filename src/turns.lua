@@ -342,6 +342,10 @@ end
 
 -- Nothing moves on while spells or abilities wait on the stack.
 local function stackBusy(color)
+  if Stack and Stack.size() == 0 and Triggers and Triggers.isOrdering and Triggers.isOrdering() then
+    broadcastToColor("Waiting for a player to order their triggers.", color, WARN)
+    return true
+  end
   if Stack and not Stack.isEmpty() then
     broadcastToColor("Resolve the stack first (" .. Stack.size() .. " on it).", color, WARN)
     return true

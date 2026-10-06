@@ -31,6 +31,8 @@
 
   Several triggers at once go on the stack active player first, then the
   others in turn order (so the last player's resolve first), like the rules.
+  A player with two or more at once picks their order in a panel only they
+  see (ORDER YOUR TRIGGERS); empty seats keep the order they were found in.
   !triggers off / !triggers on   turn it off / on for the table.
 --]]
 
@@ -397,16 +399,178 @@ local function turnOrder()
   return order
 end
 
+---------------------------------------------------------------------------
+-- Ordering: a player with two or more triggers at once picks the order they
+-- resolve in (a panel only they see). Batches go one seat at a time, active
+-- player first (APNAP), so later players' triggers land on top. Empty seats
+-- and more than MAX_ORDER triggers use the order they were found in.
+---------------------------------------------------------------------------
+
+local MAX_ORDER = 10
+local queue = {}      -- waiting batches: { seat, list }
+local ordering = nil  -- the batch being ordered: { seat, list (resolve order), picks = { [i] = n }, count }
+
+-- Triggers found but not on the stack yet (the turn waits for them).
+function Triggers.isOrdering()
+  return ordering ~= nil or #queue > 0
+end
+
+local function seated(color)
+  local ok, yes = pcall(function() return Player[color].seated end)
+  return ok and yes
+end
+
+local function push(f)
+  Stack.pushAbility(f.controller, f.obj.getName(), f.text, faceOf(f.obj), { trigger = true })
+end
+
+local function shortText(f)
+  local t = tostring(f.text or "")
+  if #t > 70 then
+    t = t:sub(1, 68) .. "..."
+  end
+  return f.obj.getName() .. ": " .. t
+end
+
+local function renderOrder()
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    local o = ordering and ordering.seat == c and ordering or nil
+    UI.setAttribute("trigOrder_" .. c, "active", o and "true" or "false")
+    if o then
+      for i = 1, MAX_ORDER do
+        local id = "trigRow_" .. c .. "_" .. i
+        local f = o.list[i]
+        UI.setAttribute(id, "active", f and "true" or "false")
+        if f then
+          local n = o.picks[i]
+          UI.setValue(id, (n and ("[" .. n .. "]  ") or "") .. shortText(f))
+          UI.setAttribute(id, "tooltip", f.obj.getName() .. "\n" .. tostring(f.text or ""))
+          UI.setAttribute(id, "color", n and "#1B4A5A" or "#141B26")
+        end
+      end
+      UI.setAttribute("trigOrder_" .. c, "height", tostring(118 + 40 * #o.list))
+    end
+  end
+end
+
+local processNext
+
+-- Put a batch on the stack. `resolveOrder` lists them first-to-resolve
+-- first, so they're pushed from the end (the last pushed resolves first).
+local function pushInResolveOrder(resolveOrder)
+  for i = #resolveOrder, 1, -1 do
+    push(resolveOrder[i])
+  end
+end
+
+processNext = function()
+  while #queue > 0 do
+    local b = table.remove(queue, 1)
+    if #b.list >= 2 and #b.list <= MAX_ORDER and seated(b.seat) then
+      -- Shown in resolve order: as found, the first found resolves last.
+      local shown = {}
+      for i = #b.list, 1, -1 do
+        table.insert(shown, b.list[i])
+      end
+      ordering = { seat = b.seat, list = shown, picks = {}, count = 0 }
+      renderOrder()
+      broadcastToColor("You have " .. #b.list .. " triggers at once: click them in the order they should resolve"
+        .. " (or KEEP THIS ORDER).", b.seat, { 0.35, 0.95, 1 })
+      return
+    end
+    for _, f in ipairs(b.list) do
+      push(f)
+    end
+  end
+  ordering = nil
+  renderOrder()
+end
+
+local function finishOrdering(resolveOrder)
+  ordering = nil
+  renderOrder()
+  pushInResolveOrder(resolveOrder)
+  processNext()
+end
+
+function ui_trigOrder(player, arg)
+  local seat, what = tostring(arg):match("^(%a+)_(%w+)$")
+  local o = ordering
+  if o == nil or seat ~= o.seat then
+    return
+  end
+  if player.color ~= seat and not GameState.solo() then
+    return
+  end
+  if what == "keep" then
+    finishOrdering(o.list)
+  elseif what == "reset" then
+    o.picks, o.count = {}, 0
+    renderOrder()
+  else
+    local i = tonumber(what)
+    if i == nil or o.list[i] == nil or o.picks[i] then
+      return
+    end
+    o.count = o.count + 1
+    o.picks[i] = o.count
+    if o.count == #o.list then
+      local order = {}
+      for k, f in ipairs(o.list) do
+        order[o.picks[k]] = f
+      end
+      finishOrdering(order)
+    else
+      renderOrder()
+    end
+  end
+end
+
+function Triggers.orderXml()
+  local parts = {}
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    local rows = {}
+    for i = 1, MAX_ORDER do
+      table.insert(rows, ('      <Button id="trigRow_%s_%d" active="false" onClick="ui_trigOrder(%s_%d)" preferredHeight="34" '
+        .. 'color="#141B26" textColor="#E6F1FF" fontSize="13" tooltipPosition="Above">-</Button>'):format(c, i, c, i))
+    end
+    table.insert(parts, ([[
+<Panel id="trigOrder_%s" visibility="%s" active="false" rectAlignment="MiddleCenter" offsetXY="0 60" width="600" height="200"
+       color="#0B0F17F5" outline="#5AF0FF" outlineSize="2 2" allowDragging="true" returnToOriginalPositionWhenReleased="false">
+  <VerticalLayout padding="14 14 12 12" spacing="6" childForceExpandHeight="false">
+    <Text fontSize="17" fontStyle="Bold" color="#5AF0FF" alignment="MiddleLeft" preferredHeight="24">ORDER YOUR TRIGGERS</Text>
+    <Text fontSize="12" color="#8B98A9" alignment="MiddleLeft" preferredHeight="30">Click them in the order they should resolve: [1] resolves first. KEEP THIS ORDER resolves them top to bottom.</Text>
+]] .. table.concat(rows, "\n") .. [[
+
+    <HorizontalLayout preferredHeight="38" spacing="10">
+      <Button onClick="ui_trigOrder(%s_keep)" color="#00B3A4" textColor="#06130B" fontStyle="Bold">KEEP THIS ORDER</Button>
+      <Button onClick="ui_trigOrder(%s_reset)" color="#2A3346" textColor="#E6F1FF" fontStyle="Bold">RESET</Button>
+    </HorizontalLayout>
+  </VerticalLayout>
+</Panel>
+]]):format(c, c, c, c))
+  end
+  return table.concat(parts)
+end
+
+-- Found triggers go out one seat at a time, active player first.
 local function pushAll(found)
   if #found == 0 then
     return
   end
   for _, seat in ipairs(turnOrder()) do
+    local list = {}
     for _, f in ipairs(found) do
       if f.controller == seat then
-        Stack.pushAbility(f.controller, f.obj.getName(), f.text, faceOf(f.obj), { trigger = true })
+        table.insert(list, f)
       end
     end
+    if #list > 0 then
+      table.insert(queue, { seat = seat, list = list })
+    end
+  end
+  if ordering == nil then
+    processNext()
   end
 end
 

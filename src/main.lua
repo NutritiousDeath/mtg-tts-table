@@ -79,7 +79,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.87 (solo: messages to empty seats)"
+SCRIPT_VERSION = "0.88 (order your own triggers)"
 
 function onLoad(saved)
   GameLog.setup()
