@@ -50,7 +50,7 @@ end
 
 -- Only the seat's own player may use its tiles.
 local function mine(color, playerColor)
-  if playerColor ~= color then
+  if playerColor ~= color and not GameState.solo() then
     broadcastToColor("Those are " .. color .. "'s tiles.", playerColor, WARN)
     return false
   end
@@ -260,7 +260,7 @@ end
 function Actions.cleanupDiscard(color, onDone)
   local hand = handCards(color)
   local need = #hand - MAX_HAND
-  if need <= 0 then
+  if need <= 0 or (GameState.solo() and not Player[color].seated) then
     onDone()
     return
   end

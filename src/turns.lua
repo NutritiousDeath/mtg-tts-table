@@ -355,7 +355,7 @@ local function isActive(color)
     broadcastToColor("No game running. Use Start Game first.", color, WARN)
     return false
   end
-  if color ~= t.activeSeat then
+  if color ~= t.activeSeat and not GameState.solo() then
     broadcastToColor("It's " .. tostring(t.activeSeat) .. "'s turn.", color, WARN)
     return false
   end
@@ -477,6 +477,11 @@ local function requestMove(kind)
     commit(t.pending.kind)
     return
   end
+  -- Solo test: no one else to ask.
+  if GameState.solo() then
+    commit(kind)
+    return
+  end
   -- Everyone else still in the game, in turn order after the active player.
   local queue, c = {}, t.activeSeat
   for _ = 1, #players() do
@@ -526,6 +531,11 @@ function Turns.ask(from, text, label, onAllPass)
     return
   end
   local queue, c = {}, from
+  if GameState.solo() then
+    pendingAction = onAllPass
+    commit("ask")
+    return
+  end
   for _ = 1, #players() do
     c = nextPlayer(c)
     if c == from then

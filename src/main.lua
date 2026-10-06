@@ -26,6 +26,8 @@
     !search      search your library by name, type or rules text
     !triggers off / on   turn trigger detection off / on
     !triggers card       show the triggers read on the card under your mouse
+    !solo on / off       solo test mode: one person plays every seat
+    !import Red <link>   import an Archidekt / Moxfield link (or list) to a seat
     !walker      show the loyalty abilities read on the planeswalker under your mouse
     !log         snapshot every player and save the game log to the Notebook
     !logclear    start a fresh game log
@@ -77,7 +79,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.85 (planeswalker button fixes)"
+SCRIPT_VERSION = "0.86 (solo test mode)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -339,6 +341,25 @@ function onChat(message, sender)
   if message == "!triggers card" then
     local obj = sender.getHoverObject and sender.getHoverObject() or nil
     printToColor(Triggers.describe(obj), sender.color, { 0.7, 0.85, 1 })
+    return false
+  end
+
+  if message == "!solo on" or message == "!solo off" then
+    GameState.data.solo = message == "!solo on"
+    broadcastToAll(GameState.data.solo
+      and ("Solo test mode ON (by " .. sender.color .. "): you can act for every seat. Turn buttons, combat and planeswalkers work for anyone, no response pop-ups, empty seats keep their hands. Start Game includes every seat.")
+      or "Solo test mode OFF.", { 0.7, 0.85, 1 })
+    return false
+  end
+
+  local importSeat, importText = message:match("^!import (%a+) (.+)$")
+  if importSeat then
+    if not TableSetup.isActive(importSeat) then
+      printToColor("MTG > No such seat in this layout: " .. importSeat .. " (" .. table.concat(TableSetup.activeSeats(), ", ") .. ")",
+        sender.color, { 1, 0.6, 0.2 })
+    else
+      TableUI.importFor(importSeat, importText, sender.color)
+    end
     return false
   end
 

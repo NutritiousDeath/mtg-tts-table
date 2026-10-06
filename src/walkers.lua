@@ -283,6 +283,9 @@ function Walkers.activate(obj, i, color, force)
   local seat = controllerOf(obj)
   local t = GameState.data.turn or {}
   local loyalty = Counters.get(obj).loyalty
+  if GameState.solo() and seat then
+    color = seat   -- solo test: you act for the planeswalker's controller
+  end
   if not force then
     local problem
     if seat ~= color then

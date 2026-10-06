@@ -419,6 +419,9 @@ end
 function Combat.attackClick(card, color, alt)
   local c = state()
   local t = turn()
+  if GameState.solo() then
+    color = t.activeSeat   -- solo test: you act for the active player
+  end
   if color ~= t.activeSeat then
     broadcastToColor("Only " .. tostring(t.activeSeat) .. " attacks this turn.", color, WARN)
     return
@@ -526,6 +529,9 @@ end
 
 function Combat.blockClick(card, color, alt)
   local c = state()
+  if GameState.solo() then
+    color = controller(card) or color   -- solo test: you act for every defender
+  end
   if controller(card) ~= color then
     broadcastToColor("That isn't your creature.", color, WARN)
     return
@@ -1111,7 +1117,7 @@ function ui_combat(player, arg)
   local idx, action = tostring(arg):match("^(%d+)_(%a+)$")
   idx = tonumber(idx)
   if action == "confirm" or action == "skip" then
-    if color ~= turn().activeSeat then
+    if color ~= turn().activeSeat and not GameState.solo() then
       broadcastToColor("The active player (" .. tostring(turn().activeSeat) .. ") confirms combat damage.", color, WARN)
       return
     end

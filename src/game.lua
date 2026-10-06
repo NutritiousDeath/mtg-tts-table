@@ -283,7 +283,10 @@ function GameFlow.start(byColor)
   local s = setup()
   local players, skipped = {}, {}
   for _, color in ipairs(TableSetup.activeSeats()) do
-    if Player[color].seated then
+    if GameState.solo() and not Player[color].seated then
+      -- Solo test: every seat plays, deck or not.
+      table.insert(players, color)
+    elseif Player[color].seated then
       if Library.find(color) then
         table.insert(players, color)
       else
@@ -340,6 +343,10 @@ function GameFlow.start(byColor)
     Wait.time(function()
       for _, color in ipairs(players) do
         GameFlow.renderMulligan(color)
+        -- Solo test: nobody sits at this seat, so it keeps its hand.
+        if GameState.solo() and not Player[color].seated then
+          GameFlow.keep(color)
+        end
       end
     end, 1)
   end, 1)

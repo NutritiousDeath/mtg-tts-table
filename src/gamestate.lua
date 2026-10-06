@@ -106,3 +106,10 @@ function GameState.summary()
   end
   return table.concat(lines, "\n")
 end
+
+-- Solo test mode (!solo on): one person plays every seat. Turn buttons,
+-- combat, planeswalkers and seat tiles accept anyone, response pop-ups
+-- are skipped, and empty seats keep their opening hand and skip discards.
+function GameState.solo()
+  return GameState.data ~= nil and GameState.data.solo == true
+end

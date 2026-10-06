@@ -148,42 +148,44 @@ function ui_importDeck(player)
   if not seated(color) then
     return
   end
-  local text = pastedText[color]
+  closeImport(color)
+  TableUI.importFor(color, pastedText[color], color)
+end
 
+-- Import a deck list or an Archidekt / Moxfield link to a seat; messages go
+-- to `notify` (the player who asked). Used by the import panel and by
+-- "!import <Color> <link or list>" (solo testing).
+function TableUI.importFor(color, text, notify)
+  notify = notify or color
   local moxId = Archidekt.moxfieldId(text)
   if moxId then
-    closeImport(color)
-    broadcastToColor("Fetching Moxfield deck " .. moxId .. "...", color, { 0.7, 0.85, 1 })
+    broadcastToColor("Fetching Moxfield deck " .. moxId .. "...", notify, { 0.7, 0.85, 1 })
     Archidekt.fetchMoxfield(moxId, function(list, nameOrError)
       if list == nil then
-        broadcastToColor(nameOrError, color, { 1, 0.3, 0.3 })
+        broadcastToColor(nameOrError, notify, { 1, 0.3, 0.3 })
         return
       end
       if nameOrError then
-        broadcastToColor("Moxfield: " .. nameOrError, color, { 0.7, 0.85, 1 })
+        broadcastToColor("Moxfield: " .. nameOrError, notify, { 0.7, 0.85, 1 })
       end
       Importer.importDeck(color, list)
     end)
     return
   end
-
-  closeImport(color)
-
   local deckId = Archidekt.deckId(text)
   if deckId then
-    broadcastToColor("Fetching Archidekt deck " .. deckId .. "...", color, { 0.7, 0.85, 1 })
+    broadcastToColor("Fetching Archidekt deck " .. deckId .. "...", notify, { 0.7, 0.85, 1 })
     Archidekt.fetch(deckId, function(list, nameOrError)
       if list == nil then
-        broadcastToColor(nameOrError, color, { 1, 0.3, 0.3 })
+        broadcastToColor(nameOrError, notify, { 1, 0.3, 0.3 })
         return
       end
       if nameOrError then
-        broadcastToColor("Archidekt: " .. nameOrError, color, { 0.7, 0.85, 1 })
+        broadcastToColor("Archidekt: " .. nameOrError, notify, { 0.7, 0.85, 1 })
       end
       Importer.importDeck(color, list)
     end)
     return
   end
-
   Importer.importDeck(color, text)
 end
