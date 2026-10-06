@@ -97,6 +97,18 @@ end
 
 function counters_noop() end
 
+-- Other modules' buttons on the card, drawn after the counters label
+-- (render clears every button first): combat (combat.lua) and loyalty
+-- abilities (walkers.lua).
+function Counters.decorate(obj)
+  if Combat then
+    Combat.decorate(obj)
+  end
+  if Walkers then
+    Walkers.decorate(obj)
+  end
+end
+
 -- Label position on the card face (local units). Positive z is toward the
 -- bottom of the card (rules text), so the art is at negative z.
 local LABEL_Z = -0.75
@@ -130,9 +142,7 @@ function Counters.render(obj)
     table.insert(lines, tostring(c.other))
   end
   if #lines == 0 then
-    if Combat then
-      Combat.decorate(obj)
-    end
+    Counters.decorate(obj)
     return
   end
   obj.createButton({
@@ -151,9 +161,7 @@ function Counters.render(obj)
     font_color = { 1, 1, 1 },
     color = { 0, 0, 0, 0.8 },
   })
-  if Combat then
-    Combat.decorate(obj)
-  end
+  Counters.decorate(obj)
 end
 
 ---------------------------------------------------------------------------
@@ -179,9 +187,7 @@ function Counters.clear(obj)
   end
   obj.memo = ""
   obj.clearButtons()
-  if Combat then
-    Combat.decorate(obj)
-  end
+  Counters.decorate(obj)
 end
 
 ---------------------------------------------------------------------------

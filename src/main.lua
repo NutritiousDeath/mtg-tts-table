@@ -53,6 +53,7 @@ require("src/gamelog")
 require("src/stack")
 require("src/triggers")
 require("src/combat")
+require("src/walkers")
 require("src/tokens")
 require("src/ui")
 require("src/importcards")
@@ -75,7 +76,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.80 (Phase 7: combat assistant)"
+SCRIPT_VERSION = "0.81 (combat + planeswalker buttons)"
 
 function onLoad(saved)
   GameLog.setup()
