@@ -463,7 +463,9 @@ local function seated(color)
 end
 
 local function push(f)
-  Stack.pushAbility(f.controller, f.obj.getName(), f.text, faceOf(f.obj), { trigger = true })
+  -- that = "that player" in the effect (the one who drew, cast, whose
+  -- creature entered...), for auto-resolve (effects.lua).
+  Stack.pushAbility(f.controller, f.obj.getName(), f.text, faceOf(f.obj), { trigger = true, that = f.that })
 end
 
 local function shortText(f)
@@ -601,9 +603,12 @@ function Triggers.orderXml()
 end
 
 -- Found triggers go out one seat at a time, active player first.
-local function pushAll(found)
+local function pushAll(found, that)
   if #found == 0 then
     return
+  end
+  for _, f in ipairs(found) do
+    f.that = f.that or that
   end
   for _, seat in ipairs(turnOrder()) do
     local list = {}
@@ -642,7 +647,7 @@ Events.on("stepStarted", function(d)
       end
     end
   end
-  pushAll(found)
+  pushAll(found, d.seat)
 end)
 
 local IN_PLAY = { battlefield = true, lands = true }
@@ -670,7 +675,7 @@ Events.on("cardMoved", function(d)
         end
       end
     end
-    pushAll(found)
+    pushAll(found, d.to.seat)
     return
   end
   local entering = IN_PLAY[d.to.region] and not IN_PLAY[d.from.region]
@@ -703,7 +708,7 @@ Events.on("cardMoved", function(d)
   end
   -- "Whenever a creature dies" on a creature that died with it isn't
   -- checked (it's already in the graveyard): add those by hand.
-  pushAll(found)
+  pushAll(found, cardController)
 end)
 
 -- A spell was cast (put on the stack).
@@ -738,7 +743,7 @@ Events.on("spellCast", function(d)
       end
     end
   end
-  pushAll(found)
+  pushAll(found, d.controller)
 end)
 
 ---------------------------------------------------------------------------
@@ -855,7 +860,7 @@ function Triggers.onCombatDamage(list)
       end
     end
   end
-  pushAll(found)
+  pushAll(found, list[1] and list[1].seat)
 end
 
 -- Debug (!triggers card): what the table reads on the card under the mouse.

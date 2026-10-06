@@ -51,6 +51,7 @@ end
 -- Empty = nothing on the stack and no triggers waiting to be ordered.
 function Stack.isEmpty()
   return #items() == 0 and not (Triggers and Triggers.isOrdering and Triggers.isOrdering())
+    and not (Effects and Effects.isPending and Effects.isPending())
 end
 
 function Stack.size()
@@ -229,7 +230,7 @@ function Stack.pushAbility(controller, sourceName, text, image, opts)
   -- On the list right away (not when the picture has loaded), so the turn
   -- can't move on in the meantime.
   table.insert(items(), { guid = obj.getGUID(), kind = "ability", name = sourceName, controller = controller,
-    text = text, trigger = opts.trigger })
+    text = text, trigger = opts.trigger, that = opts.that, auto = (opts.trigger or opts.loyalty) and true or nil })
   Stack.render()
   if opts.trigger then
     log(sourceName .. " triggers (" .. controller .. "): " .. tostring(text or ""))
@@ -298,6 +299,10 @@ function Stack.resolveTop()
   if it.kind == "ability" then
     log(it.name .. "'s ability resolves.")
     obj.destruct()
+    -- Carry out what it says, when the table can (effects.lua).
+    if Effects then
+      Effects.resolve(it)
+    end
     return
   end
   local types = typesOf(obj)

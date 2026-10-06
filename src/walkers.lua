@@ -318,7 +318,7 @@ function Walkers.activate(obj, i, color, force)
   if force then
     printToAll("MTG > " .. color .. " activates " .. obj.getName() .. " " .. a.label .. " (checks skipped).", WARN)
   end
-  Stack.pushAbility(who, obj.getName(), a.label .. ": " .. a.text, faceOf(obj))
+  Stack.pushAbility(who, obj.getName(), a.label .. ": " .. a.text, faceOf(obj), { loyalty = true })
   if a.cost == nil then
     broadcastToColor("X ability: take X loyalty off " .. obj.getName() .. " yourself (right-click > Loyalty -1).",
       color, INFO)

@@ -25,6 +25,7 @@
     !layout 2    two players facing each other (White, Green)
     !search      search your library by name, type or rules text
     !triggers off / on   turn trigger detection off / on
+    !auto off / on       turn auto-resolving of simple effects off / on
     !triggers card       show the triggers read on the card under your mouse
     !solo on / off       solo test mode: one person plays every seat
     !import Red <link>   import an Archidekt / Moxfield link (or list) to a seat
@@ -57,6 +58,7 @@ require("src/stack")
 require("src/triggers")
 require("src/combat")
 require("src/walkers")
+require("src/effects")
 require("src/tokens")
 require("src/ui")
 require("src/importcards")
@@ -79,7 +81,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.89 (trigger panel labels, \"creature or planeswalker\" triggers)"
+SCRIPT_VERSION = "0.90 (Phase 8: auto-resolve life and draw)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -334,6 +336,13 @@ function onChat(message, sender)
   if message == "!triggers off" or message == "!triggers on" then
     Triggers.setEnabled(message == "!triggers on")
     broadcastToAll("Trigger detection " .. (message == "!triggers on" and "ON" or "OFF") .. " (by " .. sender.color .. ").",
+      { 0.7, 0.85, 1 })
+    return false
+  end
+
+  if message == "!auto off" or message == "!auto on" then
+    Effects.setEnabled(message == "!auto on")
+    broadcastToAll("Auto-resolve " .. (message == "!auto on" and "ON" or "OFF") .. " (by " .. sender.color .. ").",
       { 0.7, 0.85, 1 })
     return false
   end
