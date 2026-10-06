@@ -864,8 +864,11 @@ function Combat.xml()
       <Button id="cMinus_%d" onClick="ui_combat(%d_minus)" preferredWidth="28" preferredHeight="26" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold">-</Button>
       <Text id="cAmt_%d" preferredWidth="34" preferredHeight="26" fontSize="15" fontStyle="Bold" color="#FF6A7A">0</Text>
       <Button id="cPlus_%d" onClick="ui_combat(%d_plus)" preferredWidth="28" preferredHeight="26" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold">+</Button>
-      <Button id="cTog_%d" onClick="ui_combat(%d_toggle)" preferredWidth="74" preferredHeight="26" color="#5A1020" textColor="#FFE6EA" fontStyle="Bold" fontSize="12">DIES</Button>
-    </HorizontalLayout>]]):format(i, i, i, i, i, i, i, i, i))
+      <Panel id="cTog_%d" preferredWidth="74" preferredHeight="26">
+        <Button id="cTogBtn_%d" onClick="ui_combat(%d_toggle)" color="#5A1020" />
+        <Text id="cTogTxt_%d" raycastTarget="false" color="#FFE6EA" fontStyle="Bold" fontSize="12">DIES</Text>
+      </Panel>
+    </HorizontalLayout>]]):format(i, i, i, i, i, i, i, i, i, i, i))
   end
   return [[
 <Panel id="combatPanel" active="false" rectAlignment="UpperRight" offsetXY="-20 -170" width="560" height="300"
@@ -928,8 +931,8 @@ local function renderPanel()
       UI.setAttribute("cTog_" .. id, "active", v.kind == "toggle" and "true" or "false")
       if v.kind == "toggle" then
         local keep = c.keep[v.guid]
-        UI.setValue("cTog_" .. id, keep and "KEEPS" or "DIES")
-        UI.setAttribute("cTog_" .. id, "color", keep and "#1B4A2A" or "#5A1020")
+        UI.setValue("cTogTxt_" .. id, keep and "KEEPS" or "DIES")
+        UI.setAttribute("cTogBtn_" .. id, "color", keep and "#1B4A2A" or "#5A1020")
       end
     end
   end

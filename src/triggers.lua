@@ -188,21 +188,56 @@ local function parseTrigger(p)
   if plainFind(p, "when ~ enters") or plainFind(p, "whenever ~ enters") or plainFind(p, "when ~ and ") and plainFind(p, " enter") then
     return { kind = "enters", self = true }
   end
-  for _, subj in ipairs(SUBJECTS) do
-    for _, other in ipairs({ "another ", "a ", "an " }) do
-      for _, nontoken in ipairs({ "nontoken ", "" }) do
-        local head = "whenever " .. other .. nontoken .. subj
-        local s = p:find(head, 1, true)
-        if s then
-          local rest = p:sub(s + #head, s + #head + 40)
-          if rest:sub(1, 7) == " enters" or rest:find("^ you control enters") or rest:find("^ an opponent controls enters") then
-            return { kind = "enters", subject = subj, another = other == "another ", nontoken = nontoken ~= "",
-              mine = rest:find("^ you control") ~= nil, theirs = rest:find("^ an opponent controls") ~= nil }
+  -- "Whenever [another / a / an / one or more [other]] [nontoken] <types>
+  -- [you control / an opponent controls] enters / dies". The subject is
+  -- the words between "whenever" and the verb; several types joined by "or"
+  -- ("creature or planeswalker") all count. Plain searches only (long rules
+  -- text breaks TTS's pattern matching).
+  local at = 1
+  while true do
+    local w = p:find("whenever ", at, true)
+    if not w then
+      break
+    end
+    at = w + 9
+    local window = p:sub(w + 9, w + 9 + 80)
+    local verbAt, kind
+    local e = window:find(" enter", 1, true)
+    local d = window:find(" die", 1, true)
+    if e and (not d or e < d) then
+      verbAt, kind = e, "enters"
+    elseif d then
+      verbAt, kind = d, "dies"
+    end
+    if verbAt then
+      local subj = window:sub(1, verbAt - 1)
+      local lead
+      for _, l in ipairs({ "another ", "a ", "an ", "one or more other ", "one or more " }) do
+        if lead == nil and subj:sub(1, #l) == l then
+          lead = l
+        end
+      end
+      local clean = lead and not subj:find("~", 1, true) and not subj:find(",", 1, true)
+        and not subj:find(".", 1, true)
+      if clean then
+        local types = {}
+        for _, t in ipairs(SUBJECTS) do
+          if subj:find(t, 1, true) then
+            table.insert(types, t)
           end
-          if rest:sub(1, 5) == " dies" or rest:find("^ you control dies") or rest:find("^ an opponent controls dies") then
-            return { kind = "dies", subject = subj, another = other == "another ", nontoken = nontoken ~= "",
-              mine = rest:find("^ you control") ~= nil, theirs = rest:find("^ an opponent controls") ~= nil }
-          end
+        end
+        -- Older wording: "enters the battlefield under your control".
+        local after = window:sub(verbAt, verbAt + 45)
+        local underMine = after:find("under your control", 1, true) ~= nil
+        local underTheirs = after:find("under an opponent's control", 1, true) ~= nil
+        if #types > 0 then
+          return { kind = kind, subject = types[1], subjects = types,
+            another = lead == "another " or lead == "one or more other ",
+            nontoken = subj:find("nontoken", 1, true) ~= nil,
+            tokenOnly = subj:find(" token", 1, true) ~= nil and subj:find("nontoken", 1, true) == nil,
+            mine = subj:find("you control", 1, true) ~= nil or underMine,
+            theirs = subj:find("an opponent controls", 1, true) ~= nil or subj:find("your opponents control", 1, true) ~= nil
+              or underTheirs }
         end
       end
     end
@@ -344,10 +379,17 @@ local function typesOf(obj)
 end
 
 local function matchesSubject(obj, trig)
-  if trig.subject == nil or trig.subject == "permanent" then
-    return true
+  local list = trig.subjects or { trig.subject }
+  local types = typesOf(obj)
+  if trig.tokenOnly and not (obj.hasTag("Token") or types.token) then
+    return false
   end
-  return typesOf(obj)[trig.subject] == true
+  for _, sub in ipairs(list) do
+    if sub == nil or sub == "permanent" or types[sub] then
+      return true
+    end
+  end
+  return #list == 0
 end
 
 local function isToken(obj)
@@ -443,9 +485,10 @@ local function renderOrder()
         UI.setAttribute(id, "active", f and "true" or "false")
         if f then
           local n = o.picks[i]
-          UI.setValue(id, (n and ("[" .. n .. "]  ") or "") .. shortText(f))
-          UI.setAttribute(id, "tooltip", f.obj.getName() .. "\n" .. tostring(f.text or ""))
-          UI.setAttribute(id, "color", n and "#1B4A5A" or "#141B26")
+          local key = c .. "_" .. i
+          UI.setValue("trigTxt_" .. key, (n and ("[" .. n .. "]  ") or "") .. shortText(f))
+          UI.setAttribute("trigBtn_" .. key, "tooltip", f.obj.getName() .. "\n" .. tostring(f.text or ""))
+          UI.setAttribute("trigBtn_" .. key, "color", n and "#1B4A5A" or "#141B26")
         end
       end
       UI.setAttribute("trigOrder_" .. c, "height", tostring(118 + 40 * #o.list))
@@ -531,8 +574,12 @@ function Triggers.orderXml()
   for _, c in ipairs(TableSetup.activeSeats()) do
     local rows = {}
     for i = 1, MAX_ORDER do
-      table.insert(rows, ('      <Button id="trigRow_%s_%d" active="false" onClick="ui_trigOrder(%s_%d)" preferredHeight="34" '
-        .. 'color="#141B26" textColor="#E6F1FF" fontSize="13" tooltipPosition="Above">-</Button>'):format(c, i, c, i))
+      -- A Text over the button carries the label (changing a Button's own
+      -- text from script didn't show in TTS).
+      table.insert(rows, ('      <Panel id="trigRow_%s_%d" active="false" preferredHeight="34">'
+        .. '<Button id="trigBtn_%s_%d" onClick="ui_trigOrder(%s_%d)" color="#141B26" tooltipPosition="Above" />'
+        .. '<Text id="trigTxt_%s_%d" raycastTarget="false" fontSize="13" color="#E6F1FF" alignment="MiddleLeft" '
+        .. 'rectAlignment="MiddleCenter" offsetXY="10 0">-</Text></Panel>'):format(c, i, c, i, c, i, c, i))
     end
     table.insert(parts, ([[
 <Panel id="trigOrder_%s" visibility="%s" active="false" rectAlignment="MiddleCenter" offsetXY="0 60" width="600" height="200"

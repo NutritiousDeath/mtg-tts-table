@@ -79,7 +79,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.88 (order your own triggers)"
+SCRIPT_VERSION = "0.89 (trigger panel labels, \"creature or planeswalker\" triggers)"
 
 function onLoad(saved)
   GameLog.setup()
