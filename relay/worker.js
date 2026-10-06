@@ -441,6 +441,8 @@ function archidektToDecklist(deck) {
   const commanders = [];
   const main = [];
   for (const entry of deck.cards || []) {
+    // Cards removed from an Archidekt deck stay in its data, marked deleted.
+    if (entry.deletedAt) continue;
     const card = entry.card || {};
     const name = card.oracleCard && card.oracleCard.name;
     if (!name) continue;

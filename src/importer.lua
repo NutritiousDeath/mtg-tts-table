@@ -728,6 +728,19 @@ function Importer.tokenInfo(tpl)
   }
 end
 
+-- Tell the player which tokens from their list were kept out of the library.
+function Importer.announceTokens(color, deckTokens)
+  if #deckTokens == 0 then
+    return
+  end
+  local names = {}
+  for _, tk in ipairs(deckTokens) do
+    table.insert(names, tk.name)
+  end
+  broadcastToColor(#deckTokens .. " token" .. (#deckTokens == 1 and "" or "s") .. " in your list kept out of the library: "
+    .. table.concat(names, ", ") .. ". Click your TOKENS tile to create them.", color, { 0.7, 0.85, 1 })
+end
+
 -- Shared with tokens.lua (token search spawns cards the same way).
 Importer.RELAY_HOST = RELAY_HOST
 Importer.splitPlain = splitPlain
@@ -872,9 +885,16 @@ function Importer.importDeck(color, text)
       end
     end
 
+    local deckTokens = {}
     for _, e in ipairs(deck.main) do
       local card = resolve(e)
-      if card then
+      local typeLine = card and tostring(card.type_line or "") or ""
+      if card and (typeLine:sub(1, 6) == "Token " or typeLine:sub(1, 6) == "Emblem") then
+        -- Tokens / emblems in the list go to the TOKENS tile, not the library.
+        local json = JSON.encode(buildCard(card, false))
+        table.insert(deckTokens, { name = card.name, typeLine = typeLine,
+          image = json:match('"FaceURL":"([^"]+)"') or "", tpl = json })
+      elseif card then
         for _ = 1, e.count do
           table.insert(mainCards, buildCard(card, false))
         end
@@ -895,7 +915,9 @@ function Importer.importDeck(color, text)
       for _, e in ipairs(deck.commanders) do
         table.insert(player.commanderNames, e.name)
       end
+      player.deckTokens = deckTokens
     end
+    Importer.announceTokens(color, deckTokens)
 
     progress("Spawning " .. #mainCards .. " cards...")
 
@@ -1041,14 +1063,7 @@ function Importer.importDeck(color, text)
     if player then
       player.deckTokens = deckTokens
     end
-    if #deckTokens > 0 then
-      local names = {}
-      for _, tk in ipairs(deckTokens) do
-        table.insert(names, tk.name)
-      end
-      broadcastToColor(#deckTokens .. " token" .. (#deckTokens == 1 and "" or "s") .. " in your list kept out of the library: "
-        .. table.concat(names, ", ") .. ". Click your TOKENS tile to create them.", color, { 0.7, 0.85, 1 })
-    end
+    Importer.announceTokens(color, deckTokens)
 
     progress("Spawning " .. #mainCards .. " cards...")
     if #mainCards == 1 then
