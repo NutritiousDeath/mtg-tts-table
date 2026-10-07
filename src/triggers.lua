@@ -465,7 +465,7 @@ end
 local function push(f)
   -- that = "that player" in the effect (the one who drew, cast, whose
   -- creature entered...), for auto-resolve (effects.lua).
-  Stack.pushAbility(f.controller, f.obj.getName(), f.text, faceOf(f.obj), { trigger = true, that = f.that })
+  Stack.pushAbility(f.controller, f.name or "?", f.text, f.face or "", { trigger = true, that = f.that })
 end
 
 local function shortText(f)
@@ -473,7 +473,7 @@ local function shortText(f)
   if #t > 70 then
     t = t:sub(1, 68) .. "..."
   end
-  return f.obj.getName() .. ": " .. t
+  return tostring(f.name) .. ": " .. t
 end
 
 local function renderOrder()
@@ -489,7 +489,7 @@ local function renderOrder()
           local n = o.picks[i]
           local key = c .. "_" .. i
           UI.setValue("trigTxt_" .. key, (n and ("[" .. n .. "]  ") or "") .. shortText(f))
-          UI.setAttribute("trigBtn_" .. key, "tooltip", f.obj.getName() .. "\n" .. tostring(f.text or ""))
+          UI.setAttribute("trigBtn_" .. key, "tooltip", tostring(f.name) .. "\n" .. tostring(f.text or ""))
           UI.setAttribute("trigBtn_" .. key, "color", n and "#1B4A5A" or "#141B26")
         end
       end
@@ -609,6 +609,13 @@ local function pushAll(found, that)
   end
   for _, f in ipairs(found) do
     f.that = f.that or that
+    -- Name and picture now: the card object can be gone by the time the
+    -- trigger goes on the stack (merged into a pile, replaced...).
+    if f.name == nil then
+      local ok, name = pcall(function() return f.obj.getName() end)
+      f.name = ok and name or "Trigger"
+      f.face = faceOf(f.obj)
+    end
   end
   for _, seat in ipairs(turnOrder()) do
     local list = {}

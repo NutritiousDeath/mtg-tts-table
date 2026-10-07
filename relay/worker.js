@@ -175,7 +175,11 @@ async function scryfallCollection(identifiers) {
     },
     body: JSON.stringify({ identifiers }),
   });
-  if (!res.ok) throw new Error("Scryfall returned " + res.status);
+  if (!res.ok) {
+    let detail = "";
+    try { detail = (await res.text()).slice(0, 200); } catch (e) {}
+    throw new Error("Scryfall returned " + res.status + " " + detail.replace(/[\t\r\n]+/g, " "));
+  }
   const body = await res.json();
   return body.data || [];
 }
@@ -367,8 +371,14 @@ async function handleCards(request, host) {
       return;
     }
     if (fixed.has(i)) lines.push("FIXED\t" + i + "\t" + clean(it.name));
-    const [tpl, entryTpl] = buildTemplates(card, !!it.commander, host);
-    lines.push("CARD\t" + i + "\t" + tpl + "\t" + entryTpl);
+    // One odd card shouldn't fail the whole batch: report it and go on.
+    try {
+      const [tpl, entryTpl] = buildTemplates(card, !!it.commander, host);
+      lines.push("CARD\t" + i + "\t" + tpl + "\t" + entryTpl);
+    } catch (err) {
+      lines.push("MISS\t" + i + "\t" + clean(it.name));
+      lines.push("WARN\t" + i + "\t" + clean(it.name + ": " + String(err && err.message ? err.message : err)));
+    }
   });
 
   return new Response(lines.join("\n"), {

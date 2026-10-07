@@ -832,6 +832,8 @@ local function parseRelayText(text, first, results)
         table.insert(results.missing, f[3] or "?")
       elseif kind == "FIXED" then
         table.insert(results.fixed, f[3] or "?")
+      elseif kind == "WARN" then
+        printToAll("MTG > Relay couldn't build " .. tostring(f[3]), { 1, 0.6, 0.2 })
       end
     end
   end
@@ -866,7 +868,14 @@ local function fetchViaRelay(entries, onDone, onProgress)
       ["Accept"] = "text/plain",
     }, function(req)
       if req.is_error or req.response_code ~= 200 then
-        onDone(nil, "HTTP " .. tostring(req.response_code))
+        -- The relay says what went wrong as "ERROR <tab> message".
+        local body = tostring(req.text or "")
+        local tab = body:find("\t", 1, true)
+        if tab then
+          body = body:sub(tab + 1)
+        end
+        body = body:sub(1, 160)
+        onDone(nil, "HTTP " .. tostring(req.response_code) .. (body ~= "" and (": " .. body) or ""))
         return
       end
       local ok, err = pcall(parseRelayText, req.text, first, results)
