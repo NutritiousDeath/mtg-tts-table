@@ -64,6 +64,7 @@ local function state()
   c.blocks = c.blocks or {}         -- [blocker guid] = attacker guid
   c.blockOrder = c.blockOrder or {} -- [attacker guid] = { blocker guids }
   c.blocked = c.blocked or {}       -- [attacker guid] = true once blocks lock
+  c.extra = c.extra or {}           -- [blocker guid] = { further attacker guids } (blocks more than one)
   c.marked = c.marked or {}         -- damage marked on creatures this combat
   c.gone = c.gone or {}             -- [guid] = true: died / left this combat
   c.keep = c.keep or {}             -- [guid] = true: player flipped DIES -> KEEPS
@@ -372,6 +373,9 @@ function Combat.decorate(card)
   elseif c.blocks and c.blocks[guid] then
     local a = obj(c.blocks[guid])
     label = "BLOCKING\n" .. short(a and a.getName())
+    if c.extra and c.extra[guid] and #c.extra[guid] > 0 then
+      label = label .. " +" .. #c.extra[guid]
+    end
     bg = { 0.05, 0.3, 0.55, 0.92 }
     tip = step == "blockers" and "Blocking. Click: next attacker. Right-click: not blocking." or "Blocking"
   elseif step == "attackers" and not c.declared and seat == turn().activeSeat
@@ -542,6 +546,15 @@ local function unblock(blockerGuid)
     end
   end
   c.blocks[blockerGuid] = nil
+  for _, ag in ipairs(c.extra[blockerGuid] or {}) do
+    for i, g in ipairs(c.blockOrder[ag] or {}) do
+      if g == blockerGuid then
+        table.remove(c.blockOrder[ag], i)
+        break
+      end
+    end
+  end
+  c.extra[blockerGuid] = nil
   return a
 end
 
@@ -638,6 +651,9 @@ local function lockBlocks()
         table.insert(names, b.getName())
       end
       table.insert(parts, (a and a.getName() or "?") .. " blocked by " .. table.concat(names, " + "))
+      if #bl > 1 then
+        table.insert(parts, "damage order for " .. (a and a.getName() or "?") .. ": " .. table.concat(names, " then "))
+      end
       if a and hasKeyword(a, "Menace") and #bl == 1 then
         broadcastToAll(a.getName() .. " has menace: it needs two or more blockers. Fix the blocks if this is wrong.", WARN)
       end
@@ -761,7 +777,9 @@ local function buildRows(phase)
         local b = live(bg)
         if b and dealsIn(b, phase) then
           local power = stats(b)
-          add({ kind = "creature", src = bg, dst = ag, amount = power })
+          local more = #(c.extra[bg] or {})
+          add({ kind = "creature", src = bg, dst = ag, amount = power,
+            note = more > 0 and ("blocks " .. (more + 1) .. " attackers: split its power") or nil })
         end
       end
     end
@@ -1212,7 +1230,79 @@ function combat_cardClick(card, color, alt)
   end
 end
 
+-- A blocker that can block an additional creature (Palace Guard and the like).
+function Combat.alsoBlock(card, color)
+  local c = state()
+  if stepId() ~= "blockers" then
+    broadcastToColor("Extra blocks are set in the BLOCK step.", color, WARN)
+    return
+  end
+  if GameState.solo() then
+    color = controller(card) or color
+  end
+  local guid = card.getGUID()
+  if controller(card) ~= color or c.blocks[guid] == nil then
+    broadcastToColor("Block with this creature first (click BLOCK?), then use Also block.", color, WARN)
+    return
+  end
+  local have = { [c.blocks[guid]] = true }
+  for _, g in ipairs(c.extra[guid] or {}) do
+    have[g] = true
+  end
+  for _, g in ipairs(c.order) do
+    if live(g) and not have[g] and targetSeat(c.attackers[g]) == color then
+      c.extra[guid] = c.extra[guid] or {}
+      table.insert(c.extra[guid], g)
+      c.blockOrder[g] = c.blockOrder[g] or {}
+      table.insert(c.blockOrder[g], guid)
+      broadcastToAll(card.getName() .. " also blocks " .. (obj(g) and obj(g).getName() or "?")
+        .. ". Its power will be split: edit the numbers in the damage panel.", { 0.4, 0.7, 1 })
+      redraw(card)
+      redraw(obj(g))
+      return
+    end
+  end
+  broadcastToColor("No other attacker for " .. card.getName() .. " to block.", color, WARN)
+end
+
+-- Several blockers on one attacker: the attacker's controller picks the order
+-- damage is dealt in. Each use moves the first blocker to the back.
+function Combat.cycleOrder(card, color)
+  local c = state()
+  local guid = card.getGUID()
+  if stepId() ~= "blockers" then
+    broadcastToColor("Set the damage order in the BLOCK step.", color, WARN)
+    return
+  end
+  if c.attackers[guid] == nil then
+    broadcastToColor("Use this on an attacking creature.", color, WARN)
+    return
+  end
+  local list = c.blockOrder[guid] or {}
+  if #list < 2 then
+    broadcastToColor(card.getName() .. " has fewer than two blockers.", color, WARN)
+    return
+  end
+  table.insert(list, table.remove(list, 1))
+  local names = {}
+  for _, g in ipairs(list) do
+    local b = obj(g)
+    table.insert(names, b and b.getName() or "?")
+  end
+  broadcastToAll(card.getName() .. " damage order: " .. table.concat(names, " then "), { 0.4, 0.7, 1 })
+end
+
 function Combat.addCardMenu(card)
+  card.addContextMenuItem("Also block next attacker", function(playerColor)
+    if not card.isDestroyed() then
+      Combat.alsoBlock(card, playerColor)
+    end
+  end)
+  card.addContextMenuItem("Damage order (cycle blockers)", function(playerColor)
+    if not card.isDestroyed() then
+      Combat.cycleOrder(card, playerColor)
+    end
+  end)
   card.addContextMenuItem("Attack / Block", function(playerColor)
     if not card.isDestroyed() then
       click(card, playerColor, false)
