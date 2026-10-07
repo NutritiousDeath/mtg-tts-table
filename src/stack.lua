@@ -230,7 +230,7 @@ function Stack.pushAbility(controller, sourceName, text, image, opts)
   -- On the list right away (not when the picture has loaded), so the turn
   -- can't move on in the meantime.
   table.insert(items(), { guid = obj.getGUID(), kind = "ability", name = sourceName, controller = controller,
-    text = text, trigger = opts.trigger, that = opts.that,
+    text = text, trigger = opts.trigger, that = opts.that, source = opts.source,
     auto = (opts.trigger or opts.loyalty or opts.activated) and true or nil })
   Stack.render()
   if opts.trigger then
@@ -638,11 +638,31 @@ function Stack.activate(obj, playerColor, ab)
   end
   local nameLow = tostring(cardName):lower()
   local sacSelf = low:find("sacrifice " .. nameLow, 1, true) ~= nil or low:find("sacrifice this", 1, true) ~= nil
+    or low:find("sacrifice it", 1, true) ~= nil
+  -- "Remove three quest counters from ~": check there are enough, take them off.
+  local remWord, remKind = low:match("remove (%w+) ([%w%+/%-]+) counters? from")
+  local NUM = { a = 1, an = 1, one = 1, two = 2, three = 3, four = 4, five = 5, six = 6, seven = 7, eight = 8, nine = 9, ten = 10 }
+  local remN = remWord and (tonumber(remWord) or NUM[remWord])
+  local remKey
+  if remN then
+    remKey = (remKind == "+1/+1" and "plus") or (remKind == "-1/-1" and "minus") or (remKind == "loyalty" and "loyalty")
+      or "other"
+    local have = Counters.get(obj)[remKey] or 0
+    if have < remN then
+      broadcastToColor(obj.getName() .. " has only " .. have .. " " .. remKind .. " counter" .. (have == 1 and "" or "s")
+        .. " (needs " .. remN .. ").", playerColor, WARN)
+      return
+    end
+  end
   local paid, yours = {}, {}
   if tap then
     local r = obj.getRotation()
     obj.setRotationSmooth({ r.x, (TableSetup.seat(seat).yaw + 90) % 360, r.z }, false, true)
     table.insert(paid, "tapped it")
+  end
+  if remN then
+    Counters.change(obj, remKey, -remN, playerColor)
+    table.insert(paid, "removed " .. remN .. " " .. remKind .. " counters")
   end
   local life = tonumber(low:match("pay (%d+) life") or "")
   if life then
@@ -651,8 +671,11 @@ function Stack.activate(obj, playerColor, ab)
   end
   -- What's left for the player: mana symbols and other costs.
   local rest = low:gsub("{t}", ""):gsub("pay %d+ life", "")
+  if remN then
+    rest = rest:gsub("remove %w+ [%w%+/%-]+ counters? from [^,]*", "")
+  end
   if sacSelf then
-    rest = rest:gsub("sacrifice this %a+", ""):gsub("sacrifice " .. nameLow:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "")
+    rest = rest:gsub("sacrifice this %a+", ""):gsub("sacrifice it", ""):gsub("sacrifice " .. nameLow:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "")
   end
   if rest:find("{", 1, true) then
     table.insert(yours, "the mana")
@@ -669,7 +692,7 @@ function Stack.activate(obj, playerColor, ab)
       break
     end
   end)
-  Stack.pushAbility(seat, obj.getName(), ab.effect, face, { activated = true })
+  Stack.pushAbility(seat, obj.getName(), ab.effect, face, { activated = true, source = obj.getGUID() })
   if sacSelf then
     table.insert(paid, "sacrificed it")
     sacrifice(obj, seat)

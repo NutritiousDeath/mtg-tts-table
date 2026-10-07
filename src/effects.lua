@@ -66,7 +66,7 @@ end
 
 -- Parse an effect: { optional = bool, actions = { { what, who, n } } } or
 -- nil (nothing it can do), plus the reason when it's left to the players.
-function Effects.parse(text)
+function Effects.parse(text, sourceName)
   -- Drop keyword-only lines ("Flash", "Flying, trample"): no period.
   local kept = {}
   local raw = tostring(text or "")
@@ -81,6 +81,23 @@ function Effects.parse(text)
   end
   text = table.concat(kept, "\n")
   local t = " " .. effectPart(tostring(text or ""):lower()) .. " "
+  -- The card's own name (and "this creature" etc.) as "~".
+  local function swap(n)
+    if n and #n > 1 then
+      local esc = n:lower():gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1")
+      t = t:gsub(esc, "~")
+    end
+  end
+  if sourceName then
+    swap(sourceName)
+    local comma = sourceName:find(",", 1, true)
+    if comma then
+      swap(sourceName:sub(1, comma - 1))
+    end
+  end
+  for _, w in ipairs({ "creature", "land", "enchantment", "artifact", "permanent", "planeswalker" }) do
+    t = t:gsub("this " .. w, "~")
+  end
   if t:find("\n", 1, true) then
     return nil, "several abilities"
   end
@@ -150,6 +167,24 @@ function Effects.parse(text)
     table.insert(actions, { what = "search", who = "you", n = 1, query = q, where = where,
       tapped = rest:find("battlefield tapped", 1, true) ~= nil, phrase = phrase })
   end
+  -- "put a quest counter on ~": counters on the card itself.
+  local cn, ckind = t:match("put (%w+) ([%w%+/%-]+) counters? on ~")
+  if cn and num(cn) then
+    local kind = (ckind == "+1/+1" and "plus") or (ckind == "-1/-1" and "minus") or (ckind == "loyalty" and "loyalty")
+      or "other"
+    table.insert(actions, { what = "counter", who = "you", n = num(cn), kind = kind, label = ckind })
+  end
+  -- "return a land you control to its owner's hand" (bounce lands),
+  -- "return target creature to its owner's hand": pick it on the table.
+  local btype = t:match("return an? (%a+) you control to its owner's hand")
+  if btype then
+    table.insert(actions, { what = "bounce", who = "you", n = 1, type = btype, mine = true })
+  else
+    btype = t:match("return target (%a+) to its owner's hand")
+    if btype then
+      table.insert(actions, { what = "bounce", who = "you", n = 1, type = btype, mine = false })
+    end
+  end
   if #actions == 0 then
     return nil, "nothing it can apply on its own"
   end
@@ -178,6 +213,10 @@ local function describe(a, target, controller)
   local you = who == "you"
   if a.what == "search" then
     return who .. (you and " search " or " searches ") .. "the library for " .. tostring(a.phrase)
+  elseif a.what == "counter" then
+    return a.n .. " " .. tostring(a.label) .. " counter" .. (a.n == 1 and "" or "s") .. " added"
+  elseif a.what == "bounce" then
+    return who .. " returns a " .. tostring(a.type) .. " to hand"
   end
   if a.what == "gain" then
     return who .. (you and " gain " or " gains ") .. a.n .. " life"
@@ -227,6 +266,15 @@ local function apply(it, plan, target)
             how = "click the card to put it into your hand"
           end
           LibSearch.open(seat, a.query, it.name .. " (" .. tostring(a.phrase) .. "): " .. how .. ", then CLOSE + SHUFFLE.")
+        elseif a.what == "counter" then
+          local src = it.source and getObjectFromGUID(it.source)
+          if src and not src.isDestroyed() then
+            Counters.change(src, a.kind, a.n, seat)
+          else
+            broadcastToColor(it.name .. " isn't on the table any more: no counter added.", seat, INFO)
+          end
+        elseif a.what == "bounce" then
+          Effects.pickBounce(seat, a, it.name)
         end
       end
     end
@@ -251,7 +299,22 @@ local function seated(color)
   return ok and yes
 end
 
+local pickShown = false   -- card buttons are up for a "pick a permanent" question
+
+-- Redraw every card on the battlefields (their buttons come from
+-- Counters.render, which calls Effects.decorate).
+local function refreshCards()
+  if Combat and Combat.refresh then
+    Combat.refresh()
+  end
+end
+
 local function render()
+  local picking = current ~= nil and current.pick ~= nil
+  if picking or pickShown then
+    pickShown = picking
+    refreshCards()
+  end
   for _, c in ipairs(TableSetup.activeSeats()) do
     local q = current and current.seat == c and current or nil
     UI.setAttribute("effAsk_" .. c, "active", q and "true" or "false")
@@ -299,8 +362,8 @@ local function nextQuestion()
   render()
 end
 
-local function ask(seat, title, text, choices, onPick)
-  table.insert(queue, { seat = seat, title = title, text = text, choices = choices, onPick = onPick })
+local function ask(seat, title, text, choices, onPick, pick)
+  table.insert(queue, { seat = seat, title = title, text = text, choices = choices, onPick = onPick, pick = pick })
   if current == nil then
     nextQuestion()
   end
@@ -361,7 +424,7 @@ function Effects.resolve(it)
   if not enabled() or not it.auto or not GameState.data.started then
     return
   end
-  local plan, why = Effects.parse(it.text)
+  local plan, why = Effects.parse(it.text, it.name)
   if plan == nil then
     printToAll("MTG > " .. it.name .. ": resolve it by hand (" .. tostring(why) .. ").", INFO)
     return
@@ -433,3 +496,164 @@ function Effects.resolveSpell(obj, controller)
   end
   Effects.resolve({ name = obj.getName(), controller = controller, text = text, auto = true })
 end
+
+---------------------------------------------------------------------------
+-- Picking a permanent on the table (bounce lands, "return target ...")
+---------------------------------------------------------------------------
+
+local function cardTypes(obj)
+  local t = {}
+  pcall(function()
+    local d = JSON.decode(obj.getGMNotes())
+    for _, n in ipairs(type(d) == "table" and d.types or {}) do
+      t[tostring(n):lower()] = true
+    end
+  end)
+  return t
+end
+
+local function fieldSeat(obj)
+  local loc = Zones.regionAt(obj.getPosition())
+  if loc.region == "battlefield" or loc.region == "lands" then
+    return loc.seat
+  end
+  return nil
+end
+
+-- A card button on each permanent that can be picked.
+function Effects.decorate(obj)
+  local q = current
+  if q == nil or q.pick == nil or obj.is_face_down then
+    return
+  end
+  local seat = fieldSeat(obj)
+  if seat == nil or not q.pick.filter(obj, seat) then
+    return
+  end
+  obj.createButton({
+    click_function = "effects_cardPick",
+    function_owner = Global,
+    label = q.pick.label,
+    tooltip = q.title,
+    position = { 0, 0.3, 0.5 },
+    rotation = { 0, 0, 0 },
+    width = 800,
+    height = 260,
+    font_size = 160,
+    font_color = { 1, 1, 1 },
+    color = { 0.05, 0.45, 0.55, 0.95 },
+  })
+end
+
+function effects_cardPick(obj, color, alt)
+  local q = current
+  if q == nil or q.pick == nil or obj == nil or obj.isDestroyed() then
+    return
+  end
+  if color ~= q.seat and not GameState.solo() then
+    broadcastToColor("That's " .. q.seat .. "'s choice.", color, INFO)
+    return
+  end
+  current = nil
+  UI.setAttribute("effAsk_" .. q.seat, "visibility", q.seat)
+  Counters.render(obj)   -- its RETURN button goes before it moves
+  q.onPick(obj)
+  nextQuestion()
+end
+
+local function returnToHand(obj)
+  local seat = fieldSeat(obj)
+  if seat == nil then
+    return
+  end
+  if obj.hasTag("Token") then
+    printToAll("MTG > " .. obj.getName() .. " (a token) left the battlefield and is gone.", INFO)
+    obj.destruct()
+    return
+  end
+  local s = TableSetup.seat(seat)
+  obj.setRotationSmooth({ 0, s.yaw, 0 }, false, true)
+  obj.setPositionSmooth(Player[seat].getHandTransform().position, false, true)
+  printToAll("MTG > " .. obj.getName() .. " returned to " .. seat .. "'s hand.", GOOD)
+end
+
+function Effects.pickBounce(seat, a, sourceName)
+  local want = tostring(a.type)
+  local filter = function(obj, owner)
+    if a.mine and owner ~= seat then
+      return false
+    end
+    local t = cardTypes(obj)
+    if want == "permanent" then
+      return true
+    elseif want == "nonland" then
+      return not t.land
+    end
+    return t[want] == true
+  end
+  ask(seat, sourceName .. ": return a " .. want, "Click RETURN on the " .. want .. " to return to its owner's hand.",
+    { { label = "SKIP", value = false } }, function(obj)
+      if obj then
+        returnToHand(obj)
+      else
+        printToAll("MTG > " .. sourceName .. ": nothing returned.", INFO)
+      end
+    end, { filter = filter, label = "RETURN" })
+end
+
+---------------------------------------------------------------------------
+-- "Enters tapped" (not a trigger): tap the permanent as it enters.
+---------------------------------------------------------------------------
+
+local ON_FIELD = { battlefield = true, lands = true }
+
+Events.on("cardMoved", function(d)
+  if not enabled() or not GameState.data.started or d.card == nil or d.to == nil then
+    return
+  end
+  if not ON_FIELD[d.to.region] or (d.from and ON_FIELD[d.from.region]) then
+    return
+  end
+  local card = d.card
+  if card.isDestroyed() or card.is_face_down then
+    return
+  end
+  local name, oracle = card.getName(), ""
+  pcall(function()
+    local data = JSON.decode(card.getGMNotes())
+    if type(data) == "table" then
+      oracle = type(data.oracle) == "string" and data.oracle or ""
+      name = data.name or name
+    end
+  end)
+  local t = oracle:lower()
+  local function swap(n)
+    if n and #n > 1 then
+      t = t:gsub(n:lower():gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "~")
+    end
+  end
+  swap(name)
+  for _, w in ipairs({ "creature", "land", "enchantment", "artifact", "permanent" }) do
+    t = t:gsub("this " .. w, "~")
+  end
+  local at = t:find("~ enters tapped", 1, true) or t:find("~ enters the battlefield tapped", 1, true)
+  if at == nil then
+    return
+  end
+  local stop = t:find(".", at, true) or #t
+  local clause = t:sub(at, stop)
+  local seat = d.to.seat
+  if clause:find("unless", 1, true) or clause:find(" if ", 1, true) then
+    broadcastToColor(card.getName() .. " may enter tapped (" .. clause .. "): tap it if it does.", seat, INFO)
+    return
+  end
+  Wait.time(function()
+    if card.isDestroyed() then
+      return
+    end
+    local s = TableSetup.seat(seat)
+    local r = card.getRotation()
+    card.setRotationSmooth({ r.x, (s.yaw + 90) % 360, r.z }, false, true)
+    printToAll("MTG > " .. card.getName() .. " enters tapped.", INFO)
+  end, 0.8)
+end)

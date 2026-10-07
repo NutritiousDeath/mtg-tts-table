@@ -107,6 +107,9 @@ function Counters.decorate(obj)
   if Walkers then
     Walkers.decorate(obj)
   end
+  if Effects and Effects.decorate then
+    Effects.decorate(obj)
+  end
 end
 
 -- Label position on the card face (local units). Positive z is toward the

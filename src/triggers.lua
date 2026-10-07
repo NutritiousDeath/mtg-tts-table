@@ -465,7 +465,7 @@ end
 local function push(f)
   -- that = "that player" in the effect (the one who drew, cast, whose
   -- creature entered...), for auto-resolve (effects.lua).
-  Stack.pushAbility(f.controller, f.name or "?", f.text, f.face or "", { trigger = true, that = f.that })
+  Stack.pushAbility(f.controller, f.name or "?", f.text, f.face or "", { trigger = true, that = f.that, source = f.guid })
 end
 
 local function shortText(f)
@@ -614,6 +614,8 @@ local function pushAll(found, that)
     if f.name == nil then
       local ok, name = pcall(function() return f.obj.getName() end)
       f.name = ok and name or "Trigger"
+      local ok2, guid = pcall(function() return f.obj.getGUID() end)
+      f.guid = ok2 and guid or nil
       f.face = faceOf(f.obj)
     end
   end
