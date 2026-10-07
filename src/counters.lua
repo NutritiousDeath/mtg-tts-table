@@ -28,7 +28,9 @@
 
 Counters = {}
 
-local KINDS = { "plus", "minus", "loyalty", "other" }
+-- tp / tt: power / toughness changes until end of turn ("gets +2/+0 until
+-- end of turn", effects.lua); they can be negative and clear at cleanup.
+local KINDS = { "plus", "minus", "loyalty", "other", "tp", "tt" }
 
 ---------------------------------------------------------------------------
 -- Storage
@@ -40,7 +42,7 @@ end
 
 -- Counters on a card: { plus, minus, loyalty, other } (missing = 0).
 function Counters.get(obj)
-  local c = { plus = 0, minus = 0, loyalty = 0, other = 0 }
+  local c = { plus = 0, minus = 0, loyalty = 0, other = 0, tp = 0, tt = 0 }
   local memo = obj and obj.memo
   if memo and memo ~= "" then
     -- Simple "plus=2;minus=0;..." format: no JSON decoding needed.
@@ -79,13 +81,13 @@ function Counters.stats(obj)
   local data = cardData(obj)
   local c = Counters.get(obj)
   local bonus = c.plus - c.minus
-  local function apply(v)
+  local function apply(v, extra)
     local n = tonumber(v)
-    return n and (n + bonus) or v
+    return n and (n + bonus + extra) or v
   end
   return {
-    power = data.power and apply(data.power) or nil,
-    toughness = data.toughness and apply(data.toughness) or nil,
+    power = data.power and apply(data.power, c.tp) or nil,
+    toughness = data.toughness and apply(data.toughness, c.tt) or nil,
     loyalty = c.loyalty,
     counters = c,
   }
@@ -131,10 +133,23 @@ function Counters.render(obj)
   if bonus ~= 0 then
     local sign = bonus > 0 and "+" or ""
     table.insert(lines, sign .. bonus .. "/" .. sign .. bonus)
+  end
+  if c.tp ~= 0 or c.tt ~= 0 then
+    local function sg(n)
+      return (n >= 0 and "+" or "") .. n
+    end
+    table.insert(lines, sg(c.tp) .. "/" .. sg(c.tt) .. " (turn)")
+  end
+  if bonus ~= 0 or c.tp ~= 0 or c.tt ~= 0 then
     local st = Counters.stats(obj)
     if type(st.power) == "number" and type(st.toughness) == "number" then
       table.insert(lines, st.power .. "/" .. st.toughness)
     end
+  end
+  -- Keywords gained until end of turn.
+  local kws = Counters.tempKeywords(obj)
+  if #kws > 0 then
+    table.insert(lines, table.concat(kws, ", "))
   end
   -- Planeswalkers on the battlefield show loyalty on their loyalty box
   -- (walkers.lua) instead.
@@ -178,12 +193,74 @@ function Counters.change(obj, kind, delta, byColor)
     return
   end
   local c = Counters.get(obj)
-  c[kind] = math.max(0, (c[kind] or 0) + delta)
+  if kind == "tp" or kind == "tt" then
+    c[kind] = (c[kind] or 0) + delta
+  else
+    c[kind] = math.max(0, (c[kind] or 0) + delta)
+  end
   -- +1/+1 and -1/-1 counters cancel out in pairs.
   local cancel = math.min(c.plus, c.minus)
   c.plus, c.minus = c.plus - cancel, c.minus - cancel
   save(obj, c)
   Counters.render(obj)
+end
+
+-- Keywords gained until end of turn ("gains trample until end of turn"):
+-- kept in the game state by card, cleared at cleanup.
+function Counters.tempKeywords(obj)
+  local all = GameState.data and GameState.data.tempKeywords or {}
+  local list = {}
+  for k in pairs(all[obj.getGUID()] or {}) do
+    table.insert(list, k)
+  end
+  table.sort(list)
+  return list
+end
+
+function Counters.addTempKeyword(obj, kw)
+  GameState.data.tempKeywords = GameState.data.tempKeywords or {}
+  local t = GameState.data.tempKeywords
+  t[obj.getGUID()] = t[obj.getGUID()] or {}
+  t[obj.getGUID()][kw:lower()] = true
+  Counters.render(obj)
+end
+
+function Counters.hasTempKeyword(obj, kw)
+  local t = GameState.data and GameState.data.tempKeywords
+  return t ~= nil and t[obj.getGUID()] ~= nil and t[obj.getGUID()][kw:lower()] == true
+end
+
+-- Cleanup step: "until end of turn" ends.
+function Counters.endOfTurn()
+  GameState.data.tempKeywords = {}
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" and obj.memo and obj.memo ~= "" then
+      local c = Counters.get(obj)
+      if c.tp ~= 0 or c.tt ~= 0 then
+        c.tp, c.tt = 0, 0
+        save(obj, c)
+      end
+      Counters.render(obj)
+    end
+  end
+end
+
+Events.on("stepStarted", function(d)
+  if d.step == "cleanup" then
+    local had = GameState.data.tempKeywords and next(GameState.data.tempKeywords) ~= nil
+    Counters.endOfTurn()
+    if had then
+      Counters.renderAll()
+    end
+  end
+end)
+
+function Counters.renderAll()
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" then
+      Counters.render(obj)
+    end
+  end
 end
 
 function Counters.clear(obj)

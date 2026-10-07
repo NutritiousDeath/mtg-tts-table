@@ -132,6 +132,9 @@ end
 
 local function hasKeyword(obj, kw)
   kw = kw:lower()
+  if Counters.hasTempKeyword and Counters.hasTempKeyword(obj, kw) then
+    return true
+  end
   for _, k in ipairs(cardData(obj).keywords or {}) do
     if tostring(k):lower() == kw then
       return true

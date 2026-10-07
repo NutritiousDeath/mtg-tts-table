@@ -403,6 +403,37 @@ function Library.moveToBottom(color, index, onDone)
     callback_function = function(obj) if onDone then onDone(obj) end end })
 end
 
+-- Move the top k cards to the bottom, in the same order (one rebuild).
+function Library.topToBottom(color, k, onDone)
+  local lib = Library.find(color)
+  if lib == nil or lib.type ~= "Deck" or k <= 0 then
+    if onDone then onDone(lib) end
+    return
+  end
+  local data = lib.getData()
+  local objs, ids = data.ContainedObjects or {}, data.DeckIDs or {}
+  k = math.min(k, #objs)
+  local movedObjs, movedIds = {}, {}
+  for _ = 1, k do
+    if #objs > 0 then
+      table.insert(movedObjs, table.remove(objs, 1))
+    end
+    if #ids > 0 then
+      table.insert(movedIds, table.remove(ids, 1))
+    end
+  end
+  for _, o in ipairs(movedObjs) do
+    table.insert(objs, o)
+  end
+  for _, d in ipairs(movedIds) do
+    table.insert(ids, d)
+  end
+  local pos, rot = lib.getPosition(), lib.getRotation()
+  lib.destruct()
+  spawnObjectData({ data = data, position = pos, rotation = rot,
+    callback_function = function(obj) if onDone then onDone(obj) end end })
+end
+
 -- Resolve a scry / surveil of the top cards in one go. Cards kept on top stay
 -- in the order they were seen, "bottom" cards go under the library (in order),
 -- "grave" cards are milled.

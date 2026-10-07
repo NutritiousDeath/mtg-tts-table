@@ -83,7 +83,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.05 (modes, unless pays, graveyard returns, creature-type triggers)"
+SCRIPT_VERSION = "1.07 (conditions, sacrifice, look at top N)"
 
 function onLoad(saved)
   GameLog.setup()

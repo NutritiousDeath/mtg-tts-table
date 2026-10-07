@@ -28,6 +28,9 @@ local searched = {}  -- [color] = true once the panel has looked at the library
 local dest = {}      -- [color] = { where = "hand"|"battlefield", tapped = bool }
 local filters = {}   -- [color] = { typeOnly, mvMin, mvMax, zone } from an effect, or nil
 local zoneOf = {}    -- [color] = "library" (default) or "graveyard" (Eternal Witness...)
+-- "Look at the top N cards": { left = cards still in that top group, picks =
+-- how many may still be taken }. Not cleared by typing a new search.
+local look = {}
 
 -- The pile being searched: the library, or the graveyard.
 local function pileFor(color)
@@ -124,7 +127,9 @@ local function render(color, guids, faces, total, matched)
       UI.setAttribute("lsSlot_" .. id, "active", "false")
     end
   end
-  if matched == 0 then
+  if look[color] then
+    status(color, matched .. " of the top " .. look[color].left .. " cards match. Click one to take it, or CLOSE: the rest go on the bottom.")
+  elseif matched == 0 then
     status(color, "Nothing in your library matches. (" .. total .. " cards in your library.)")
   elseif matched > #guids then
     status(color, "Showing " .. #guids .. " of " .. matched .. " matches. Add words to narrow it down.")
@@ -147,14 +152,18 @@ function LibSearch.run(color)
   local want = words(query[color])
   local matches = {}
   local f = filters[color]
+  local lk = look[color]
   for n, e in ipairs(entries) do
     e.index = e.index or (n - 1)
     local hay = haystack(e)
     if f and f.typeOnly then
       hay = tostring(gmField(e.gm_notes, "typeLine") or e.description or ""):lower()
     end
-    local ok = true
-    for _, w in ipairs(want) do
+    if lk and e.index >= lk.left then
+      hay = nil
+    end
+    local ok = hay ~= nil
+    for _, w in ipairs(ok and want or {}) do
       if not hay:find(w, 1, true) then
         ok = false
         break
@@ -229,7 +238,9 @@ function LibSearch.open(color, preset, note, where, tapped, opts)
   -- not rules text, plus any mana value limit; typing a new search clears it.
   filters[color] = opts
   zoneOf[color] = opts and opts.zone or "library"
-  UI.setValue("lsTitle_" .. color, zoneOf[color] == "graveyard" and "SEARCH GRAVEYARD" or "SEARCH LIBRARY")
+  look[color] = (opts and opts.topN) and { left = opts.topN, picks = opts.picks or 1 } or nil
+  UI.setValue("lsTitle_" .. color, look[color] and ("TOP " .. opts.topN .. " CARDS")
+    or (zoneOf[color] == "graveyard" and "SEARCH GRAVEYARD" or "SEARCH LIBRARY"))
   renderDest(color)
   query[color] = preset or query[color]
   if preset then
@@ -251,7 +262,17 @@ function LibSearch.close(color, quiet)
   open[color] = false
   shown[color] = nil
   UI.setAttribute("libsearch_" .. color, "active", "false")
-  if searched[color] and zoneOf[color] ~= "graveyard" then
+  local lk = look[color]
+  look[color] = nil
+  if lk then
+    -- Looked at the top cards: the rest go on the bottom, no shuffle.
+    if lk.left > 0 then
+      Library.topToBottom(color, lk.left)
+    end
+    if not quiet then
+      printToAll("MTG > " .. color .. " put the rest (" .. lk.left .. ") on the bottom of their library.", INFO)
+    end
+  elseif searched[color] and zoneOf[color] ~= "graveyard" then
     local lib = Library.find(color)
     if lib and lib.type == "Deck" then
       lib.shuffle()
@@ -314,6 +335,18 @@ local function take(color, slot, toBattlefield, tapped)
       printToAll("MTG > " .. color .. " returned " .. name .. " from their graveyard to their hand.", INFO)
     else
       printToAll("MTG > " .. color .. " put a card from their library into their hand.", INFO)
+    end
+  end
+  -- Top N: one fewer card in the group; done once the picks are used.
+  local lk = look[color]
+  if lk then
+    lk.left = math.max(0, lk.left - 1)
+    lk.picks = lk.picks - 1
+    if lk.picks <= 0 then
+      Wait.frames(function()
+        LibSearch.close(color)
+      end, 5)
+      return
     end
   end
   -- Refresh the results (the library changed).

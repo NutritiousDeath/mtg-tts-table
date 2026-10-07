@@ -107,18 +107,28 @@ function Effects.parse(text, sourceName)
   t = t:gsub("\n", " ")
   -- Swords to Plowshares: "Its controller gains life equal to its power."
   -- is handled with the exile itself.
-  local lifeEqualPower = false
+  local lifeEqualPower, loseEqualMV = false, false
   do
     local a = t:find("its controller gains life equal to its power", 1, true)
     if a then
       lifeEqualPower = true
       t = t:sub(1, a - 1) .. t:sub(a + #"its controller gains life equal to its power")
     end
+    -- Feed the Swarm: "You lose life equal to that permanent's mana value."
+    local lm = "you lose life equal to that permanent's mana value"
+    a = t:find(lm, 1, true)
+    if a then
+      loseEqualMV = true
+      t = t:sub(1, a - 1) .. t:sub(a + #lm)
+    end
   end
   -- Sentence by sentence: one with a condition ("Then if you control four
   -- or more lands, untap that land.") is left to the players; the plain
   -- sentences around it still happen.
   local kept, notes, firstWhy = {}, {}, nil
+  -- "If <condition>, <effect>." sentences: asked as YES / NO when it
+  -- resolves ("Is this true: you control no creatures with decayed?").
+  local conds = {}
   local pos = 1
   while pos <= #t do
     local stop = t:find(". ", pos, true)
@@ -132,7 +142,25 @@ function Effects.parse(text, sourceName)
     if why then
       firstWhy = firstWhy or why
       local clean = sentence:gsub("^%s+", ""):gsub("%s+$", "")
-      if clean ~= "" then
+      local cond, rest
+      if why == "if" and #clean < 400 then
+        cond, rest = clean:match("^if ([^,]+), (.+)$")
+        if cond == nil then
+          cond, rest = clean:match("^then if ([^,]+), (.+)$")
+        end
+      end
+      if cond and not rest:find("instead", 1, true) then
+        local c = { cond = cond, rest = rest }
+        -- "You may X. If you do, Y.": the "you may" sentence goes with it.
+        if cond == "you do" and #kept > 0 then
+          local prev = kept[#kept]:gsub("^%s+", ""):gsub("%s+$", "")
+          if prev:find("^you may ") then
+            table.remove(kept, #kept)
+            c.prev = prev
+          end
+        end
+        table.insert(conds, c)
+      elseif clean ~= "" then
         table.insert(notes, clean)
       end
     else
@@ -140,7 +168,7 @@ function Effects.parse(text, sourceName)
     end
     pos = stop and (stop + 2) or (#t + 1)
   end
-  if #kept == 0 then
+  if #kept == 0 and #conds == 0 then
     return nil, "it has a condition (" .. tostring(firstWhy) .. ")"
   end
   -- "... instead" changes the other sentences too: all by hand.
@@ -151,6 +179,19 @@ function Effects.parse(text, sourceName)
   end
   t = " " .. table.concat(kept, " ") .. " "
   local actions = {}
+  -- "You may sacrifice a land. If you do, ...": pick the land, then the rest.
+  for i = #conds, 1, -1 do
+    local c = conds[i]
+    local what = c.prev and c.prev:match("^you may sacrifice (.+)$")
+    if what then
+      what = what:gsub("%.$", ""):gsub("^another ", ""):gsub("^an? ", "")
+      local ty = what:match("^(%a+)")
+      if ty then
+        table.remove(conds, i)
+        table.insert(actions, { what = "sacrifice", who = "you", n = 1, type = ty, rest = c.rest, phrase = what })
+      end
+    end
+  end
   local function add(what, who, n)
     if n and n > 0 then
       table.insert(actions, { what = what, who = who, n = n })
@@ -261,7 +302,7 @@ function Effects.parse(text, sourceName)
           end
           table.insert(actions, { what = (how == "all" or how == "each") and "removeAll" or "removeTarget",
             who = "you", n = 1, verb = verb, types = types, scope = scope, other = phrase:find("other", 1, true) ~= nil,
-            lifeEqualPower = lifeEqualPower,
+            lifeEqualPower = lifeEqualPower, loseEqualMV = loseEqualMV,
             phrase = phrase:gsub("%.$", "") })
           break
         end
@@ -328,6 +369,89 @@ function Effects.parse(text, sourceName)
       break
     end
   end
+  -- "Target creature gets +2/+0 and gains trample until end of turn",
+  -- "Creatures you control get +1/+1 until end of turn", "~ gets +3/+3...".
+  local eot = t:find(" until end of turn", 1, true)
+  if eot then
+    local clause = t:sub(1, eot)
+    -- Start of this clause: after the last ". " before it.
+    local s0 = 1
+    local look = 1
+    while true do
+      local d = clause:find(". ", look, true)
+      if not d then
+        break
+      end
+      s0, look = d + 2, d + 2
+    end
+    clause = clause:sub(s0)
+    local gAt = clause:find(" gets ", 1, true) or clause:find(" get ", 1, true)
+    local gainAt = clause:find(" gains ", 1, true) or clause:find(" gain ", 1, true)
+    local headEnd = gAt or gainAt
+    if headEnd then
+      local head = clause:sub(1, headEnd - 1)
+      local p, q
+      if gAt then
+        local after = clause:sub(gAt):gsub("^ gets? ", "")
+        p, q = after:match("^([%+%-]%d+)/([%+%-]%d+)")
+      end
+      local kws = {}
+      if gainAt then
+        local words = clause:sub(gainAt):gsub("^ gains? ", "")
+        for _, kw in ipairs({ "first strike", "double strike", "flying", "trample", "lifelink", "deathtouch", "vigilance",
+          "haste", "indestructible", "hexproof", "menace", "reach" }) do
+          if words:find(kw, 1, true) then
+            table.insert(kws, kw)
+          end
+        end
+      end
+      local scope
+      if head:find("target creature you control", 1, true) then
+        scope = "targetMine"
+      elseif head:find("target creature an opponent controls", 1, true) or head:find("target creature you don't control", 1, true) then
+        scope = "targetOpp"
+      elseif head:find("target creature", 1, true) then
+        scope = "target"
+      elseif head:find("creatures you control", 1, true) then
+        scope = "allMine"
+      elseif head:find("creatures your opponents control", 1, true) then
+        scope = "allOpp"
+      elseif head:find("each creature", 1, true) or head:find("all creatures", 1, true) then
+        scope = "all"
+      elseif head:sub(-1) == "~" or head:find("~$") then
+        scope = "self"
+      elseif (" " .. head):find(" it$") or head:find("that creature$") then
+        -- Enduring Courage: "it gets +2/+0" = the creature the trigger saw.
+        scope = "that"
+      end
+      if scope and (p or #kws > 0) then
+        table.insert(actions, { what = "pump", who = "you", n = 1, p = tonumber(p or "0"), q = tonumber(q or "0"),
+          kws = kws, scope = scope, other = head:find("other", 1, true) ~= nil,
+          label = (p and (p .. "/" .. q) or "") .. (#kws > 0 and ((p and " and " or "") .. table.concat(kws, ", ")) or "") })
+      end
+    end
+  end
+  -- "Look at the top four cards of your library. You may reveal a creature
+  -- card from among them and put it into your hand. Put the rest on the
+  -- bottom": the search panel showing just those cards.
+  local lAt = t:find("look at the top ", 1, true)
+  if lAt and t:find("rest on the bottom", 1, true) then
+    local after = t:sub(lAt, lAt + 400)
+    local lw = after:match("^look at the top (%w+) cards? of your library")
+    if lw and num(lw) then
+      local phrase = after:match("reveal (.-) cards? from among") or after:match("put (.-) cards? from among")
+        or after:match("reveal (.-) cards?") or ""
+      phrase = phrase:gsub("^up to %w+ ", ""):gsub("^an? ", ""):gsub("^any number of ", "")
+      local q = ""
+      if not phrase:find(" or ", 1, true) and not phrase:find("non", 1, true) and phrase:match("^(%a+)$") then
+        q = phrase
+      end
+      local picks = num(after:match("up to (%w+)") or "") or 1
+      table.insert(actions, { what = "look", who = "you", n = num(lw), query = q, picks = picks,
+        where = after:find("onto the battlefield", 1, true) and "battlefield" or "hand",
+        tapped = after:find("battlefield tapped", 1, true) ~= nil })
+    end
+  end
   -- Scry / surveil / mill (you).
   local sw = t:match("scry (%d+)")
   if sw then
@@ -363,13 +487,18 @@ function Effects.parse(text, sourceName)
       table.insert(actions, { what = "bounce", who = "you", n = 1, type = btype, mine = false })
     end
   end
-  if #actions == 0 then
+  if #actions == 0 and #conds == 0 then
     if firstWhy then
       return nil, "it has a condition (" .. firstWhy .. ")"
     end
     return nil, "nothing it can apply on its own"
   end
-  return { optional = t:find("you may", 1, true) ~= nil, actions = actions, notes = notes }
+  local optional = t:find("you may", 1, true) ~= nil
+  -- "You may reveal a creature card": the look panel is already optional.
+  if #actions == 1 and actions[1].what == "look" then
+    optional = false
+  end
+  return { optional = optional, actions = actions, notes = notes, conds = conds }
 end
 
 ---------------------------------------------------------------------------
@@ -404,6 +533,8 @@ local function describe(a, target, controller)
     return who .. (you and " create " or " creates ") .. tostring(a.phrase) .. " token"
   elseif a.what == "amass" then
     return who .. (you and " amass " or " amasses ") .. a.n
+  elseif a.what == "pump" then
+    return tostring(a.label) .. " until end of turn (" .. tostring(a.count or "target") .. ")"
   elseif a.what == "graveReturn" then
     return who .. " returns a " .. (a.type ~= "" and (a.type .. " ") or "") .. "card from the graveyard"
   elseif a.what == "scry" then
@@ -414,6 +545,10 @@ local function describe(a, target, controller)
     return a.verb .. " all " .. tostring(a.phrase) .. " (" .. tostring(a.count or 0) .. ")"
   elseif a.what == "removeTarget" then
     return a.verb .. " target " .. tostring(a.phrase)
+  elseif a.what == "sacrifice" then
+    return who .. " may sacrifice " .. tostring(a.phrase)
+  elseif a.what == "look" then
+    return who .. (you and " look" or " looks") .. " at the top " .. a.n .. " cards"
   end
   if a.what == "gain" then
     return who .. (you and " gain " or " gains ") .. a.n .. " life"
@@ -478,6 +613,8 @@ local function apply(it, plan, target)
           Tokens.create(seat, a.spec, a.n, it.name)
         elseif a.what == "amass" then
           Effects.amass(seat, a.kind, a.n, it.name)
+        elseif a.what == "pump" then
+          a.count = Effects.pump(seat, a, it)
         elseif a.what == "graveReturn" then
           LibSearch.open(seat, a.type, it.name .. ": click the " .. (a.type ~= "" and a.type or "card") .. " to return it"
             .. (a.where == "battlefield" and " to the battlefield" or " to your hand") .. ", then CLOSE.",
@@ -492,6 +629,14 @@ local function apply(it, plan, target)
           a.count = Effects.removeAll(seat, a, it)
         elseif a.what == "removeTarget" then
           Effects.pickRemove(seat, a, it.name, it.source)
+        elseif a.what == "sacrifice" then
+          Effects.pickSacrifice(seat, a, it)
+        elseif a.what == "look" then
+          local how = a.where == "battlefield" and ("click it to put it onto the battlefield" .. (a.tapped and " tapped" or ""))
+            or "click it to put it into your hand"
+          LibSearch.open(seat, a.query, it.name .. ": the top " .. a.n .. " cards" .. (a.query ~= "" and (" (" .. a.query .. ")") or "")
+            .. ": " .. how .. ". CLOSE puts the rest on the bottom.", a.where, a.tapped,
+            { typeOnly = true, topN = a.n, picks = a.picks })
         elseif a.what == "untap" or a.what == "tap" then
           local card = it.thatCard and getObjectFromGUID(it.thatCard)
           local owner = card and Zones.regionAt(card.getPosition()).seat
@@ -514,7 +659,9 @@ local function apply(it, plan, target)
     end
     table.insert(done, describe(a, a.who == "that" and (it.that or target) or target, controller))
   end
-  printToAll("MTG > " .. it.name .. " resolved: " .. table.concat(done, ", ") .. ".", GOOD)
+  if #done > 0 then
+    printToAll("MTG > " .. it.name .. " resolved: " .. table.concat(done, ", ") .. ".", GOOD)
+  end
   for _, n in ipairs(plan.notes or {}) do
     broadcastToColor(it.name .. ": do this part yourself: \"" .. n .. "\"", controller, INFO)
   end
@@ -741,6 +888,39 @@ function Effects.resolve(it)
     return
   end
   local seat = it.controller
+  -- "If ..., ..." parts: the controller says whether it's true, then the
+  -- rest resolves like any other effect.
+  local function askConds()
+    for _, c in ipairs(plan.conds or {}) do
+      local title, text
+      if c.prev then
+        title, text = it.name .. ": did you?", "Did you do this: \"" .. c.prev .. "\"\nIf you did: " .. c.rest
+      elseif c.cond == "you do" then
+        title, text = it.name .. ": did you?", "Did you do it? If you did: " .. c.rest
+      else
+        title, text = it.name .. ": is this true?", "If " .. c.cond .. "?\nThen: " .. c.rest
+      end
+      ask(seat, title, text, { { label = "YES", value = true }, { label = "NO", value = false } }, function(yes)
+        if yes then
+          local copy = {}
+          for k, v in pairs(it) do
+            copy[k] = v
+          end
+          copy.text = c.rest
+          copy.modePicked = true
+          copy.unlessDone = true
+          Effects.resolve(copy)
+        else
+          printToAll("MTG > " .. it.name .. ": not true, so that part does nothing.", INFO)
+        end
+      end)
+    end
+  end
+  if #plan.actions == 0 then
+    apply(it, plan, nil)   -- just the "do this yourself" notes
+    askConds()
+    return
+  end
   local needsTarget, oppOnly = false, false
   for _, a in ipairs(plan.actions) do
     if a.who == "target" or a.who == "targetOpponent" or (a.who == "that" and it.that == nil) then
@@ -788,6 +968,7 @@ function Effects.resolve(it)
   else
     withTarget()
   end
+  askConds()
 end
 
 -- A spell (instant / sorcery) resolved: carry out its rules text too.
@@ -888,6 +1069,12 @@ local function returnToHand(obj)
   obj.setRotationSmooth({ 0, s.yaw, 0 }, false, true)
   obj.setPositionSmooth(Player[seat].getHandTransform().position, false, true)
   printToAll("MTG > " .. obj.getName() .. " returned to " .. seat .. "'s hand.", GOOD)
+  -- So the table knows it's in the hand now (a later discard isn't "dies").
+  Wait.time(function()
+    if not obj.isDestroyed() then
+      Zones.refresh(obj)
+    end
+  end, 1.2)
 end
 
 function Effects.pickBounce(seat, a, sourceName)
@@ -912,6 +1099,40 @@ function Effects.pickBounce(seat, a, sourceName)
         printToAll("MTG > " .. sourceName .. ": nothing returned.", INFO)
       end
     end, { filter = filter, label = "RETURN" })
+end
+
+-- "You may sacrifice a land. If you do, ...": a SACRIFICE button on each of
+-- your permanents of that type, then the rest resolves.
+function Effects.pickSacrifice(seat, a, it)
+  local want = tostring(a.type)
+  local filter = function(obj, owner)
+    if owner ~= seat then
+      return false
+    end
+    if a.phrase and a.phrase:find("other", 1, true) and it.source and obj.getGUID() == it.source then
+      return false
+    end
+    local t = cardTypes(obj)
+    return want == "permanent" or t[want] == true
+  end
+  ask(seat, it.name .. ": sacrifice " .. tostring(a.phrase) .. "?", "Click SACRIFICE on it, or SKIP. If you do: " .. tostring(a.rest),
+    { { label = "SKIP", value = false } }, function(obj)
+      if not obj then
+        printToAll("MTG > " .. seat .. " didn't sacrifice (" .. it.name .. ").", INFO)
+        return
+      end
+      local name = obj.getName()
+      Combat.removeCard(obj, "graveyard")
+      printToAll("MTG > " .. seat .. " sacrificed " .. name .. " (" .. it.name .. ").", GOOD)
+      local copy = {}
+      for k, v in pairs(it) do
+        copy[k] = v
+      end
+      copy.text = a.rest
+      copy.modePicked = true
+      copy.unlessDone = true
+      Effects.resolve(copy)
+    end, { filter = filter, label = "SACRIFICE" })
 end
 
 ---------------------------------------------------------------------------
@@ -989,7 +1210,7 @@ end
 ---------------------------------------------------------------------------
 
 local function hasKeyword(obj, kw)
-  local found = false
+  local found = Counters.hasTempKeyword and Counters.hasTempKeyword(obj, kw) or false
   pcall(function()
     local d = JSON.decode(obj.getGMNotes())
     for _, k in ipairs(type(d) == "table" and d.keywords or {}) do
@@ -1064,9 +1285,17 @@ function Effects.pickRemove(seat, a, sourceName, sourceGuid)
         local name = obj.getName()
         local owner = fieldSeat(obj)
         local power = tonumber(Counters.stats(obj).power or "") or 0
+        local mv = 0
+        pcall(function()
+          local d = JSON.decode(obj.getGMNotes())
+          mv = tonumber(type(d) == "table" and d.cmc or 0) or 0
+        end)
         if removeOne(obj, a.verb) then
           if a.lifeEqualPower and owner and power > 0 then
             Trackers.changeLife(owner, power, sourceName)
+          end
+          if a.loseEqualMV and mv > 0 then
+            Trackers.changeLife(seat, -mv, sourceName)
           end
           printToAll("MTG > " .. sourceName .. ": " .. (a.verb == "exile" and "exiled " or "destroyed ") .. name .. ".", GOOD)
         end
@@ -1160,3 +1389,77 @@ Events.on("cardMoved", function(d)
     end
   end, 0.6)
 end)
+
+---------------------------------------------------------------------------
+-- Until end of turn: +N/+N and keywords (cleared at cleanup, counters.lua)
+---------------------------------------------------------------------------
+
+local function boost(obj, a)
+  if a.p ~= 0 then
+    Counters.change(obj, "tp", a.p)
+  end
+  if a.q ~= 0 then
+    Counters.change(obj, "tt", a.q)
+  end
+  for _, kw in ipairs(a.kws or {}) do
+    Counters.addTempKeyword(obj, kw)
+  end
+end
+
+-- Returns how many creatures got it ("target" ones are picked on the table).
+function Effects.pump(seat, a, it)
+  if a.scope == "self" then
+    local src = it.source and getObjectFromGUID(it.source)
+    if src and not src.isDestroyed() then
+      boost(src, a)
+      return 1
+    end
+    broadcastToColor(it.name .. ": give it " .. tostring(a.label) .. " yourself.", seat, INFO)
+    return 0
+  end
+  if a.scope == "that" then
+    local card = it.thatCard and getObjectFromGUID(it.thatCard)
+    if card and not card.isDestroyed() and fieldSeat(card) then
+      boost(card, a)
+      printToAll("MTG > " .. card.getName() .. " gets " .. tostring(a.label) .. " until end of turn.", GOOD)
+      return 1
+    end
+    broadcastToColor(it.name .. ": give it " .. tostring(a.label) .. " yourself (couldn't tell which creature).", seat, INFO)
+    return 0
+  end
+  local function eligible(obj, owner)
+    if not cardTypes(obj).creature then
+      return false
+    end
+    if (a.scope == "allMine" or a.scope == "targetMine") and owner ~= seat then
+      return false
+    elseif (a.scope == "allOpp" or a.scope == "targetOpp") and owner == seat then
+      return false
+    end
+    if a.other and it.source and obj.getGUID() == it.source then
+      return false
+    end
+    return true
+  end
+  if a.scope == "target" or a.scope == "targetMine" or a.scope == "targetOpp" then
+    ask(seat, it.name .. ": " .. tostring(a.label) .. " until end of turn", "Click TARGET on the creature.",
+      { { label = "SKIP", value = false } }, function(obj)
+        if obj then
+          boost(obj, a)
+          printToAll("MTG > " .. obj.getName() .. " gets " .. tostring(a.label) .. " until end of turn.", GOOD)
+        end
+      end, { filter = eligible, label = "TARGET" })
+    return 0
+  end
+  local n = 0
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" and not obj.isDestroyed() and not obj.is_face_down then
+      local owner = fieldSeat(obj)
+      if owner and eligible(obj, owner) then
+        boost(obj, a)
+        n = n + 1
+      end
+    end
+  end
+  return n
+end
