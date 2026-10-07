@@ -115,7 +115,8 @@ function LibSearch.run(color)
     { guid = lib.getGUID(), name = lib.getName(), description = lib.getDescription(), gm_notes = lib.getGMNotes() } }
   local want = words(query[color])
   local matches = {}
-  for _, e in ipairs(entries) do
+  for n, e in ipairs(entries) do
+    e.index = e.index or (n - 1)
     local hay = haystack(e)
     local ok = true
     for _, w in ipairs(want) do
@@ -129,23 +130,25 @@ function LibSearch.run(color)
     end
   end
   -- Picture for each shown card (small size: matches the slot, stays sharp).
+  -- Cards are matched to their pictures by POSITION in the deck: cards
+  -- inside a deck can share a GUID, so a GUID lookup showed one card's
+  -- picture for every match (and could take the wrong card).
   local faces, guids = {}, {}
   local data = lib.getData()
-  local byGuid = {}
-  for _, cd in ipairs(lib.type == "Deck" and (data.ContainedObjects or {}) or { data }) do
-    byGuid[cd.GUID] = cd
-  end
+  local contained = lib.type == "Deck" and (data.ContainedObjects or {}) or { data }
   for i = 1, math.min(MAX_SHOWN, #matches) do
     local e = matches[i]
-    table.insert(guids, e.guid)
-    local cd = byGuid[e.guid]
+    local pos = (e.index or 0) + 1        -- getObjects() index is 0-based
+    local key = tostring(pos)
+    table.insert(guids, key)
+    local cd = contained[pos]
     local face
     for _, d in pairs(cd and cd.CustomDeck or {}) do
       face = d.FaceURL
       break
     end
-    faces[e.guid] = face and face:gsub("/large/", "/small/", 1) or ""
-    faces[e.guid .. "|name"] = e.name
+    faces[key] = face and face:gsub("/large/", "/small/", 1) or ""
+    faces[key .. "|name"] = e.name
   end
   shown[color] = guids
   render(color, guids, faces, #entries, #matches)
@@ -192,17 +195,18 @@ end
 
 -- Take a shown card: to the hand, or onto the battlefield (face up).
 local function take(color, slot, toBattlefield)
-  local g = shown[color] and shown[color][slot]
+  local key = shown[color] and shown[color][slot]
   local lib = Library.find(color)
-  if g == nil or lib == nil then
+  if key == nil or lib == nil then
     return
   end
+  local index = tonumber(key) - 1         -- takeObject wants the 0-based index
   local s = TableSetup.seat(color)
   local name = "a card"
   if toBattlefield then
     local pos = TableSetup.slot(color, "battlefield", 2)
     if lib.type == "Deck" then
-      local card = lib.takeObject({ guid = g, position = pos, rotation = { 0, s.yaw, 0 }, smooth = true })
+      local card = lib.takeObject({ index = index, position = pos, rotation = { 0, s.yaw, 0 }, smooth = true })
       name = card and card.getName() or name
     else
       lib.setPositionSmooth(pos)
@@ -213,7 +217,7 @@ local function take(color, slot, toBattlefield)
   else
     local hand = Player[color].getHandTransform()
     if lib.type == "Deck" then
-      local card = lib.takeObject({ guid = g, position = hand.position, rotation = { 0, s.yaw, 0 }, smooth = true })
+      local card = lib.takeObject({ index = index, position = hand.position, rotation = { 0, s.yaw, 0 }, smooth = true })
       name = card and card.getName() or name
     else
       lib.setPositionSmooth(hand.position)

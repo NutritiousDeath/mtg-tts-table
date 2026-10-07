@@ -81,7 +81,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.95 (enters tapped, bounce lands, counters)"
+SCRIPT_VERSION = "0.96 (library search pictures fix)"
 
 function onLoad(saved)
   GameLog.setup()
