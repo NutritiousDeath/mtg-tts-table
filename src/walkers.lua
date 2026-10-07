@@ -335,3 +335,20 @@ for i = 1, 8 do
     end
   end
 end
+
+-- A planeswalker that just landed: draw its buttons again once it has
+-- settled (while it was still moving into place it didn't count as on the
+-- battlefield, so its buttons only showed up on a later redraw).
+Events.on("cardMoved", function(d)
+  local card = d.card
+  if card == nil or d.to == nil or (d.to.region ~= "battlefield" and d.to.region ~= "lands") then
+    return
+  end
+  for _, delay in ipairs({ 1.2, 3 }) do
+    Wait.time(function()
+      if not card.isDestroyed() and isWalker(card) then
+        Counters.render(card)
+      end
+    end, delay)
+  end
+end)

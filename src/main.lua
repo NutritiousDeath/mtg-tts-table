@@ -30,6 +30,7 @@
     !solo on / off       solo test mode: one person plays every seat
     !import <link>       import an Archidekt / Moxfield link to your seat
     !import Red <link>   import an Archidekt / Moxfield link (or list) to a seat
+    !forcepass   stop waiting on a player who isn't answering
     !walker      show the loyalty abilities read on the planeswalker under your mouse
     !log         snapshot every player and save the game log to the Notebook
     !logclear    start a fresh game log
@@ -82,7 +83,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.03 (batch fixes: reminder text, nonbasic, once per turn, amass, search filters)"
+SCRIPT_VERSION = "1.04 (combat priority protection, walker buttons on landing)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -383,6 +384,11 @@ function onChat(message, sender)
     else
       TableUI.importFor(importSeat, importText, sender.color)
     end
+    return false
+  end
+
+  if message == "!forcepass" then
+    Turns.forcePass(sender.color)
     return false
   end
 

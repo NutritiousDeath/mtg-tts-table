@@ -477,6 +477,13 @@ local function requestMove(kind)
     return
   end
   if t.pending then
+    -- Priority protection in combat: nobody clicks past the players still
+    -- being asked (!forcepass if someone is away).
+    if Turns.protected() then
+      broadcastToColor("Waiting on " .. tostring(t.pending.queue[t.pending.at]) .. " to answer (combat: no skipping)."
+        .. " Type !forcepass if they're away.", t.activeSeat, WARN)
+      return
+    end
     broadcastToAll(t.activeSeat .. " moves on without waiting.", INFO)
     commit(t.pending.kind)
     return
@@ -527,6 +534,11 @@ function Turns.ask(from, text, label, onAllPass)
   local t = turn()
   if t.pending then
     if t.pending.kind == "ask" and t.pending.from == from then
+      if Turns.protected() then
+        broadcastToColor("Waiting on " .. tostring(t.pending.queue[t.pending.at]) .. " to answer (combat: no skipping)."
+          .. " Type !forcepass if they're away.", from, WARN)
+        return
+      end
       broadcastToAll(from .. " goes ahead without waiting.", INFO)
       commit("ask")
     else
@@ -554,6 +566,25 @@ function Turns.ask(from, text, label, onAllPass)
   end
   t.pending = { kind = "ask", queue = queue, at = 1, from = from, text = text, label = label }
   promptNext()
+end
+
+-- Combat steps: the wait for answers can't be clicked through.
+local COMBAT_STEPS = { combat = true, attackers = true, blockers = true, damage = true, endcombat = true }
+function Turns.protected()
+  local t = turn()
+  return GameState.data.started and t.stepIndex ~= nil and Turns.STEPS[t.stepIndex] ~= nil
+    and COMBAT_STEPS[Turns.STEPS[t.stepIndex].id] == true
+end
+
+-- !forcepass: move on now (someone isn't answering).
+function Turns.forcePass(color)
+  local t = turn()
+  if not t.pending then
+    broadcastToColor("Nobody is being waited on.", color, INFO)
+    return
+  end
+  broadcastToAll(color .. " forced a pass (" .. tostring(t.pending.queue[t.pending.at]) .. " didn't answer).", WARN)
+  commit(t.pending.kind)
 end
 
 -- A player answered their pop-up.
