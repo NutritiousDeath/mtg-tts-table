@@ -235,6 +235,16 @@ local function parseTrigger(p)
             tapped = kind == "enters" and window:sub(verbAt, verbAt + 13) == " enters tapped",
             another = lead == "another " or lead == "one or more other ",
             nontoken = subj:find("nontoken", 1, true) ~= nil,
+            -- "nonbasic land", "noncreature artifact": types it must NOT have.
+            excludes = (function()
+              local ex = {}
+              for w in subj:gmatch("non(%a+)") do
+                if w ~= "token" then
+                  table.insert(ex, w)
+                end
+              end
+              return ex
+            end)(),
             tokenOnly = subj:find(" token", 1, true) ~= nil and subj:find("nontoken", 1, true) == nil,
             mine = subj:find("you control", 1, true) ~= nil or underMine,
             theirs = subj:find("an opponent controls", 1, true) ~= nil or subj:find("your opponents control", 1, true) ~= nil
@@ -308,6 +318,25 @@ local function parseCombat(p)
 end
 
 -- A card's triggered abilities: { { trig, text } } (text = original wording).
+-- Reminder text "(...)" explains a keyword; it isn't rules. Reading it as
+-- rules made Dreadhorde Invasion's amass reminder create tokens and a
+-- Case's "(If unsolved, solve at the beginning of your end step.)" trigger.
+local function stripReminder(s)
+  local out, depth = {}, 0
+  for i = 1, #s do
+    local ch = s:sub(i, i)
+    if ch == "(" then
+      depth = depth + 1
+    elseif ch == ")" and depth > 0 then
+      depth = depth - 1
+    elseif depth == 0 then
+      table.insert(out, ch)
+    end
+  end
+  return (table.concat(out):gsub("%s+$", ""))
+end
+Triggers.stripReminder = stripReminder
+
 local function abilitiesOf(obj)
   local d = cardData(obj)
   if d == nil or type(d.oracle) ~= "string" or d.oracle == "" then
@@ -318,7 +347,8 @@ local function abilitiesOf(obj)
     return cache[key]
   end
   local list = {}
-  for _, para in ipairs(lines(d.oracle)) do
+  for _, raw in ipairs(lines(d.oracle)) do
+    local para = stripReminder(raw)
     if para ~= "" then
       local norm = normalize(para, d.name)
       local trig = parseTrigger(norm)
@@ -396,6 +426,11 @@ end
 local function matchesSubject(obj, trig)
   local list = trig.subjects or { trig.subject }
   local types = typesOf(obj)
+  for _, ex in ipairs(trig.excludes or {}) do
+    if types[ex] then
+      return false
+    end
+  end
   if trig.tokenOnly and not (obj.hasTag("Token") or types.token) then
     return false
   end
@@ -619,6 +654,30 @@ end
 
 -- Found triggers go out one seat at a time, active player first.
 local function pushAll(found, that, thatCard)
+  if #found == 0 then
+    return
+  end
+  -- "This ability triggers only once each turn."
+  local kept = {}
+  local t = GameState.data.turn or {}
+  GameState.data.oncePerTurn = GameState.data.oncePerTurn or {}
+  for _, f in ipairs(found) do
+    local once = tostring(f.text):lower():find("only once each turn", 1, true)
+    local key
+    if once then
+      local ok, g = pcall(function() return f.obj.getGUID() end)
+      key = (ok and g or "?") .. "|" .. tostring(f.text):sub(1, 40)
+    end
+    if key and GameState.data.oncePerTurn[key] == t.taken then
+      -- Already triggered this turn.
+    else
+      if key then
+        GameState.data.oncePerTurn[key] = t.taken
+      end
+      table.insert(kept, f)
+    end
+  end
+  found = kept
   if #found == 0 then
     return
   end

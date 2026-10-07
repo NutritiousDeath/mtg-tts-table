@@ -26,6 +26,21 @@ local searched = {}  -- [color] = true once the panel has looked at the library
 -- whether it enters tapped. Buttons with a value attached can't tell left
 -- from right click in TTS, so the destination is a toggle, not a click.
 local dest = {}      -- [color] = { where = "hand"|"battlefield", tapped = bool }
+local filters = {}   -- [color] = { typeOnly, mvMin, mvMax } from an effect, or nil
+
+-- A field out of the card data JSON in GM Notes, by plain search.
+local function gmField(notes, key)
+  local a = tostring(notes or ""):find('"' .. key .. '":', 1, true)
+  if not a then
+    return nil
+  end
+  local rest = notes:sub(a + #key + 3, a + #key + 160)
+  if rest:sub(1, 1) == '"' then
+    local b = rest:find('"', 2, true)
+    return b and rest:sub(2, b - 1) or nil
+  end
+  return rest:match("^(%-?[%d%.]+)")
+end
 
 function LibSearch.xml()
   local parts = {}
@@ -122,14 +137,24 @@ function LibSearch.run(color)
     { guid = lib.getGUID(), name = lib.getName(), description = lib.getDescription(), gm_notes = lib.getGMNotes() } }
   local want = words(query[color])
   local matches = {}
+  local f = filters[color]
   for n, e in ipairs(entries) do
     e.index = e.index or (n - 1)
     local hay = haystack(e)
+    if f and f.typeOnly then
+      hay = tostring(gmField(e.gm_notes, "typeLine") or e.description or ""):lower()
+    end
     local ok = true
     for _, w in ipairs(want) do
       if not hay:find(w, 1, true) then
         ok = false
         break
+      end
+    end
+    if ok and f and (f.mvMin or f.mvMax) then
+      local mv = tonumber(gmField(e.gm_notes, "cmc") or "") or 0
+      if (f.mvMin and mv < f.mvMin) or (f.mvMax and mv > f.mvMax) then
+        ok = false
       end
     end
     if ok then
@@ -184,13 +209,16 @@ end
 -- preset: search words to start with (effects.lua fills in "basic land"
 -- etc.); note: a line telling the player what to do; where / tapped: where
 -- picked cards go ("hand" or "battlefield").
-function LibSearch.open(color, preset, note, where, tapped)
+function LibSearch.open(color, preset, note, where, tapped, opts)
   if not TableSetup.isActive(color) then
     return
   end
   open[color] = true
   searched[color] = false
   dest[color] = { where = where or "hand", tapped = tapped and true or false }
+  -- An effect's search ("a basic land card") matches the TYPE LINE only,
+  -- not rules text, plus any mana value limit; typing a new search clears it.
+  filters[color] = opts
   renderDest(color)
   query[color] = preset or query[color]
   if preset then
@@ -271,10 +299,12 @@ end
 
 function ui_libText(player, value)
   query[player.color] = value
+  filters[player.color] = nil
 end
 
 function ui_libSubmit(player, value)
   query[player.color] = value
+  filters[player.color] = nil
   LibSearch.run(player.color)
 end
 

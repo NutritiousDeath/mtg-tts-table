@@ -37,19 +37,20 @@ local HEADER = [[
         color="#00B3A4">Import Deck</Button>
 ]]
 
--- One import panel per seat (visibility fixed to that seat).
-local function importPanel(color)
-  return ([[
-<Panel id="importPanel_%s"
-       visibility="%s"
+-- ONE import panel for everyone (no per-seat visibility: players who join
+-- after the table was built often never received their seat-only panel, so
+-- they couldn't import). Whoever clicks Import imports to their own seat.
+local function importPanel()
+  return [[
+<Panel id="importPanel"
        active="false"
        width="560" height="520"
        color="#0D1117F2"
        outline="#00B3A4" outlineSize="2 2"
        allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="16 16 16 16" spacing="10" childForceExpandHeight="false">
-    <Text fontSize="22" fontStyle="Bold" alignment="MiddleLeft" preferredHeight="32">Import Commander Deck</Text>
-    <Text fontSize="13" alignment="MiddleLeft" preferredHeight="36" color="#8B98A9">Paste an Archidekt or Moxfield deck link, or a decklist (plain text, or a Moxfield / Archidekt export). The commander is found from a "Commander" header, a [Commander] / *CMDR* tag, or Moxfield's MTGO export.</Text>
+    <Text id="importTitle" fontSize="22" fontStyle="Bold" alignment="MiddleLeft" preferredHeight="32">Import Commander Deck</Text>
+    <Text fontSize="13" alignment="MiddleLeft" preferredHeight="36" color="#8B98A9">Paste an Archidekt or Moxfield deck link, or a decklist. Import puts it at YOUR seat. (Or type in chat: !import followed by your deck link.)</Text>
     <InputField onValueChanged="ui_deckText"
                 lineType="MultiLineNewline"
                 characterLimit="0"
@@ -62,15 +63,12 @@ local function importPanel(color)
     </HorizontalLayout>
   </VerticalLayout>
 </Panel>
-]]):format(color, color)
+]]
 end
 
 -- Build the on-screen UI. (Life tracking is on the table: trackers.lua.)
 function TableUI.build()
-  local panels = {}
-  for _, color in ipairs(TableSetup.activeSeats()) do
-    table.insert(panels, importPanel(color))
-  end
+  local panels = { importPanel() }
   local xml = HEADER .. table.concat(panels) .. GameFlow.xml() .. Turns.xml() .. Actions.xml()
     .. Dice.xml() .. Tokens.xml() .. LibSearch.xml() .. Stack.xml() .. Combat.xml() .. Triggers.orderXml() .. Effects.xml()
   -- Remember every element that's shown to one seat only (see
@@ -122,13 +120,17 @@ function TableUI.openImport(color)
   if not seated(color) then
     return
   end
-  UI.setAttribute("importPanel_" .. color, "active", "true")
+  UI.setValue("importTitle", "Import Commander Deck (" .. string.upper(color) .. ")")
+  UI.setAttribute("importPanel", "active", "true")
   importOpen[color] = true
 end
 
 local function closeImport(color)
-  UI.setAttribute("importPanel_" .. color, "active", "false")
   importOpen[color] = nil
+  -- Shared panel: hide it once nobody has it open.
+  if next(importOpen) == nil then
+    UI.setAttribute("importPanel", "active", "false")
+  end
 end
 
 function ui_toggleImport(player)

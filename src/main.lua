@@ -28,6 +28,7 @@
     !auto off / on       turn auto-resolving of simple effects off / on
     !triggers card       show the triggers read on the card under your mouse
     !solo on / off       solo test mode: one person plays every seat
+    !import <link>       import an Archidekt / Moxfield link to your seat
     !import Red <link>   import an Archidekt / Moxfield link (or list) to a seat
     !walker      show the loyalty abilities read on the planeswalker under your mouse
     !log         snapshot every player and save the game log to the Notebook
@@ -81,7 +82,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.01 (tokens, scry, mill from effects)"
+SCRIPT_VERSION = "1.03 (batch fixes: reminder text, nonbasic, once per turn, amass, search filters)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -362,6 +363,19 @@ function onChat(message, sender)
   end
 
   local importSeat, importText = message:match("^!import (%a+) (.+)$")
+  if importSeat and not TableSetup.isActive(importSeat) then
+    -- "!import <link>": your own seat.
+    importSeat, importText = nil, nil
+  end
+  local ownLink = message:match("^!import (%S+)$")
+  if importSeat == nil and ownLink then
+    if not TableSetup.isActive(sender.color) then
+      printToColor("MTG > Take a seat first, then !import your deck link.", sender.color, { 1, 0.6, 0.2 })
+    else
+      TableUI.importFor(sender.color, ownLink, sender.color)
+    end
+    return false
+  end
   if importSeat then
     if not TableSetup.isActive(importSeat) then
       printToColor("MTG > No such seat in this layout: " .. importSeat .. " (" .. table.concat(TableSetup.activeSeats(), ", ") .. ")",

@@ -307,7 +307,12 @@ function Stack.resolveTop()
     return
   end
   local types = typesOf(obj)
-  if types.Instant or types.Sorcery then
+  -- A card with a permanent type (Virtue of Persistence: an enchantment with
+  -- a sorcery Adventure side) goes to the battlefield; only plain instants
+  -- and sorceries go to the graveyard.
+  local permanent = types.Creature or types.Enchantment or types.Artifact or types.Planeswalker or types.Battle
+    or types.Land
+  if (types.Instant or types.Sorcery) and not permanent then
     log(it.name .. " resolves (to " .. it.controller .. "'s graveyard).")
     -- Read its text before it merges into the graveyard pile.
     if Effects and Effects.resolveSpell then
@@ -380,7 +385,8 @@ function Stack.onDrop(color, obj)
     end
     for _, seat in ipairs(TableSetup.activeSeats()) do
       if TableSetup.inRegion(seat, "castzone", obj.getPosition()) then
-        Stack.pushCard(obj, color, from)
+        -- The CAST mat's seat is the caster (whoever's hand it came from).
+        Stack.pushCard(obj, seat, from)
         return
       end
     end

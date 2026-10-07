@@ -67,6 +67,10 @@ end
 -- Parse an effect: { optional = bool, actions = { { what, who, n } } } or
 -- nil (nothing it can do), plus the reason when it's left to the players.
 function Effects.parse(text, sourceName)
+  -- Reminder text "(...)" isn't rules.
+  if Triggers and Triggers.stripReminder then
+    text = Triggers.stripReminder(tostring(text or ""))
+  end
   -- Drop keyword-only lines ("Flash", "Flying, trample"): no period.
   local kept = {}
   local raw = tostring(text or "")
@@ -101,6 +105,16 @@ function Effects.parse(text, sourceName)
   -- Several paragraphs (a spell: "This spell can't be countered." then
   -- "Destroy all creatures."): read them as sentences.
   t = t:gsub("\n", " ")
+  -- Swords to Plowshares: "Its controller gains life equal to its power."
+  -- is handled with the exile itself.
+  local lifeEqualPower = false
+  do
+    local a = t:find("its controller gains life equal to its power", 1, true)
+    if a then
+      lifeEqualPower = true
+      t = t:sub(1, a - 1) .. t:sub(a + #"its controller gains life equal to its power")
+    end
+  end
   -- Sentence by sentence: one with a condition ("Then if you control four
   -- or more lands, untap that land.") is left to the players; the plain
   -- sentences around it still happen.
@@ -155,6 +169,17 @@ function Effects.parse(text, sourceName)
   add("lose", "that", num(w))
   w = t:match("deals (%w+) damage to each opponent")
   add("lose", "opponents", num(w))
+  w = t:match("deals (%w+) damage to that player")
+  add("lose", "that", num(w))
+  w = t:match("deals (%w+) damage to each player")
+  add("lose", "all", num(w))
+  w = t:match("deals (%w+) damage to target opponent")
+  add("lose", "targetOpponent", num(w))
+  w = t:match("deals (%w+) damage to target player")
+  add("lose", "target", num(w))
+  -- Nekusar: "that player draws an additional card".
+  w = t:match("that player draws (%w+) additional cards?")
+  add("draw", "that", num(w))
   w = t:match("you gain (%w+) life") or t:match("you may gain (%w+) life")
   add("gain", "you", num(w))
   w = t:match("you lose (%w+) life")
@@ -194,7 +219,9 @@ function Effects.parse(text, sourceName)
     local bf = rest:find("onto the battlefield", 1, true) ~= nil
     local hand = rest:find("into your hand", 1, true) ~= nil
     local where = (bf and hand) and "both" or (bf and "battlefield" or "hand")
-    table.insert(actions, { what = "search", who = "you", n = 1, query = q, where = where,
+    local mvMin = tonumber(rest:match("mana value (%d+) or greater") or "")
+    local mvMax = tonumber(rest:match("mana value (%d+) or less") or "")
+    table.insert(actions, { what = "search", who = "you", n = 1, query = q, where = where, mvMin = mvMin, mvMax = mvMax,
       tapped = rest:find("battlefield tapped", 1, true) ~= nil, phrase = phrase })
   end
   -- "untap it" / "untap that permanent" (Amulet of Vigor): the card the
@@ -234,6 +261,7 @@ function Effects.parse(text, sourceName)
           end
           table.insert(actions, { what = (how == "all" or how == "each") and "removeAll" or "removeTarget",
             who = "you", n = 1, verb = verb, types = types, scope = scope, other = phrase:find("other", 1, true) ~= nil,
+            lifeEqualPower = lifeEqualPower,
             phrase = phrase:gsub("%.$", "") })
           break
         end
@@ -274,6 +302,12 @@ function Effects.parse(text, sourceName)
         end
       end
     end
+  end
+  -- "Amass Zombies 1": put N +1/+1 counters on your Army (make a 0/0 Army
+  -- token first if you have none).
+  local amType, amN = t:match("amass (%a+) (%d+)")
+  if amType then
+    table.insert(actions, { what = "amass", who = "you", n = tonumber(amN), kind = amType:gsub("s$", "") })
   end
   -- Scry / surveil / mill (you).
   local sw = t:match("scry (%d+)")
@@ -349,6 +383,8 @@ local function describe(a, target, controller)
     return tostring(a.cardName or "it") .. (a.what == "untap" and " untapped" or " tapped")
   elseif a.what == "token" then
     return who .. (you and " create " or " creates ") .. tostring(a.phrase) .. " token"
+  elseif a.what == "amass" then
+    return who .. (you and " amass " or " amasses ") .. a.n
   elseif a.what == "scry" then
     return who .. (a.surveil and (you and " surveil " or " surveils ") or (you and " scry " or " scries ")) .. a.n
   elseif a.what == "mill" then
@@ -406,7 +442,8 @@ local function apply(it, plan, target)
             how = "click a card to put it into your hand"
           end
           LibSearch.open(seat, a.query, it.name .. " (" .. tostring(a.phrase) .. "): " .. how .. ", then CLOSE + SHUFFLE.",
-            a.where == "hand" and "hand" or "battlefield", a.tapped)
+            a.where == "hand" and "hand" or "battlefield", a.tapped,
+            { typeOnly = true, mvMin = a.mvMin, mvMax = a.mvMax })
         elseif a.what == "counter" then
           local src = it.source and getObjectFromGUID(it.source)
           if src and not src.isDestroyed() then
@@ -418,6 +455,8 @@ local function apply(it, plan, target)
           Effects.pickBounce(seat, a, it.name)
         elseif a.what == "token" then
           Tokens.create(seat, a.spec, a.n, it.name)
+        elseif a.what == "amass" then
+          Effects.amass(seat, a.kind, a.n, it.name)
         elseif a.what == "scry" then
           for _ = 1, a.n do
             Actions.openScry(seat)
@@ -922,7 +961,12 @@ function Effects.pickRemove(seat, a, sourceName, sourceGuid)
     "Click " .. label .. " on the target.", { { label = "SKIP", value = false } }, function(obj)
       if obj then
         local name = obj.getName()
+        local owner = fieldSeat(obj)
+        local power = tonumber(Counters.stats(obj).power or "") or 0
         if removeOne(obj, a.verb) then
+          if a.lifeEqualPower and owner and power > 0 then
+            Trackers.changeLife(owner, power, sourceName)
+          end
           printToAll("MTG > " .. sourceName .. ": " .. (a.verb == "exile" and "exiled " or "destroyed ") .. name .. ".", GOOD)
         end
       else
@@ -930,3 +974,88 @@ function Effects.pickRemove(seat, a, sourceName, sourceGuid)
       end
     end, { filter = function(obj, owner) return fits(obj, owner, a, seat, sourceGuid) end, label = label })
 end
+
+---------------------------------------------------------------------------
+-- Amass, and "enters with N counters"
+---------------------------------------------------------------------------
+
+local function armyOf(seat)
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    local isArmy = cardTypes(obj).army or tostring(obj.getName()):find("Army", 1, true) ~= nil
+    if not isArmy then
+      pcall(function()
+        local d = JSON.decode(obj.getGMNotes())
+        isArmy = type(d) == "table" and tostring(d.typeLine or ""):find("Army", 1, true) ~= nil
+      end)
+    end
+    if obj.type == "Card" and not obj.isDestroyed() and fieldSeat(obj) == seat and isArmy then
+      return obj
+    end
+  end
+  return nil
+end
+
+function Effects.amass(seat, kind, n, sourceName)
+  local army = armyOf(seat)
+  if army then
+    Counters.change(army, "plus", n, seat)
+    printToAll("MTG > " .. seat .. " amasses " .. n .. " onto " .. army.getName() .. ".", GOOD)
+    return
+  end
+  -- No Army yet: a 0/0 black <Kind> Army token, then the counters.
+  Tokens.create(seat, { pt = "0/0", words = { kind:lower(), "army" }, colors = { B = true } }, 1, sourceName)
+  Wait.time(function()
+    local made = armyOf(seat)
+    if made then
+      Counters.change(made, "plus", n, seat)
+      printToAll("MTG > " .. seat .. " amasses " .. n .. " onto the new " .. made.getName() .. ".", GOOD)
+    else
+      broadcastToColor(sourceName .. ": put " .. n .. " +1/+1 counter(s) on your Army yourself.", seat, INFO)
+    end
+  end, 3)
+end
+
+-- "Spike Feeder enters with two +1/+1 counters on it."
+Events.on("cardMoved", function(d)
+  if not enabled() or not GameState.data.started or d.card == nil or d.to == nil then
+    return
+  end
+  if not ON_FIELD[d.to.region] or (d.from and ON_FIELD[d.from.region]) then
+    return
+  end
+  local card = d.card
+  if card.isDestroyed() or card.is_face_down then
+    return
+  end
+  local oracle, name = "", card.getName()
+  pcall(function()
+    local data = JSON.decode(card.getGMNotes())
+    if type(data) == "table" then
+      oracle = type(data.oracle) == "string" and data.oracle or ""
+      name = data.name or name
+    end
+  end)
+  local t = oracle:lower()
+  if Triggers and Triggers.stripReminder then
+    t = Triggers.stripReminder(t)
+  end
+  local w, kind = t:match("enters with (%w+) ([%w%+/%-]+) counters? on it")
+  local n = num(w)
+  if n == nil then
+    return
+  end
+  -- Conditional ones ("if ...", "for each", "x") are left to the player.
+  local at = t:find("enters with", 1, true)
+  local clause = t:sub(math.max(1, at - 30), at + 40)
+  if clause:find(" if ", 1, true) or clause:find("for each", 1, true) then
+    return
+  end
+  local key = (kind == "+1/+1" and "plus") or (kind == "-1/-1" and "minus") or (kind == "loyalty" and "loyalty") or "other"
+  Wait.time(function()
+    if not card.isDestroyed() then
+      Counters.change(card, key, n, d.to.seat)
+      printToAll("MTG > " .. card.getName() .. " enters with " .. n .. " " .. kind .. " counter"
+        .. (n == 1 and "" or "s") .. ".", INFO)
+    end
+  end, 0.6)
+end)
