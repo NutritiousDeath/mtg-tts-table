@@ -230,7 +230,7 @@ function Stack.pushAbility(controller, sourceName, text, image, opts)
   -- On the list right away (not when the picture has loaded), so the turn
   -- can't move on in the meantime.
   table.insert(items(), { guid = obj.getGUID(), kind = "ability", name = sourceName, controller = controller,
-    text = text, trigger = opts.trigger, that = opts.that, source = opts.source,
+    text = text, trigger = opts.trigger, that = opts.that, source = opts.source, thatCard = opts.thatCard,
     auto = (opts.trigger or opts.loyalty or opts.activated) and true or nil })
   Stack.render()
   if opts.trigger then

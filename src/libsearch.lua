@@ -7,7 +7,7 @@
       every card with scry, "creature elf" finds Elf creatures)
     - leave it empty and SEARCH to see the whole library
     - click a card: put it into your hand
-    - right-click a card: put it onto your battlefield
+    - the TO: button switches where a clicked card goes: hand or battlefield
   Closing the panel shuffles your library (searching always does).
 --]]
 
@@ -22,6 +22,10 @@ local query = {}     -- [color] = typed text
 local shown = {}     -- [color] = { guids in slot order }
 local open = {}      -- [color] = true while open
 local searched = {}  -- [color] = true once the panel has looked at the library
+-- Where a picked card goes: "hand" or "battlefield" (the TO: button), and
+-- whether it enters tapped. Buttons with a value attached can't tell left
+-- from right click in TTS, so the destination is a toggle, not a click.
+local dest = {}      -- [color] = { where = "hand"|"battlefield", tapped = bool }
 
 function LibSearch.xml()
   local parts = {}
@@ -45,13 +49,17 @@ function LibSearch.xml()
       <InputField id="lsInput_%s" onValueChanged="ui_libText" onEndEdit="ui_libSubmit" fontSize="16" flexibleWidth="1"
                   placeholder="name, type or rules text: forest, creature elf, scry, draw a card... (empty = whole library)" />
       <Button onClick="ui_libSearch(%s)" preferredWidth="110" color="#00B3A4" textColor="#06130B" fontStyle="Bold">SEARCH</Button>
+      <Panel preferredWidth="210">
+        <Button id="lsDestBtn_%s" onClick="ui_libDest(%s)" color="#2A3346" tooltip="Where a clicked card goes: click to switch" />
+        <Text id="lsDest_%s" raycastTarget="false" fontSize="15" fontStyle="Bold" color="#E6F1FF">TO: HAND</Text>
+      </Panel>
     </HorizontalLayout>
-    <Text id="lsStatus_%s" fontSize="12" color="#8B98A9" alignment="MiddleLeft" preferredHeight="18">Click a card: to your hand. Right-click: onto your battlefield.</Text>
+    <Text id="lsStatus_%s" fontSize="12" color="#8B98A9" alignment="MiddleLeft" preferredHeight="18">Click a card to take it (the TO: button picks hand or battlefield).</Text>
     <GridLayout id="lsGrid_%s" active="false" cellSize="146 204" spacing="8 8" constraint="FixedColumnCount" constraintCount="]] .. COLS .. [["
                 childAlignment="UpperLeft" preferredHeight="204">]] .. table.concat(slots) .. [[</GridLayout>
   </VerticalLayout>
 </Panel>
-]]):format(c, c, c, c, c, c, c))
+]]):format(c, c, c, c, c, c, c, c, c, c))
   end
   return table.concat(parts)
 end
@@ -87,8 +95,7 @@ local function render(color, guids, faces, total, matched)
     if g then
       UI.setAttribute("lsSlot_" .. id, "active", "true")
       UI.setAttribute("lsImg_" .. id, "image", faces[g] or "")
-      UI.setAttribute("lsBtn_" .. id, "tooltip", (faces[g .. "|name"] or "Card")
-        .. "\nClick: to your hand\nRight-click: onto your battlefield")
+      UI.setAttribute("lsBtn_" .. id, "tooltip", (faces[g .. "|name"] or "Card") .. "\nClick to take it")
     else
       UI.setAttribute("lsSlot_" .. id, "active", "false")
     end
@@ -99,7 +106,7 @@ local function render(color, guids, faces, total, matched)
     status(color, "Showing " .. #guids .. " of " .. matched .. " matches. Add words to narrow it down.")
   else
     status(color, matched .. " match" .. (matched == 1 and "" or "es") .. " in " .. total
-      .. " cards. Click: to your hand. Right-click: onto your battlefield.")
+      .. " cards. Click a card to take it.")
   end
 end
 
@@ -154,14 +161,37 @@ function LibSearch.run(color)
   render(color, guids, faces, #entries, #matches)
 end
 
+local function renderDest(color)
+  local d = dest[color] or { where = "hand" }
+  local label = d.where == "battlefield" and ("TO: BATTLEFIELD" .. (d.tapped and " (T)" or "")) or "TO: HAND"
+  UI.setValue("lsDest_" .. color, label)
+  UI.setAttribute("lsDestBtn_" .. color, "color", d.where == "battlefield" and "#1B5A3A" or "#2A3346")
+end
+
+function ui_libDest(player, c)
+  if c ~= player.color and not GameState.solo() then
+    return
+  end
+  local d = dest[c] or { where = "hand" }
+  d.where = d.where == "hand" and "battlefield" or "hand"
+  if d.where == "hand" then
+    d.tapped = false
+  end
+  dest[c] = d
+  renderDest(c)
+end
+
 -- preset: search words to start with (effects.lua fills in "basic land"
--- etc.); note: a line telling the player what to do.
-function LibSearch.open(color, preset, note)
+-- etc.); note: a line telling the player what to do; where / tapped: where
+-- picked cards go ("hand" or "battlefield").
+function LibSearch.open(color, preset, note, where, tapped)
   if not TableSetup.isActive(color) then
     return
   end
   open[color] = true
   searched[color] = false
+  dest[color] = { where = where or "hand", tapped = tapped and true or false }
+  renderDest(color)
   query[color] = preset or query[color]
   if preset then
     UI.setAttribute("lsInput_" .. color, "text", preset)
@@ -194,7 +224,7 @@ function LibSearch.close(color, quiet)
 end
 
 -- Take a shown card: to the hand, or onto the battlefield (face up).
-local function take(color, slot, toBattlefield)
+local function take(color, slot, toBattlefield, tapped)
   local key = shown[color] and shown[color][slot]
   local lib = Library.find(color)
   if key == nil or lib == nil then
@@ -206,14 +236,16 @@ local function take(color, slot, toBattlefield)
   if toBattlefield then
     local pos = TableSetup.slot(color, "battlefield", 2)
     if lib.type == "Deck" then
-      local card = lib.takeObject({ index = index, position = pos, rotation = { 0, s.yaw, 0 }, smooth = true })
+      local yaw = tapped and (s.yaw + 90) % 360 or s.yaw
+      local card = lib.takeObject({ index = index, position = pos, rotation = { 0, yaw, 0 }, smooth = true })
       name = card and card.getName() or name
     else
       lib.setPositionSmooth(pos)
       lib.setRotationSmooth({ 0, s.yaw, 0 })
       name = lib.getName()
     end
-    printToAll("MTG > " .. color .. " put " .. name .. " onto the battlefield from their library.", INFO)
+    printToAll("MTG > " .. color .. " put " .. name .. " onto the battlefield" .. (tapped and " tapped" or "")
+      .. " from their library.", INFO)
   else
     local hand = Player[color].getHandTransform()
     if lib.type == "Deck" then
@@ -260,13 +292,13 @@ function ui_libClose(player, c)
   LibSearch.close(c)
 end
 
--- value: "-1" left click, "-2" right click.
-function ui_libPick(player, arg, value)
+function ui_libPick(player, arg)
   local c, i = tostring(arg):match("^(%a+)_(%d+)$")
-  if c ~= player.color then
+  if c ~= player.color and not GameState.solo() then
     return
   end
-  take(c, tonumber(i), tostring(value) == "-2")
+  local d = dest[c] or { where = "hand" }
+  take(c, tonumber(i), d.where == "battlefield", d.tapped)
 end
 
 -- Right-click menu on the library deck.

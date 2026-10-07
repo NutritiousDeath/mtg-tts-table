@@ -232,6 +232,7 @@ local function parseTrigger(p)
         local underTheirs = after:find("under an opponent's control", 1, true) ~= nil
         if #types > 0 then
           return { kind = kind, subject = types[1], subjects = types,
+            tapped = kind == "enters" and window:sub(verbAt, verbAt + 13) == " enters tapped",
             another = lead == "another " or lead == "one or more other ",
             nontoken = subj:find("nontoken", 1, true) ~= nil,
             tokenOnly = subj:find(" token", 1, true) ~= nil and subj:find("nontoken", 1, true) == nil,
@@ -378,6 +379,20 @@ local function typesOf(obj)
   return t
 end
 
+-- "Whenever a permanent you control enters tapped": does this one?
+local function entersTappedNow(card)
+  if Effects and Effects.entersTapped and Effects.entersTapped(card) == "yes" then
+    return true
+  end
+  local loc = Zones.regionAt(card.getPosition())
+  local s = loc.seat and TableSetup.seat(loc.seat)
+  if s == nil then
+    return false
+  end
+  local diff = ((card.getRotation().y - s.yaw + 540) % 360) - 180
+  return math.abs(diff) > 30
+end
+
 local function matchesSubject(obj, trig)
   local list = trig.subjects or { trig.subject }
   local types = typesOf(obj)
@@ -465,7 +480,7 @@ end
 local function push(f)
   -- that = "that player" in the effect (the one who drew, cast, whose
   -- creature entered...), for auto-resolve (effects.lua).
-  Stack.pushAbility(f.controller, f.name or "?", f.text, f.face or "", { trigger = true, that = f.that, source = f.guid })
+  Stack.pushAbility(f.controller, f.name or "?", f.text, f.face or "", { trigger = true, that = f.that, source = f.guid, thatCard = f.thatCard })
 end
 
 local function shortText(f)
@@ -603,12 +618,13 @@ function Triggers.orderXml()
 end
 
 -- Found triggers go out one seat at a time, active player first.
-local function pushAll(found, that)
+local function pushAll(found, that, thatCard)
   if #found == 0 then
     return
   end
   for _, f in ipairs(found) do
     f.that = f.that or that
+    f.thatCard = f.thatCard or thatCard
     -- Name and picture now: the card object can be gone by the time the
     -- trigger goes on the stack (merged into a pile, replaced...).
     if f.name == nil then
@@ -707,6 +723,7 @@ Events.on("cardMoved", function(d)
       for _, a in ipairs(abilitiesOf(p.obj)) do
         local t = a.trig
         if t.kind == kind and not t.self and matchesSubject(card, t)
+            and not (t.tapped and not entersTappedNow(card))
             and not (t.nontoken and isToken(card))
             and not (t.mine and cardController ~= p.controller)
             and not (t.theirs and cardController == p.controller) then
@@ -717,7 +734,7 @@ Events.on("cardMoved", function(d)
   end
   -- "Whenever a creature dies" on a creature that died with it isn't
   -- checked (it's already in the graveyard): add those by hand.
-  pushAll(found, cardController)
+  pushAll(found, cardController, card.getGUID())
 end)
 
 -- A spell was cast (put on the stack).

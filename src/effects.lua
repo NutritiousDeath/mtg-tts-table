@@ -167,6 +167,13 @@ function Effects.parse(text, sourceName)
     table.insert(actions, { what = "search", who = "you", n = 1, query = q, where = where,
       tapped = rest:find("battlefield tapped", 1, true) ~= nil, phrase = phrase })
   end
+  -- "untap it" / "untap that permanent" (Amulet of Vigor): the card the
+  -- trigger was about.
+  if t:find("untap it", 1, true) or t:find("untap that ", 1, true) then
+    table.insert(actions, { what = "untap", who = "you", n = 1 })
+  elseif t:find(" tap it", 1, true) or t:find(" tap that ", 1, true) then
+    table.insert(actions, { what = "tap", who = "you", n = 1 })
+  end
   -- "put a quest counter on ~": counters on the card itself.
   local cn, ckind = t:match("put (%w+) ([%w%+/%-]+) counters? on ~")
   if cn and num(cn) then
@@ -217,6 +224,8 @@ local function describe(a, target, controller)
     return a.n .. " " .. tostring(a.label) .. " counter" .. (a.n == 1 and "" or "s") .. " added"
   elseif a.what == "bounce" then
     return who .. " returns a " .. tostring(a.type) .. " to hand"
+  elseif a.what == "untap" or a.what == "tap" then
+    return tostring(a.cardName or "it") .. (a.what == "untap" and " untapped" or " tapped")
   end
   if a.what == "gain" then
     return who .. (you and " gain " or " gains ") .. a.n .. " life"
@@ -256,16 +265,17 @@ local function apply(it, plan, target)
         elseif a.what == "draw" then
           Actions.draw(seat, a.n, it.name)
         elseif a.what == "search" then
-          local tapNote = a.tapped and " (then tap it)" or ""
           local how
           if a.where == "both" then
-            how = "RIGHT-click = onto the battlefield" .. tapNote .. ", click = into your hand"
+            how = "click a card for the battlefield" .. (a.tapped and " (tapped)" or "")
+              .. ", then switch TO: HAND for the other one"
           elseif a.where == "battlefield" then
-            how = "RIGHT-click the card to put it onto the battlefield" .. tapNote
+            how = "click a card to put it onto the battlefield" .. (a.tapped and " tapped" or "")
           else
-            how = "click the card to put it into your hand"
+            how = "click a card to put it into your hand"
           end
-          LibSearch.open(seat, a.query, it.name .. " (" .. tostring(a.phrase) .. "): " .. how .. ", then CLOSE + SHUFFLE.")
+          LibSearch.open(seat, a.query, it.name .. " (" .. tostring(a.phrase) .. "): " .. how .. ", then CLOSE + SHUFFLE.",
+            a.where == "hand" and "hand" or "battlefield", a.tapped)
         elseif a.what == "counter" then
           local src = it.source and getObjectFromGUID(it.source)
           if src and not src.isDestroyed() then
@@ -275,6 +285,23 @@ local function apply(it, plan, target)
           end
         elseif a.what == "bounce" then
           Effects.pickBounce(seat, a, it.name)
+        elseif a.what == "untap" or a.what == "tap" then
+          local card = it.thatCard and getObjectFromGUID(it.thatCard)
+          local owner = card and Zones.regionAt(card.getPosition()).seat
+          if card and not card.isDestroyed() and owner then
+            a.cardName = card.getName()
+            -- After "enters tapped" has turned it (that waits 0.8 s).
+            Wait.time(function()
+              if not card.isDestroyed() then
+                local s = TableSetup.seat(owner)
+                local r = card.getRotation()
+                local yaw = a.what == "untap" and s.yaw or (s.yaw + 90) % 360
+                card.setRotationSmooth({ r.x, yaw, r.z }, false, true)
+              end
+            end, 1)
+          else
+            broadcastToColor(it.name .. ": " .. a.what .. " it yourself (couldn't tell which card).", seat, INFO)
+          end
         end
       end
     end
@@ -618,6 +645,29 @@ Events.on("cardMoved", function(d)
   if card.isDestroyed() or card.is_face_down then
     return
   end
+  local how, clause = Effects.entersTapped(card)
+  if how == nil then
+    return
+  end
+  local seat = d.to.seat
+  if how == "maybe" then
+    broadcastToColor(card.getName() .. " may enter tapped (" .. clause .. "): tap it if it does.", seat, INFO)
+    return
+  end
+  Wait.time(function()
+    if card.isDestroyed() then
+      return
+    end
+    local s = TableSetup.seat(seat)
+    local r = card.getRotation()
+    card.setRotationSmooth({ r.x, (s.yaw + 90) % 360, r.z }, false, true)
+    printToAll("MTG > " .. card.getName() .. " enters tapped.", INFO)
+  end, 0.8)
+end)
+
+-- Does this card enter tapped? "yes", "maybe" (a condition: "unless you
+-- control..."), or nil; plus the clause.
+function Effects.entersTapped(card)
   local name, oracle = card.getName(), ""
   pcall(function()
     local data = JSON.decode(card.getGMNotes())
@@ -638,22 +688,12 @@ Events.on("cardMoved", function(d)
   end
   local at = t:find("~ enters tapped", 1, true) or t:find("~ enters the battlefield tapped", 1, true)
   if at == nil then
-    return
+    return nil
   end
   local stop = t:find(".", at, true) or #t
   local clause = t:sub(at, stop)
-  local seat = d.to.seat
   if clause:find("unless", 1, true) or clause:find(" if ", 1, true) then
-    broadcastToColor(card.getName() .. " may enter tapped (" .. clause .. "): tap it if it does.", seat, INFO)
-    return
+    return "maybe", clause
   end
-  Wait.time(function()
-    if card.isDestroyed() then
-      return
-    end
-    local s = TableSetup.seat(seat)
-    local r = card.getRotation()
-    card.setRotationSmooth({ r.x, (s.yaw + 90) % 360, r.z }, false, true)
-    printToAll("MTG > " .. card.getName() .. " enters tapped.", INFO)
-  end, 0.8)
-end)
+  return "yes", clause
+end
