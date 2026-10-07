@@ -98,14 +98,44 @@ function Effects.parse(text, sourceName)
   for _, w in ipairs({ "creature", "land", "enchantment", "artifact", "permanent", "planeswalker" }) do
     t = t:gsub("this " .. w, "~")
   end
-  if t:find("\n", 1, true) then
-    return nil, "several abilities"
+  -- Several paragraphs (a spell: "This spell can't be countered." then
+  -- "Destroy all creatures."): read them as sentences.
+  t = t:gsub("\n", " ")
+  -- Sentence by sentence: one with a condition ("Then if you control four
+  -- or more lands, untap that land.") is left to the players; the plain
+  -- sentences around it still happen.
+  local kept, notes, firstWhy = {}, {}, nil
+  local pos = 1
+  while pos <= #t do
+    local stop = t:find(". ", pos, true)
+    local sentence = stop and t:sub(pos, stop) or t:sub(pos)
+    local why
+    for _, m in ipairs(MANUAL) do
+      if why == nil and (" " .. sentence .. " "):find(m, 1, true) then
+        why = m:gsub("^%s+", ""):gsub("%s+$", "")
+      end
+    end
+    if why then
+      firstWhy = firstWhy or why
+      local clean = sentence:gsub("^%s+", ""):gsub("%s+$", "")
+      if clean ~= "" then
+        table.insert(notes, clean)
+      end
+    else
+      table.insert(kept, sentence)
+    end
+    pos = stop and (stop + 2) or (#t + 1)
   end
-  for _, m in ipairs(MANUAL) do
-    if t:find(m, 1, true) then
-      return nil, "it has a condition (" .. m:gsub("^%s+", ""):gsub("%s+$", "") .. ")"
+  if #kept == 0 then
+    return nil, "it has a condition (" .. tostring(firstWhy) .. ")"
+  end
+  -- "... instead" changes the other sentences too: all by hand.
+  for _, n in ipairs(notes) do
+    if n:find("instead", 1, true) then
+      return nil, "it has a condition (instead)"
     end
   end
+  t = " " .. table.concat(kept, " ") .. " "
   local actions = {}
   local function add(what, who, n)
     if n and n > 0 then
@@ -174,6 +204,42 @@ function Effects.parse(text, sourceName)
   elseif t:find(" tap it", 1, true) or t:find(" tap that ", 1, true) then
     table.insert(actions, { what = "tap", who = "you", n = 1 })
   end
+  -- "Destroy all creatures", "exile all nonland permanents your opponents
+  -- control", "destroy target artifact"...
+  for _, verb in ipairs({ "destroy", "exile" }) do
+    for _, how in ipairs({ "all", "each", "target", "up to one target" }) do
+      local a0 = t:find(verb .. " " .. how .. " ", 1, true)
+      if a0 then
+        local rest = t:sub(a0 + #verb + #how + 2)
+        local stop = rest:find(".", 1, true) or #rest
+        local phrase = rest:sub(1, stop)
+        local types = {}
+        for _, w in ipairs({ "creature", "artifact", "enchantment", "planeswalker", "land", "permanent", "battle" }) do
+          if phrase:find(w, 1, true) then
+            table.insert(types, w)
+          end
+        end
+        if phrase:find("nonland", 1, true) then
+          types = { "nonland" }
+        elseif phrase:find("noncreature", 1, true) then
+          types = { "noncreature" }
+        end
+        if #types > 0 then
+          local scope = "any"
+          if phrase:find("you don't control", 1, true) or phrase:find("opponents control", 1, true)
+              or phrase:find("an opponent controls", 1, true) then
+            scope = "opponents"
+          elseif phrase:find("you control", 1, true) then
+            scope = "mine"
+          end
+          table.insert(actions, { what = (how == "all" or how == "each") and "removeAll" or "removeTarget",
+            who = "you", n = 1, verb = verb, types = types, scope = scope, other = phrase:find("other", 1, true) ~= nil,
+            phrase = phrase:gsub("%.$", "") })
+          break
+        end
+      end
+    end
+  end
   -- "put a quest counter on ~": counters on the card itself.
   local cn, ckind = t:match("put (%w+) ([%w%+/%-]+) counters? on ~")
   if cn and num(cn) then
@@ -193,9 +259,12 @@ function Effects.parse(text, sourceName)
     end
   end
   if #actions == 0 then
+    if firstWhy then
+      return nil, "it has a condition (" .. firstWhy .. ")"
+    end
     return nil, "nothing it can apply on its own"
   end
-  return { optional = t:find("you may", 1, true) ~= nil, actions = actions }
+  return { optional = t:find("you may", 1, true) ~= nil, actions = actions, notes = notes }
 end
 
 ---------------------------------------------------------------------------
@@ -226,6 +295,10 @@ local function describe(a, target, controller)
     return who .. " returns a " .. tostring(a.type) .. " to hand"
   elseif a.what == "untap" or a.what == "tap" then
     return tostring(a.cardName or "it") .. (a.what == "untap" and " untapped" or " tapped")
+  elseif a.what == "removeAll" then
+    return a.verb .. " all " .. tostring(a.phrase) .. " (" .. tostring(a.count or 0) .. ")"
+  elseif a.what == "removeTarget" then
+    return a.verb .. " target " .. tostring(a.phrase)
   end
   if a.what == "gain" then
     return who .. (you and " gain " or " gains ") .. a.n .. " life"
@@ -285,6 +358,10 @@ local function apply(it, plan, target)
           end
         elseif a.what == "bounce" then
           Effects.pickBounce(seat, a, it.name)
+        elseif a.what == "removeAll" then
+          a.count = Effects.removeAll(seat, a, it)
+        elseif a.what == "removeTarget" then
+          Effects.pickRemove(seat, a, it.name, it.source)
         elseif a.what == "untap" or a.what == "tap" then
           local card = it.thatCard and getObjectFromGUID(it.thatCard)
           local owner = card and Zones.regionAt(card.getPosition()).seat
@@ -308,6 +385,9 @@ local function apply(it, plan, target)
     table.insert(done, describe(a, a.who == "that" and (it.that or target) or target, controller))
   end
   printToAll("MTG > " .. it.name .. " resolved: " .. table.concat(done, ", ") .. ".", GOOD)
+  for _, n in ipairs(plan.notes or {}) do
+    broadcastToColor(it.name .. ": do this part yourself: \"" .. n .. "\"", controller, INFO)
+  end
 end
 
 ---------------------------------------------------------------------------
@@ -696,4 +776,91 @@ function Effects.entersTapped(card)
     return "maybe", clause
   end
   return "yes", clause
+end
+
+---------------------------------------------------------------------------
+-- Destroy / exile (board wipes and single targets)
+---------------------------------------------------------------------------
+
+local function hasKeyword(obj, kw)
+  local found = false
+  pcall(function()
+    local d = JSON.decode(obj.getGMNotes())
+    for _, k in ipairs(type(d) == "table" and d.keywords or {}) do
+      if tostring(k):lower() == kw then
+        found = true
+      end
+    end
+  end)
+  return found
+end
+
+-- Does a permanent fit "creatures", "nonland permanents"... and the scope?
+local function fits(obj, owner, a, seat, sourceGuid)
+  if a.scope == "mine" and owner ~= seat then
+    return false
+  elseif a.scope == "opponents" and owner == seat then
+    return false
+  end
+  if a.other and sourceGuid and obj.getGUID() == sourceGuid then
+    return false
+  end
+  local t = cardTypes(obj)
+  for _, want in ipairs(a.types) do
+    if want == "permanent" or t[want] then
+      return true
+    elseif want == "nonland" and not t.land then
+      return true
+    elseif want == "noncreature" and not t.creature then
+      return true
+    end
+  end
+  return false
+end
+
+local function removeOne(obj, verb)
+  if verb == "destroy" and hasKeyword(obj, "indestructible") then
+    printToAll("MTG > " .. obj.getName() .. " is indestructible and stays.", INFO)
+    return false
+  end
+  Combat.removeCard(obj, verb == "exile" and "exile" or "graveyard")
+  return true
+end
+
+-- Everything that fits goes at once. Returns how many went.
+function Effects.removeAll(seat, a, it)
+  local gone, names = 0, {}
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" and not obj.isDestroyed() and not obj.is_face_down and obj.held_by_color == nil then
+      local owner = fieldSeat(obj)
+      if owner and fits(obj, owner, a, seat, it.source) then
+        local name = obj.getName()
+        if removeOne(obj, a.verb) then
+          gone = gone + 1
+          table.insert(names, name)
+        end
+      end
+    end
+  end
+  if gone > 0 then
+    printToAll("MTG > " .. it.name .. ": " .. (a.verb == "exile" and "exiled " or "destroyed ")
+      .. table.concat(names, ", ") .. ".", GOOD)
+  end
+  return gone
+end
+
+-- "Destroy target creature": a DESTROY / EXILE button on each candidate.
+function Effects.pickRemove(seat, a, sourceName, sourceGuid)
+  local label = string.upper(a.verb)
+  ask(seat, sourceName .. ": " .. a.verb .. " target " .. tostring(a.phrase),
+    "Click " .. label .. " on the target.", { { label = "SKIP", value = false } }, function(obj)
+      if obj then
+        local name = obj.getName()
+        if removeOne(obj, a.verb) then
+          printToAll("MTG > " .. sourceName .. ": " .. (a.verb == "exile" and "exiled " or "destroyed ") .. name .. ".", GOOD)
+        end
+      else
+        printToAll("MTG > " .. sourceName .. ": no target chosen.", INFO)
+      end
+    end, { filter = function(obj, owner) return fits(obj, owner, a, seat, sourceGuid) end, label = label })
 end

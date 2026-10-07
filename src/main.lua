@@ -81,7 +81,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.98 (search: TO hand / battlefield)"
+SCRIPT_VERSION = "1.00 (destroy / exile effects)"
 
 function onLoad(saved)
   GameLog.setup()

@@ -988,7 +988,9 @@ end
 
 -- A dead permanent leaves: tokens to the graveyard then gone, commanders to
 -- the command zone, everything else to its controller's graveyard.
-local function sendToGraveyard(card)
+-- zone = "exile" sends it to exile instead (effects.lua: "exile all ...").
+local function sendToGraveyard(card, zone)
+  zone = zone or "graveyard"
   local seat = controller(card)
   if seat == nil then
     return
@@ -1010,7 +1012,7 @@ local function sendToGraveyard(card)
   end
   card.setRotation({ 0, s.yaw, 0 })
   if isToken(card) then
-    card.setPosition(TableSetup.slot(seat, "graveyard", TableSetup.SURFACE_TOP + 1.5))
+    card.setPosition(TableSetup.slot(seat, zone, TableSetup.SURFACE_TOP + 1.5))
     Zones.refresh(card)
     Wait.time(function()
       if not card.isDestroyed() then
@@ -1022,15 +1024,19 @@ local function sendToGraveyard(card)
     end, 1.5)
     return
   end
-  card.setPosition(TableSetup.slot(seat, "graveyard", TableSetup.SURFACE_TOP + 2))
+  card.setPosition(TableSetup.slot(seat, zone, TableSetup.SURFACE_TOP + 2))
   -- Note the move now (dies triggers), before it merges into the pile.
   Zones.refresh(card)
+  if zone ~= "graveyard" then
+    return
+  end
   Library.toGraveyard(seat, card, function()
     if not card.isDestroyed() then
       Zones.refresh(card)
     end
   end)
 end
+Combat.removeCard = sendToGraveyard
 
 local function applyRound(byColor)
   local c = state()
