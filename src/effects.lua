@@ -309,6 +309,25 @@ function Effects.parse(text, sourceName)
   if amType then
     table.insert(actions, { what = "amass", who = "you", n = tonumber(amN), kind = amType:gsub("s$", "") })
   end
+  -- "Return target creature card from your graveyard to your hand / to the
+  -- battlefield" (Eternal Witness...): search the graveyard.
+  for _, dest in ipairs({ { "from your graveyard to your hand", "hand" }, { "from your graveyard to the battlefield", "battlefield" } }) do
+    local g = t:find(dest[1], 1, true)
+    if g then
+      local before = t:sub(math.max(1, g - 60), g - 1)
+      local r = before:find("return ", 1, true)
+      if r then
+        local what = before:sub(r + 7):gsub("^up to %w+ ", ""):gsub("^target ", ""):gsub("^an? ", "")
+        local word = what:match("^(%a+) cards?") or ""
+        if word == "card" or word == "target" then
+          word = ""
+        end
+        table.insert(actions, { what = "graveReturn", who = "you", n = 1, type = word, where = dest[2],
+          tapped = t:find("battlefield tapped", 1, true) ~= nil })
+      end
+      break
+    end
+  end
   -- Scry / surveil / mill (you).
   local sw = t:match("scry (%d+)")
   if sw then
@@ -385,6 +404,8 @@ local function describe(a, target, controller)
     return who .. (you and " create " or " creates ") .. tostring(a.phrase) .. " token"
   elseif a.what == "amass" then
     return who .. (you and " amass " or " amasses ") .. a.n
+  elseif a.what == "graveReturn" then
+    return who .. " returns a " .. (a.type ~= "" and (a.type .. " ") or "") .. "card from the graveyard"
   elseif a.what == "scry" then
     return who .. (a.surveil and (you and " surveil " or " surveils ") or (you and " scry " or " scries ")) .. a.n
   elseif a.what == "mill" then
@@ -457,6 +478,10 @@ local function apply(it, plan, target)
           Tokens.create(seat, a.spec, a.n, it.name)
         elseif a.what == "amass" then
           Effects.amass(seat, a.kind, a.n, it.name)
+        elseif a.what == "graveReturn" then
+          LibSearch.open(seat, a.type, it.name .. ": click the " .. (a.type ~= "" and a.type or "card") .. " to return it"
+            .. (a.where == "battlefield" and " to the battlefield" or " to your hand") .. ", then CLOSE.",
+            a.where, a.tapped, { typeOnly = true, zone = "graveyard" })
         elseif a.what == "scry" then
           for _ = 1, a.n do
             Actions.openScry(seat)
@@ -566,7 +591,9 @@ local function nextQuestion()
         local q = current
         current = nil
         q.onPick(q.choices[1].value)
-        nextQuestion()
+        if current == nil then
+          nextQuestion()
+        end
         return
       end
     end
@@ -597,7 +624,11 @@ function ui_effPick(player, arg)
   current = nil
   UI.setAttribute("effAsk_" .. seat, "visibility", seat)
   q.onPick(ch.value)
-  nextQuestion()
+  -- The answer may have asked a new question already (a mode that needs a
+  -- target, "unless" then "you may"): don't skip past it.
+  if current == nil then
+    nextQuestion()
+  end
 end
 
 function Effects.xml()
@@ -635,6 +666,74 @@ end
 function Effects.resolve(it)
   if not enabled() or not it.auto or not GameState.data.started then
     return
+  end
+  -- "Choose one —" with "• mode" lines: the controller picks a mode first.
+  local raw = tostring(it.text or "")
+  local bullet = raw:find("•", 1, true)
+  if bullet and not it.modePicked then
+    local modes = {}
+    local rest = raw:sub(bullet)
+    local pos = 1
+    while true do
+      local a = rest:find("•", pos, true)
+      if not a then
+        break
+      end
+      local b = rest:find("•", a + 1, true)
+      local m = rest:sub(a + #"•", (b or (#rest + 1)) - 1):gsub("^%s+", ""):gsub("%s+$", "")
+      table.insert(modes, m)
+      pos = b or (#rest + 1)
+      if not b then
+        break
+      end
+    end
+    if #modes > 0 then
+      local lines, choices = {}, {}
+      for i, m in ipairs(modes) do
+        if i <= MAX_CHOICES then
+          table.insert(lines, i .. ") " .. (#m > 70 and (m:sub(1, 68) .. "...") or m))
+          table.insert(choices, { label = tostring(i), value = i })
+        end
+      end
+      ask(it.controller, it.name .. ": choose a mode", table.concat(lines, "\n"), choices, function(i)
+        local copy = {}
+        for k, v in pairs(it) do
+          copy[k] = v
+        end
+        copy.text = modes[i]
+        copy.modePicked = true
+        printToAll("MTG > " .. it.controller .. " chose: " .. modes[i], INFO)
+        Effects.resolve(copy)
+      end)
+      return
+    end
+  end
+  -- "... unless that player pays {1}" (Rhystic Study): that player decides first.
+  local low = raw:lower()
+  local un = low:find("unless that player pays", 1, true) or low:find("unless they pay", 1, true)
+    or low:find("unless its controller pays", 1, true)
+  if un and not it.unlessDone then
+    local stop = raw:find(".", un, true) or (#raw + 1)
+    local clause = raw:sub(un, stop - 1)
+    local copy = {}
+    for k, v in pairs(it) do
+      copy[k] = v
+    end
+    copy.text = raw:sub(1, un - 1):gsub("%s+$", "") .. raw:sub(stop)
+    copy.unlessDone = true
+    local payer = it.that
+    if payer and payer ~= it.controller and GameState.player(payer) then
+      ask(payer, it.name .. " (" .. it.controller .. ")", "Pay to stop it? (" .. clause .. ")",
+        { { label = "PAY", value = true }, { label = "DON'T", value = false } }, function(pays)
+          if pays then
+            printToAll("MTG > " .. payer .. " pays: " .. it.name .. " does nothing.", INFO)
+          else
+            Effects.resolve(copy)
+          end
+        end)
+      return
+    end
+    it = copy
   end
   local plan, why = Effects.parse(it.text, it.name)
   if plan == nil then
@@ -770,7 +869,9 @@ function effects_cardPick(obj, color, alt)
   UI.setAttribute("effAsk_" .. q.seat, "visibility", q.seat)
   Counters.render(obj)   -- its RETURN button goes before it moves
   q.onPick(obj)
-  nextQuestion()
+  if current == nil then
+    nextQuestion()
+  end
 end
 
 local function returnToHand(obj)

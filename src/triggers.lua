@@ -230,6 +230,21 @@ local function parseTrigger(p)
         local after = window:sub(verbAt, verbAt + 45)
         local underMine = after:find("under your control", 1, true) ~= nil
         local underTheirs = after:find("under an opponent's control", 1, true) ~= nil
+        -- No card type: a creature type ("another Rat you control", "a
+        -- Zombie"), matched on the type line.
+        if #types == 0 then
+          local rest = subj:sub(#lead + 1):gsub("^nontoken ", ""):gsub("^other ", "")
+          local w = rest:match("^(%a+)")
+          local NOT = { player = true, spell = true, card = true, opponent = true, source = true, ability = true }
+          if w and not NOT[w] then
+            if w:sub(-3) == "ves" then
+              w = w:sub(1, -4) .. "f"
+            elseif w:sub(-1) == "s" and w:sub(-2) ~= "ss" then
+              w = w:sub(1, -2)
+            end
+            types = { "sub:" .. w }
+          end
+        end
         if #types > 0 then
           return { kind = kind, subject = types[1], subjects = types,
             tapped = kind == "enters" and window:sub(verbAt, verbAt + 13) == " enters tapped",
@@ -347,7 +362,17 @@ local function abilitiesOf(obj)
     return cache[key]
   end
   local list = {}
+  -- "Choose one —" modes ("• ...") belong to the line before them.
+  local paras = {}
   for _, raw in ipairs(lines(d.oracle)) do
+    local first = raw:sub(1, 3)
+    if #paras > 0 and (first == "•" or raw:sub(1, 1) == "\149" or raw:find("^%s*•")) then
+      paras[#paras] = paras[#paras] .. "\n" .. raw
+    else
+      table.insert(paras, raw)
+    end
+  end
+  for _, raw in ipairs(paras) do
     local para = stripReminder(raw)
     if para ~= "" then
       local norm = normalize(para, d.name)
@@ -437,6 +462,13 @@ local function matchesSubject(obj, trig)
   for _, sub in ipairs(list) do
     if sub == nil or sub == "permanent" or types[sub] then
       return true
+    end
+    if type(sub) == "string" and sub:sub(1, 4) == "sub:" then
+      local d = cardData(obj)
+      local tl = tostring(d and d.typeLine or ""):lower()
+      if tl:find(sub:sub(5), 1, true) then
+        return true
+      end
     end
   end
   return #list == 0

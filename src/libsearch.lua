@@ -26,7 +26,16 @@ local searched = {}  -- [color] = true once the panel has looked at the library
 -- whether it enters tapped. Buttons with a value attached can't tell left
 -- from right click in TTS, so the destination is a toggle, not a click.
 local dest = {}      -- [color] = { where = "hand"|"battlefield", tapped = bool }
-local filters = {}   -- [color] = { typeOnly, mvMin, mvMax } from an effect, or nil
+local filters = {}   -- [color] = { typeOnly, mvMin, mvMax, zone } from an effect, or nil
+local zoneOf = {}    -- [color] = "library" (default) or "graveyard" (Eternal Witness...)
+
+-- The pile being searched: the library, or the graveyard.
+local function pileFor(color)
+  if zoneOf[color] == "graveyard" then
+    return Library.pileIn(color, "graveyard")
+  end
+  return Library.find(color)
+end
 
 -- A field out of the card data JSON in GM Notes, by plain search.
 local function gmField(notes, key)
@@ -56,7 +65,7 @@ function LibSearch.xml()
        color="#0B0F17F5" outline="#5AF0FF" outlineSize="2 2" allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="12 12 12 12" spacing="8" childForceExpandHeight="false">
     <HorizontalLayout preferredHeight="26" childForceExpandWidth="false">
-      <Text fontSize="15" fontStyle="Bold" color="#5AF0FF" alignment="MiddleLeft" flexibleWidth="1">SEARCH LIBRARY</Text>
+      <Text id="lsTitle_%s" fontSize="15" fontStyle="Bold" color="#5AF0FF" alignment="MiddleLeft" flexibleWidth="1">SEARCH LIBRARY</Text>
       <Button onClick="ui_libClose(%s)" preferredWidth="160" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold"
               tooltip="Close and shuffle your library">CLOSE + SHUFFLE</Button>
     </HorizontalLayout>
@@ -74,7 +83,7 @@ function LibSearch.xml()
                 childAlignment="UpperLeft" preferredHeight="204">]] .. table.concat(slots) .. [[</GridLayout>
   </VerticalLayout>
 </Panel>
-]]):format(c, c, c, c, c, c, c, c, c, c))
+]]):format(c, c, c, c, c, c, c, c, c, c, c))
   end
   return table.concat(parts)
 end
@@ -126,7 +135,7 @@ local function render(color, guids, faces, total, matched)
 end
 
 function LibSearch.run(color)
-  local lib = Library.find(color)
+  local lib = pileFor(color)
   if lib == nil then
     status(color, "Your library is empty.")
     render(color, {}, {}, 0, 0)
@@ -219,13 +228,15 @@ function LibSearch.open(color, preset, note, where, tapped, opts)
   -- An effect's search ("a basic land card") matches the TYPE LINE only,
   -- not rules text, plus any mana value limit; typing a new search clears it.
   filters[color] = opts
+  zoneOf[color] = opts and opts.zone or "library"
+  UI.setValue("lsTitle_" .. color, zoneOf[color] == "graveyard" and "SEARCH GRAVEYARD" or "SEARCH LIBRARY")
   renderDest(color)
   query[color] = preset or query[color]
   if preset then
     UI.setAttribute("lsInput_" .. color, "text", preset)
   end
   UI.setAttribute("libsearch_" .. color, "active", "true")
-  printToAll("MTG > " .. color .. " is searching their library.", INFO)
+  printToAll("MTG > " .. color .. " is searching their " .. (zoneOf[color] or "library") .. ".", INFO)
   LibSearch.run(color)
   if note then
     status(color, note)
@@ -240,7 +251,7 @@ function LibSearch.close(color, quiet)
   open[color] = false
   shown[color] = nil
   UI.setAttribute("libsearch_" .. color, "active", "false")
-  if searched[color] then
+  if searched[color] and zoneOf[color] ~= "graveyard" then
     local lib = Library.find(color)
     if lib and lib.type == "Deck" then
       lib.shuffle()
@@ -254,7 +265,8 @@ end
 -- Take a shown card: to the hand, or onto the battlefield (face up).
 local function take(color, slot, toBattlefield, tapped)
   local key = shown[color] and shown[color][slot]
-  local lib = Library.find(color)
+  local lib = pileFor(color)
+  local fromWhere = zoneOf[color] == "graveyard" and "graveyard" or "library"
   if key == nil or lib == nil then
     return
   end
@@ -267,23 +279,42 @@ local function take(color, slot, toBattlefield, tapped)
       local yaw = tapped and (s.yaw + 90) % 360 or s.yaw
       local card = lib.takeObject({ index = index, position = pos, rotation = { 0, yaw, 0 }, smooth = true })
       name = card and card.getName() or name
+      -- It entered the battlefield: let triggers see it (landfall, Amulet...).
+      if card then
+        Wait.time(function()
+          if not card.isDestroyed() then
+            Zones.refresh(card)
+          end
+        end, 1.2)
+      end
     else
       lib.setPositionSmooth(pos)
       lib.setRotationSmooth({ 0, s.yaw, 0 })
       name = lib.getName()
     end
     printToAll("MTG > " .. color .. " put " .. name .. " onto the battlefield" .. (tapped and " tapped" or "")
-      .. " from their library.", INFO)
+      .. " from their " .. fromWhere .. ".", INFO)
   else
     local hand = Player[color].getHandTransform()
     if lib.type == "Deck" then
       local card = lib.takeObject({ index = index, position = hand.position, rotation = { 0, s.yaw, 0 }, smooth = true })
       name = card and card.getName() or name
+      if card and fromWhere == "graveyard" then
+        Wait.time(function()
+          if not card.isDestroyed() then
+            Zones.refresh(card)
+          end
+        end, 1.2)
+      end
     else
       lib.setPositionSmooth(hand.position)
       name = lib.getName()
     end
-    printToAll("MTG > " .. color .. " put a card from their library into their hand.", INFO)
+    if fromWhere == "graveyard" then
+      printToAll("MTG > " .. color .. " returned " .. name .. " from their graveyard to their hand.", INFO)
+    else
+      printToAll("MTG > " .. color .. " put a card from their library into their hand.", INFO)
+    end
   end
   -- Refresh the results (the library changed).
   Wait.frames(function()
