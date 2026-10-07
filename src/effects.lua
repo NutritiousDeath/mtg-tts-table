@@ -240,6 +240,58 @@ function Effects.parse(text, sourceName)
       end
     end
   end
+  -- "create a 2/2 black Zombie creature token", "create a Treasure token".
+  local cAt = t:find("create ", 1, true)
+  if cAt then
+    local before = t:sub(math.max(1, cAt - 14), cAt - 1)
+    local rest = t:sub(cAt + 7)
+    local tAt = rest:find(" token", 1, true)
+    local mine = not (before:find("player", 1, true) or before:find("opponent", 1, true) or before:find("controller", 1, true))
+    if tAt and mine then
+      local phrase = rest:sub(1, tAt - 1)
+      local words = {}
+      for w in phrase:gmatch("%S+") do
+        table.insert(words, w)
+      end
+      local n = num(words[1])
+      if n then
+        table.remove(words, 1)
+        local spec = { words = {}, colors = {} }
+        local COLOR = { white = "W", blue = "U", black = "B", red = "R", green = "G" }
+        local SKIP = { ["and"] = true, creature = true, artifact = true, enchantment = true, legendary = true,
+          colorless = true, snow = true, tapped = true }
+        for _, w in ipairs(words) do
+          if w:find("^%d+/%d+$") then
+            spec.pt = w
+          elseif COLOR[w] then
+            spec.colors[COLOR[w]] = true
+          elseif not SKIP[w] and w:find("^%a+$") then
+            table.insert(spec.words, w)
+          end
+        end
+        if #spec.words > 0 then
+          table.insert(actions, { what = "token", who = "you", n = n, spec = spec, phrase = phrase })
+        end
+      end
+    end
+  end
+  -- Scry / surveil / mill (you).
+  local sw = t:match("scry (%d+)")
+  if sw then
+    table.insert(actions, { what = "scry", who = "you", n = tonumber(sw) })
+  end
+  sw = t:match("surveil (%d+)")
+  if sw then
+    table.insert(actions, { what = "scry", who = "you", n = tonumber(sw), surveil = true })
+  end
+  local mAt = t:find("mill ", 1, true)
+  if mAt then
+    local before = t:sub(math.max(1, mAt - 10), mAt - 1)
+    local mw = t:match("mill (%w+) cards?")
+    if mw and num(mw) and not before:find("player", 1, true) and not before:find("opponent", 1, true) then
+      table.insert(actions, { what = "mill", who = "you", n = num(mw) })
+    end
+  end
   -- "put a quest counter on ~": counters on the card itself.
   local cn, ckind = t:match("put (%w+) ([%w%+/%-]+) counters? on ~")
   if cn and num(cn) then
@@ -295,6 +347,12 @@ local function describe(a, target, controller)
     return who .. " returns a " .. tostring(a.type) .. " to hand"
   elseif a.what == "untap" or a.what == "tap" then
     return tostring(a.cardName or "it") .. (a.what == "untap" and " untapped" or " tapped")
+  elseif a.what == "token" then
+    return who .. (you and " create " or " creates ") .. tostring(a.phrase) .. " token"
+  elseif a.what == "scry" then
+    return who .. (a.surveil and (you and " surveil " or " surveils ") or (you and " scry " or " scries ")) .. a.n
+  elseif a.what == "mill" then
+    return who .. (you and " mill " or " mills ") .. a.n
   elseif a.what == "removeAll" then
     return a.verb .. " all " .. tostring(a.phrase) .. " (" .. tostring(a.count or 0) .. ")"
   elseif a.what == "removeTarget" then
@@ -358,6 +416,14 @@ local function apply(it, plan, target)
           end
         elseif a.what == "bounce" then
           Effects.pickBounce(seat, a, it.name)
+        elseif a.what == "token" then
+          Tokens.create(seat, a.spec, a.n, it.name)
+        elseif a.what == "scry" then
+          for _ = 1, a.n do
+            Actions.openScry(seat)
+          end
+        elseif a.what == "mill" then
+          Actions.mill(seat, a.n)
         elseif a.what == "removeAll" then
           a.count = Effects.removeAll(seat, a, it)
         elseif a.what == "removeTarget" then

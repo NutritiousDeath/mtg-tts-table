@@ -156,6 +156,98 @@ function Tokens.spawn(color, r, n)
 end
 
 ---------------------------------------------------------------------------
+-- Creating a token from rules text (effects.lua): "create a 2/2 black Zombie
+-- creature token". spec = { pt = "2/2" or nil, words = { "zombie" },
+-- colors = { B = true } }. The seat's decklist tokens are tried first, then
+-- a relay search; the best match (power/toughness, type words, colors) is
+-- spawned n times.
+---------------------------------------------------------------------------
+
+-- Colors in a token template's card data ("colors":["B","G"], escaped).
+local function tplColors(tpl)
+  local set = {}
+  local a = tostring(tpl):find('colors\\":[', 1, true)
+  if a then
+    local b = tpl:find("]", a, true) or (a + 40)
+    local seg = tpl:sub(a, b)
+    for _, c in ipairs({ "W", "U", "B", "R", "G" }) do
+      if seg:find('\\"' .. c .. '\\"', 1, true) then
+        set[c] = true
+      end
+    end
+  end
+  return set
+end
+
+-- How well a token fits the spec (higher is better; nil = wrong token).
+local function score(r, spec)
+  local hay = (tostring(r.name) .. " " .. tostring(r.typeLine)):lower()
+  for _, w in ipairs(spec.words) do
+    if not hay:find(w, 1, true) then
+      return nil
+    end
+  end
+  local s = 0
+  if spec.pt then
+    if tostring(r.tpl):find(spec.pt, 1, true) then
+      s = s + 2
+    else
+      return nil
+    end
+  end
+  local have = tplColors(r.tpl)
+  local same = true
+  for _, c in ipairs({ "W", "U", "B", "R", "G" }) do
+    if (have[c] or false) ~= (spec.colors[c] or false) then
+      same = false
+    end
+  end
+  if same then
+    s = s + 3
+  end
+  return s
+end
+
+local function best(list, spec)
+  local top, topScore
+  for _, r in ipairs(list) do
+    local sc = score(r, spec)
+    if sc and (topScore == nil or sc > topScore) then
+      top, topScore = r, sc
+    end
+  end
+  return top
+end
+
+function Tokens.create(color, spec, n, sourceName)
+  local p = GameState.player(color)
+  local fromDeck = best(p and p.deckTokens or {}, spec)
+  if fromDeck then
+    Tokens.spawn(color, fromDeck, n)
+    return
+  end
+  local query = ((spec.pt or "") .. " " .. table.concat(spec.words, " ")):gsub("^%s+", "")
+  WebRequest.get("https://" .. Importer.RELAY_HOST .. "/tokens?q=" .. urlEncode(query), function(req)
+    local list = {}
+    if not req.is_error and (req.response_code or 200) < 400 and req.text ~= "NONE" then
+      for _, line in ipairs(Importer.splitPlain(req.text or "", "\n")) do
+        local f = Importer.splitPlain(line, "\t")
+        if f[1] == "TOKEN" and f[6] then
+          table.insert(list, { name = f[3], typeLine = f[4], image = f[5], tpl = f[6] })
+        end
+      end
+    end
+    local r = best(list, spec)
+    if r == nil then
+      broadcastToColor(tostring(sourceName) .. ": couldn't find a \"" .. query
+        .. "\" token. Make it with your TOKENS tile.", color, { 1, 0.6, 0.2 })
+      return
+    end
+    Tokens.spawn(color, r, n)
+  end)
+end
+
+---------------------------------------------------------------------------
 -- XML handlers
 ---------------------------------------------------------------------------
 
