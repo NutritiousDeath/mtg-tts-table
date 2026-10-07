@@ -61,6 +61,7 @@ require("src/triggers")
 require("src/combat")
 require("src/walkers")
 require("src/effects")
+require("src/faces")
 require("src/tokens")
 require("src/ui")
 require("src/importcards")
@@ -83,7 +84,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.07 (conditions, sacrifice, look at top N)"
+SCRIPT_VERSION = "1.08 (transform, face-down cards, 0 loyalty)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -124,11 +125,25 @@ end
 -- counter menu (counters.lua). Wait a frame so its tags are in place.
 function onObjectSpawn(obj)
   Wait.frames(function()
-    if obj ~= nil and not obj.isDestroyed() then
+    if obj ~= nil and not obj.isDestroyed() and not (Faces and Faces.consumeSpawn(obj)) then
       Counters.setup(obj)
       LibSearch.addMenu(obj)
     end
   end, 1)
+end
+
+-- A card was flipped (face down / face up: faces.lua).
+function onObjectRotate(obj, spin, flip, playerColor, oldSpin, oldFlip)
+  if Faces then
+    Faces.onRotate(obj, flip, oldFlip, playerColor)
+  end
+end
+
+-- A double-faced card changed face (faces.lua carries its data over).
+function onObjectStateChange(obj, oldGuid)
+  if Faces then
+    Faces.onStateChange(obj, oldGuid)
+  end
 end
 
 -- Someone joined the game: make sure they get their seat-only panels.

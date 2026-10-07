@@ -184,11 +184,14 @@ function Effects.parse(text, sourceName)
     local c = conds[i]
     local what = c.prev and c.prev:match("^you may sacrifice (.+)$")
     if what then
-      what = what:gsub("%.$", ""):gsub("^another ", ""):gsub("^an? ", "")
+      what = what:gsub("%.$", "")
+      local other = what:find("^another ") ~= nil or what:find("other ", 1, true) ~= nil
+      what = what:gsub("^another ", ""):gsub("^an? ", "")
       local ty = what:match("^(%a+)")
       if ty then
         table.remove(conds, i)
-        table.insert(actions, { what = "sacrifice", who = "you", n = 1, type = ty, rest = c.rest, phrase = what })
+        table.insert(actions, { what = "sacrifice", who = "you", n = 1, type = ty, rest = c.rest, phrase = what,
+          other = other })
       end
     end
   end
@@ -452,6 +455,15 @@ function Effects.parse(text, sourceName)
         tapped = after:find("battlefield tapped", 1, true) ~= nil })
     end
   end
+  -- "Manifest the top card of your library" / "cloak the top card".
+  local mk = t:match("(manifest) the top card of your library") or t:match("(cloak) the top card of your library")
+  if mk then
+    table.insert(actions, { what = "manifest", who = "you", n = 1, kind = mk })
+  end
+  -- "Transform ~" (Sephiroth, werewolves, flip planeswalkers).
+  if t:find("transform ~", 1, true) then
+    table.insert(actions, { what = "transform", who = "you", n = 1 })
+  end
   -- Scry / surveil / mill (you).
   local sw = t:match("scry (%d+)")
   if sw then
@@ -549,6 +561,10 @@ local function describe(a, target, controller)
     return who .. " may sacrifice " .. tostring(a.phrase)
   elseif a.what == "look" then
     return who .. (you and " look" or " looks") .. " at the top " .. a.n .. " cards"
+  elseif a.what == "transform" then
+    return "it transforms"
+  elseif a.what == "manifest" then
+    return who .. " " .. a.kind .. "s the top card"
   end
   if a.what == "gain" then
     return who .. (you and " gain " or " gains ") .. a.n .. " life"
@@ -631,6 +647,15 @@ local function apply(it, plan, target)
           Effects.pickRemove(seat, a, it.name, it.source)
         elseif a.what == "sacrifice" then
           Effects.pickSacrifice(seat, a, it)
+        elseif a.what == "manifest" then
+          Faces.manifest(seat, a.kind, it.name)
+        elseif a.what == "transform" then
+          local src = it.source and getObjectFromGUID(it.source)
+          if src and not src.isDestroyed() and Faces.isDoubleFaced(src) then
+            Faces.flip(src, it.name)
+          else
+            broadcastToColor(it.name .. ": transform it yourself (right-click > Transform / other face).", seat, INFO)
+          end
         elseif a.what == "look" then
           local how = a.where == "battlefield" and ("click it to put it onto the battlefield" .. (a.tapped and " tapped" or ""))
             or "click it to put it into your hand"
@@ -809,10 +834,29 @@ end
 -- Called by the stack when an ability resolves
 ---------------------------------------------------------------------------
 
+-- How many times each ability has resolved this turn ("If this is the
+-- fourth time this ability has resolved this turn", Sephiroth).
+local ORDINAL = { first = 1, second = 2, third = 3, fourth = 4, fifth = 5, sixth = 6, seventh = 7, eighth = 8,
+  ninth = 9, tenth = 10 }
+
+local function countResolve(it)
+  local d = GameState.data
+  local turnNo = d.turn and d.turn.taken or 0
+  if d.resolved == nil or d.resolved.turn ~= turnNo then
+    d.resolved = { turn = turnNo, counts = {} }
+  end
+  local key = tostring(it.source or "") .. "|" .. tostring(it.name) .. "|" .. tostring(it.text):sub(1, 60)
+  d.resolved.counts[key] = (d.resolved.counts[key] or 0) + 1
+  return d.resolved.counts[key]
+end
+
 -- it = the stack item { name, controller, text, that, auto }.
 function Effects.resolve(it)
   if not enabled() or not it.auto or not GameState.data.started then
     return
+  end
+  if it.resolvedTimes == nil then
+    it.resolvedTimes = countResolve(it)
   end
   -- "Choose one —" with "• mode" lines: the controller picks a mode first.
   local raw = tostring(it.text or "")
@@ -892,16 +936,11 @@ function Effects.resolve(it)
   -- rest resolves like any other effect.
   local function askConds()
     for _, c in ipairs(plan.conds or {}) do
-      local title, text
-      if c.prev then
-        title, text = it.name .. ": did you?", "Did you do this: \"" .. c.prev .. "\"\nIf you did: " .. c.rest
-      elseif c.cond == "you do" then
-        title, text = it.name .. ": did you?", "Did you do it? If you did: " .. c.rest
-      else
-        title, text = it.name .. ": is this true?", "If " .. c.cond .. "?\nThen: " .. c.rest
-      end
-      ask(seat, title, text, { { label = "YES", value = true }, { label = "NO", value = false } }, function(yes)
-        if yes then
+      local ordWord = c.cond:match("^this is the (%a+) time this ability has resolved this turn")
+      local nth = ordWord and ORDINAL[ordWord]
+      if nth then
+        -- The table counts it: no need to ask.
+        if it.resolvedTimes == nth then
           local copy = {}
           for k, v in pairs(it) do
             copy[k] = v
@@ -909,11 +948,33 @@ function Effects.resolve(it)
           copy.text = c.rest
           copy.modePicked = true
           copy.unlessDone = true
+          printToAll("MTG > " .. it.name .. ": " .. ordWord .. " time this turn.", INFO)
           Effects.resolve(copy)
-        else
-          printToAll("MTG > " .. it.name .. ": not true, so that part does nothing.", INFO)
         end
-      end)
+      else
+        local title, text
+        if c.prev then
+          title, text = it.name .. ": did you?", "Did you do this: \"" .. c.prev .. "\"\nIf you did: " .. c.rest
+        elseif c.cond == "you do" then
+          title, text = it.name .. ": did you?", "Did you do it? If you did: " .. c.rest
+        else
+          title, text = it.name .. ": is this true?", "If " .. c.cond .. "?\nThen: " .. c.rest
+        end
+        ask(seat, title, text, { { label = "YES", value = true }, { label = "NO", value = false } }, function(yes)
+          if yes then
+            local copy = {}
+            for k, v in pairs(it) do
+              copy[k] = v
+            end
+            copy.text = c.rest
+            copy.modePicked = true
+            copy.unlessDone = true
+            Effects.resolve(copy)
+          else
+            printToAll("MTG > " .. it.name .. ": not true, so that part does nothing.", INFO)
+          end
+        end)
+      end
     end
   end
   if #plan.actions == 0 then
@@ -1015,7 +1076,7 @@ end
 -- A card button on each permanent that can be picked.
 function Effects.decorate(obj)
   local q = current
-  if q == nil or q.pick == nil or obj.is_face_down then
+  if q == nil or q.pick == nil or Faces.unknown(obj) then
     return
   end
   local seat = fieldSeat(obj)
@@ -1059,6 +1120,9 @@ local function returnToHand(obj)
   local seat = fieldSeat(obj)
   if seat == nil then
     return
+  end
+  if Faces and Faces.state(obj) == 2 then
+    obj = Faces.front(obj)
   end
   if obj.hasTag("Token") then
     printToAll("MTG > " .. obj.getName() .. " (a token) left the battlefield and is gone.", INFO)
@@ -1109,7 +1173,7 @@ function Effects.pickSacrifice(seat, a, it)
     if owner ~= seat then
       return false
     end
-    if a.phrase and a.phrase:find("other", 1, true) and it.source and obj.getGUID() == it.source then
+    if a.other and it.source and obj.getGUID() == it.source then
       return false
     end
     local t = cardTypes(obj)
@@ -1258,7 +1322,7 @@ end
 function Effects.removeAll(seat, a, it)
   local gone, names = 0, {}
   for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
-    if obj.type == "Card" and not obj.isDestroyed() and not obj.is_face_down and obj.held_by_color == nil then
+    if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) and obj.held_by_color == nil then
       local owner = fieldSeat(obj)
       if owner and fits(obj, owner, a, seat, it.source) then
         local name = obj.getName()
@@ -1453,7 +1517,7 @@ function Effects.pump(seat, a, it)
   end
   local n = 0
   for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
-    if obj.type == "Card" and not obj.isDestroyed() and not obj.is_face_down then
+    if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) then
       local owner = fieldSeat(obj)
       if owner and eligible(obj, owner) then
         boost(obj, a)

@@ -32,6 +32,8 @@ Counters = {}
 -- end of turn", effects.lua); they can be negative and clear at cleanup.
 local KINDS = { "plus", "minus", "loyalty", "other", "tp", "tt" }
 
+local ON_BATTLEFIELD = { battlefield = true, lands = true }
+
 ---------------------------------------------------------------------------
 -- Storage
 ---------------------------------------------------------------------------
@@ -41,9 +43,25 @@ local function isCard(obj)
 end
 
 -- Counters on a card: { plus, minus, loyalty, other } (missing = 0).
+-- Last known counters per GUID, so a card that turns into a new object
+-- (double-faced cards changing face, faces.lua) keeps them.
+local memoOf = {}
+
+function Counters.carry(old, obj)
+  local m = memoOf[old]
+  if m ~= nil then
+    obj.memo = m
+  end
+  memoOf[obj.getGUID()] = obj.memo
+  memoOf[old] = nil
+end
+
 function Counters.get(obj)
   local c = { plus = 0, minus = 0, loyalty = 0, other = 0, tp = 0, tt = 0 }
   local memo = obj and obj.memo
+  if obj and memo then
+    pcall(function() memoOf[obj.getGUID()] = memo end)
+  end
   if memo and memo ~= "" then
     -- Simple "plus=2;minus=0;..." format: no JSON decoding needed.
     for k, v in memo:gmatch("(%a+)=(%-?%d+)") do
@@ -63,6 +81,7 @@ local function save(obj, c)
     end
   end
   obj.memo = table.concat(parts, ";")
+  memoOf[obj.getGUID()] = obj.memo
 end
 
 -- The card's printed data (stored in GMNotes by the importer).
@@ -203,6 +222,47 @@ function Counters.change(obj, kind, delta, byColor)
   c.plus, c.minus = c.plus - cancel, c.minus - cancel
   save(obj, c)
   Counters.render(obj)
+  if delta < 0 or kind == "minus" then
+    Counters.checkDeath(obj)
+  end
+end
+
+-- State-based actions: a planeswalker with 0 loyalty, or a creature with 0
+-- or less toughness, goes to the graveyard. Checked a moment later, so a
+-- misclick on a loyalty box can be clicked back first.
+local pendingCheck = {}
+
+function Counters.checkDeath(obj)
+  local guid = obj.getGUID()
+  if pendingCheck[guid] then
+    return
+  end
+  pendingCheck[guid] = true
+  Wait.time(function()
+    pendingCheck[guid] = nil
+    if obj == nil or obj.isDestroyed() or obj.is_face_down and not (Faces and Faces.isFaceDown(obj)) then
+      return
+    end
+    if not (Zones and ON_BATTLEFIELD[Zones.regionAt(obj.getPosition()).region]) then
+      return
+    end
+    local data = cardData(obj)
+    local types = {}
+    for _, t in ipairs(data.types or {}) do
+      types[tostring(t):lower()] = true
+    end
+    local s = Counters.stats(obj)
+    local why
+    if types.planeswalker and (s.loyalty or 0) <= 0 then
+      why = "has 0 loyalty"
+    elseif types.creature and tonumber(s.toughness or "") and tonumber(s.toughness) <= 0 then
+      why = "has 0 toughness"
+    end
+    if why and Combat and Combat.removeCard then
+      printToAll("MTG > " .. obj.getName() .. " " .. why .. " and goes to the graveyard.", { 1, 0.6, 0.2 })
+      Combat.removeCard(obj, "graveyard")
+    end
+  end, 2)
 end
 
 -- Keywords gained until end of turn ("gains trample until end of turn"):
@@ -292,7 +352,6 @@ local MENU_OTHER = {
   { "Counter -1", "other", -1 },
 }
 
-local ON_BATTLEFIELD = { battlefield = true, lands = true }
 
 local function typeLine(obj)
   return cardData(obj).typeLine or ""
@@ -349,6 +408,9 @@ function Counters.setup(obj)
   end
   if Combat then
     Combat.addCardMenu(obj)
+  end
+  if Faces then
+    Faces.addMenu(obj)
   end
   Counters.render(obj)
 end

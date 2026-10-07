@@ -238,6 +238,14 @@ function Zones.onEnterContainer(container, obj)
   moveTo(obj, obj.getName(), obj.getGUID(), Zones.regionAt(container.getPosition()))
 end
 
+-- A card became a new object (a double-faced card changed face): same place.
+function Zones.rekey(old, new)
+  if where[old] ~= nil then
+    where[new] = where[old]
+    where[old] = nil
+  end
+end
+
 -- Stop tracking a card that was destroyed by script (e.g. rebuilt into a deck).
 function Zones.forget(guid)
   where[guid] = nil

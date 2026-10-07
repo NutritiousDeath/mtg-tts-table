@@ -21,6 +21,13 @@ function Events.on(name, fn)
   table.insert(listeners[name], fn)
 end
 
+-- Run before the other listeners (faces.lua: a card played face down is a
+-- 2/2 creature before triggers look at it).
+function Events.onFirst(name, fn)
+  listeners[name] = listeners[name] or {}
+  table.insert(listeners[name], 1, fn)
+end
+
 function Events.emit(name, data)
   for _, fn in ipairs(listeners[name] or {}) do
     -- One broken listener shouldn't stop the others.

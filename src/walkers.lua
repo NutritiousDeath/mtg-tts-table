@@ -253,10 +253,9 @@ end
 
 function walker_loyalty(obj, color, alt)
   if obj and not obj.isDestroyed() then
+    -- At 0 it goes to the graveyard by itself (counters.lua), after a
+    -- moment to click it back up if that was a slip.
     Counters.change(obj, "loyalty", alt and -1 or 1, color)
-    if Counters.get(obj).loyalty <= 0 then
-      broadcastToAll(obj.getName() .. " has 0 loyalty: put it into its owner's graveyard.", WARN)
-    end
   end
 end
 
@@ -322,8 +321,6 @@ function Walkers.activate(obj, i, color, force)
   if a.cost == nil then
     broadcastToColor("X ability: take X loyalty off " .. obj.getName() .. " yourself (right-click > Loyalty -1).",
       color, INFO)
-  elseif Counters.get(obj).loyalty <= 0 then
-    broadcastToAll(obj.getName() .. " has 0 loyalty: put it into its owner's graveyard.", WARN)
   end
 end
 

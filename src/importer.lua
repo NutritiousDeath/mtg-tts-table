@@ -174,6 +174,7 @@ local function buildCardData(card, f, isCommander)
     colors = card.colors or {},
     colorIdentity = card.color_identity or {},
     isCommander = isCommander,
+    layout = card.layout,
   }
 end
 

@@ -103,7 +103,7 @@ function Stack.layout()
       local x = MAT.x + (col == 0 and 0 or 1.2) * (col % 2 == 1 and 1 or -1)
       local z = MAT.z + MAT.d / 2 - 2.6 - row * CARD_STEP
       obj.setLock(true)
-      obj.setRotationSmooth({ 0, MAT_YAW, 0 }, false, true)
+      obj.setRotationSmooth({ 0, MAT_YAW, Faces.isFaceDown(obj) and 180 or 0 }, false, true)
       obj.setPositionSmooth({ x, TableSetup.SURFACE_TOP + 0.15 + i * 0.06, z }, false, true)
     end
   end
@@ -176,6 +176,10 @@ function Stack.pushCard(obj, controller, from)
     return
   end
   controller = controller or "?"
+  -- Cast face down (morph, disguise): a nameless 2/2 creature spell.
+  if obj.is_face_down and not Faces.isFaceDown(obj) then
+    Faces.hide(obj, nil, controller)
+  end
   table.insert(items(), { guid = obj.getGUID(), kind = "card", name = obj.getName(), controller = controller })
   log(controller .. " casts " .. obj.getName() .. " (on the stack).")
   Events.emit("spellCast", { card = obj, controller = controller })
@@ -275,7 +279,7 @@ local function sendCard(obj, it, destination)
   else
     local types = typesOf(obj)
     local region = types.Land and "lands" or "battlefield"
-    obj.setRotationSmooth({ 0, s.yaw, 0 }, false, true)
+    obj.setRotationSmooth({ 0, s.yaw, Faces.isFaceDown(obj) and 180 or 0 }, false, true)
     obj.setPositionSmooth(TableSetup.slot(color, region, 1.5), false, true)
     Wait.time(function()
       if not obj.isDestroyed() then

@@ -493,7 +493,7 @@ end
 local function permanents()
   local list = {}
   for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
-    if obj.type == "Card" and not obj.is_face_down and obj.held_by_color == nil then
+    if obj.type == "Card" and not Faces.unknown(obj) and obj.held_by_color == nil then
       local loc = Zones.regionAt(obj.getPosition())
       if loc.seat and (loc.region == "battlefield" or loc.region == "lands") then
         table.insert(list, { obj = obj, controller = loc.seat })
@@ -774,7 +774,7 @@ Events.on("cardMoved", function(d)
     return
   end
   local card = d.card
-  if card.isDestroyed() or card.is_face_down then
+  if card.isDestroyed() or Faces.unknown(card) then
     return
   end
   -- A card drawn: library -> hand.

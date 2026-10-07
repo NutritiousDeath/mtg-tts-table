@@ -335,7 +335,7 @@ end
 function Combat.decorate(card)
   local step = stepId()
   local c = GameState.data.combat
-  if step == nil or c == nil or card.is_face_down or not onField(card) then
+  if step == nil or c == nil or Faces.unknown(card) or not onField(card) then
     return
   end
   if step ~= "attackers" and step ~= "blockers" and step ~= "damage" then
@@ -997,6 +997,10 @@ local function sendToGraveyard(card, zone)
   local seat = controller(card)
   if seat == nil then
     return
+  end
+  -- A transformed card turns back to its front as it leaves.
+  if Faces and Faces.state(card) == 2 then
+    card = Faces.front(card)
   end
   local s = TableSetup.seat(seat)
   card.setLock(false)
