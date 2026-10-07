@@ -81,7 +81,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "0.93 (trigger source safety)"
+SCRIPT_VERSION = "0.94 (spells resolve, activated abilities)"
 
 function onLoad(saved)
   GameLog.setup()

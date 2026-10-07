@@ -67,6 +67,19 @@ end
 -- Parse an effect: { optional = bool, actions = { { what, who, n } } } or
 -- nil (nothing it can do), plus the reason when it's left to the players.
 function Effects.parse(text)
+  -- Drop keyword-only lines ("Flash", "Flying, trample"): no period.
+  local kept = {}
+  local raw = tostring(text or "")
+  local i = 1
+  while i <= #raw do
+    local j = raw:find("\n", i, true) or (#raw + 1)
+    local line = raw:sub(i, j - 1)
+    if line:find(".", 1, true) or line:find(":", 1, true) then
+      table.insert(kept, line)
+    end
+    i = j + 1
+  end
+  text = table.concat(kept, "\n")
   local t = " " .. effectPart(tostring(text or ""):lower()) .. " "
   if t:find("\n", 1, true) then
     return nil, "several abilities"
@@ -131,8 +144,9 @@ function Effects.parse(text)
       -- A card name or subtype ("a forest", "an elf"): first word after the article.
       q = phrase:gsub("^up to %w+ ", ""):gsub("^an? ", ""):match("^(%a+)") or ""
     end
-    local where = rest:find("onto the battlefield", 1, true) and "battlefield"
-      or (rest:find("into your hand", 1, true) and "hand") or "hand"
+    local bf = rest:find("onto the battlefield", 1, true) ~= nil
+    local hand = rest:find("into your hand", 1, true) ~= nil
+    local where = (bf and hand) and "both" or (bf and "battlefield" or "hand")
     table.insert(actions, { what = "search", who = "you", n = 1, query = q, where = where,
       tapped = rest:find("battlefield tapped", 1, true) ~= nil, phrase = phrase })
   end
@@ -203,10 +217,16 @@ local function apply(it, plan, target)
         elseif a.what == "draw" then
           Actions.draw(seat, a.n, it.name)
         elseif a.what == "search" then
-          local how = a.where == "battlefield"
-            and ("RIGHT-click the card to put it onto the battlefield" .. (a.tapped and " (then tap it)" or ""))
-            or "click the card to put it into your hand"
-          LibSearch.open(seat, a.query, it.name .. ": " .. how .. ", then CLOSE + SHUFFLE.")
+          local tapNote = a.tapped and " (then tap it)" or ""
+          local how
+          if a.where == "both" then
+            how = "RIGHT-click = onto the battlefield" .. tapNote .. ", click = into your hand"
+          elseif a.where == "battlefield" then
+            how = "RIGHT-click the card to put it onto the battlefield" .. tapNote
+          else
+            how = "click the card to put it into your hand"
+          end
+          LibSearch.open(seat, a.query, it.name .. " (" .. tostring(a.phrase) .. "): " .. how .. ", then CLOSE + SHUFFLE.")
         end
       end
     end
@@ -394,4 +414,22 @@ function Effects.resolve(it)
   else
     withTarget()
   end
+end
+
+-- A spell (instant / sorcery) resolved: carry out its rules text too.
+function Effects.resolveSpell(obj, controller)
+  if not enabled() or not GameState.data.started or obj == nil then
+    return
+  end
+  local text = ""
+  pcall(function()
+    local d = JSON.decode(obj.getGMNotes())
+    if type(d) == "table" and type(d.oracle) == "string" then
+      text = d.oracle
+    end
+  end)
+  if text == "" then
+    return
+  end
+  Effects.resolve({ name = obj.getName(), controller = controller, text = text, auto = true })
 end

@@ -230,7 +230,8 @@ function Stack.pushAbility(controller, sourceName, text, image, opts)
   -- On the list right away (not when the picture has loaded), so the turn
   -- can't move on in the meantime.
   table.insert(items(), { guid = obj.getGUID(), kind = "ability", name = sourceName, controller = controller,
-    text = text, trigger = opts.trigger, that = opts.that, auto = (opts.trigger or opts.loyalty) and true or nil })
+    text = text, trigger = opts.trigger, that = opts.that,
+    auto = (opts.trigger or opts.loyalty or opts.activated) and true or nil })
   Stack.render()
   if opts.trigger then
     log(sourceName .. " triggers (" .. controller .. "): " .. tostring(text or ""))
@@ -308,6 +309,10 @@ function Stack.resolveTop()
   local types = typesOf(obj)
   if types.Instant or types.Sorcery then
     log(it.name .. " resolves (to " .. it.controller .. "'s graveyard).")
+    -- Read its text before it merges into the graveyard pile.
+    if Effects and Effects.resolveSpell then
+      Effects.resolveSpell(obj, it.controller)
+    end
     sendCard(obj, it, "graveyard")
   else
     log(it.name .. " resolves (onto " .. it.controller .. "'s battlefield).")
@@ -510,8 +515,183 @@ function ui_stackRemove(player, r)
   end
 end
 
+---------------------------------------------------------------------------
+-- Activated abilities ("{T}, Sacrifice ~: Search your library..."): one
+-- right-click item per ability. The table pays the simple costs (tap the
+-- card, sacrifice it, pay life), says which costs are yours to pay (mana,
+-- discards...), and puts the effect on the stack; auto-resolve
+-- (effects.lua) carries it out when it resolves. Mana abilities ("Add
+-- {G}") and loyalty abilities (walkers.lua) aren't listed.
+---------------------------------------------------------------------------
+
+local function oracleOf(obj)
+  local text, name = "", obj.getName()
+  pcall(function()
+    local d = JSON.decode(obj.getGMNotes())
+    if type(d) == "table" then
+      text = type(d.oracle) == "string" and d.oracle or ""
+      name = d.name or name
+    end
+  end)
+  return text, name
+end
+
+local function splitLines(text)
+  local out, i = {}, 1
+  while i <= #text do
+    local j = text:find("\n", i, true) or (#text + 1)
+    table.insert(out, text:sub(i, j - 1))
+    i = j + 1
+  end
+  return out
+end
+
+function Stack.activatedAbilities(obj)
+  local text = oracleOf(obj)
+  local list = {}
+  for _, line in ipairs(splitLines(text)) do
+    local colon = line:find(":", 1, true)
+    if colon and colon <= 100 then
+      local cost = line:sub(1, colon - 1)
+      -- Ability word in front ("Boast — {1}{R}"): keep just the cost.
+      -- (A literal dash: TTS's Lua sees it as one character, so no byte escapes.)
+      local DASH = " — "
+      local dash = cost:find(DASH, 1, true)
+      if dash then
+        cost = cost:sub(dash + #DASH)
+      end
+      local effect = line:sub(colon + 1):gsub("^%s+", "")
+      local low = cost:lower()
+      local isCost = low:find("{", 1, true) or low:find("sacrifice", 1, true) or low:find("pay ", 1, true)
+        or low:find("discard", 1, true) or low:find("exile", 1, true) or low:find("remove", 1, true)
+      local first = cost:sub(1, 1)
+      local loyalty = first == "+" or cost == "0" or (not cost:find("{", 1, true) and #cost <= 4)
+      local mana = effect:lower():sub(1, 4) == "add "
+      if isCost and not loyalty and not mana then
+        table.insert(list, { cost = cost, effect = effect, line = line })
+      end
+    end
+  end
+  return list
+end
+
+local function seatOf(obj)
+  local loc = Zones.regionAt(obj.getPosition())
+  return loc.seat, loc.region
+end
+
+local function tappedNow(obj, seat)
+  local s = TableSetup.seat(seat)
+  if s == nil then
+    return false
+  end
+  local diff = ((obj.getRotation().y - s.yaw + 540) % 360) - 180
+  return math.abs(diff) > 30
+end
+
+-- The card itself is sacrificed: to its graveyard (a token goes away after).
+local function sacrifice(obj, seat)
+  local s = TableSetup.seat(seat)
+  obj.setLock(false)
+  obj.setRotation({ 0, s.yaw, 0 })
+  obj.setPosition(TableSetup.slot(seat, "graveyard", TableSetup.SURFACE_TOP + 2))
+  Zones.refresh(obj)
+  if obj.hasTag("Token") then
+    Wait.time(function()
+      if not obj.isDestroyed() then
+        obj.destruct()
+      end
+    end, 1.5)
+    return
+  end
+  Library.toGraveyard(seat, obj, function()
+    if not obj.isDestroyed() then
+      Zones.refresh(obj)
+    end
+  end)
+end
+
+function Stack.activate(obj, playerColor, ab)
+  if obj == nil or obj.isDestroyed() then
+    return
+  end
+  local seat, region = seatOf(obj)
+  if not (region == "battlefield" or region == "lands") then
+    -- Off the battlefield only abilities that say so work ("Return this
+    -- card from your graveyard...", "Exile this card from your hand...").
+    if not ab.effect:lower():find("this card", 1, true) and not ab.cost:lower():find("this card", 1, true) then
+      broadcastToColor(obj.getName() .. " has to be on the battlefield to do that.", playerColor, WARN)
+      return
+    end
+    seat = playerColor
+  end
+  if seat ~= playerColor and not GameState.solo() then
+    broadcastToColor("That's " .. tostring(seat) .. "'s card.", playerColor, WARN)
+    return
+  end
+  local _, cardName = oracleOf(obj)
+  local low = ab.cost:lower()
+  local tap = low:find("{t}", 1, true) ~= nil
+  if tap and tappedNow(obj, seat) then
+    broadcastToColor(obj.getName() .. " is already tapped.", playerColor, WARN)
+    return
+  end
+  local nameLow = tostring(cardName):lower()
+  local sacSelf = low:find("sacrifice " .. nameLow, 1, true) ~= nil or low:find("sacrifice this", 1, true) ~= nil
+  local paid, yours = {}, {}
+  if tap then
+    local r = obj.getRotation()
+    obj.setRotationSmooth({ r.x, (TableSetup.seat(seat).yaw + 90) % 360, r.z }, false, true)
+    table.insert(paid, "tapped it")
+  end
+  local life = tonumber(low:match("pay (%d+) life") or "")
+  if life then
+    Trackers.changeLife(seat, -life, cardName)
+    table.insert(paid, "paid " .. life .. " life")
+  end
+  -- What's left for the player: mana symbols and other costs.
+  local rest = low:gsub("{t}", ""):gsub("pay %d+ life", "")
+  if sacSelf then
+    rest = rest:gsub("sacrifice this %a+", ""):gsub("sacrifice " .. nameLow:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "")
+  end
+  if rest:find("{", 1, true) then
+    table.insert(yours, "the mana")
+  end
+  for _, word in ipairs({ "discard", "sacrifice", "exile", "remove" }) do
+    if rest:find(word, 1, true) then
+      table.insert(yours, word .. " (see the cost)")
+    end
+  end
+  local face = ""
+  pcall(function()
+    for _, d in pairs(obj.getData().CustomDeck or {}) do
+      face = d.FaceURL
+      break
+    end
+  end)
+  Stack.pushAbility(seat, obj.getName(), ab.effect, face, { activated = true })
+  if sacSelf then
+    table.insert(paid, "sacrificed it")
+    sacrifice(obj, seat)
+  end
+  log(seat .. " activates " .. obj.getName() .. " (" .. ab.cost .. ")"
+    .. (#paid > 0 and ("; " .. table.concat(paid, ", ")) or "") .. ".")
+  if #yours > 0 then
+    broadcastToColor("Pay the rest of the cost yourself: " .. table.concat(yours, ", ") .. ".", playerColor, INFO)
+  end
+end
+
 -- Right-click on a card: put one of its abilities on the stack.
 function Stack.addCardMenu(obj)
+  for _, ab in ipairs(Stack.activatedAbilities(obj)) do
+    local label = "Activate: " .. ab.cost
+    if #label > 38 then
+      label = label:sub(1, 36) .. ".."
+    end
+    obj.addContextMenuItem(label, function(playerColor)
+      Stack.activate(obj, playerColor, ab)
+    end)
+  end
   obj.addContextMenuItem("Ability to stack", function(playerColor)
     local face = ""
     pcall(function()
