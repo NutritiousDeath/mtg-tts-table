@@ -84,7 +84,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.08 (transform, face-down cards, 0 loyalty)"
+SCRIPT_VERSION = "1.09 (X spells, Approach, Vorinclex untap)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -136,6 +136,9 @@ end
 function onObjectRotate(obj, spin, flip, playerColor, oldSpin, oldFlip)
   if Faces then
     Faces.onRotate(obj, flip, oldFlip, playerColor)
+  end
+  if Actions and Actions.onRotate then
+    Actions.onRotate(obj, spin, oldSpin, playerColor)
   end
 end
 

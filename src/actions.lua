@@ -78,9 +78,21 @@ function Actions.mill(color, n)
 end
 
 -- Untap every tapped card (turned sideways) on the seat's battlefield and lands.
+-- "Doesn't untap during your untap step" (Mana Vault, Colossus of Sardia).
+local function neverUntaps(obj)
+  local text = ""
+  pcall(function()
+    local d = JSON.decode(obj.getGMNotes())
+    text = type(d) == "table" and tostring(d.oracle or ""):lower() or ""
+  end)
+  return text:find("doesn't untap during your untap step", 1, true) ~= nil
+end
+
 function Actions.untapAll(color, quiet)
   local s = TableSetup.seat(color)
   local count = 0
+  local skip = GameState.data.skipUntap or {}
+  local held = {}
   for _, obj in ipairs(getObjects()) do
     if obj.type == "Card" and obj.held_by_color == nil then
       local loc = Zones.regionAt(obj.getPosition())
@@ -88,16 +100,96 @@ function Actions.untapAll(color, quiet)
         local r = obj.getRotation()
         local diff = ((r.y - s.yaw + 540) % 360) - 180
         if math.abs(diff) > 30 then
-          obj.setRotationSmooth({ r.x, s.yaw, r.z }, false, true)
-          count = count + 1
+          local guid = obj.getGUID()
+          if skip[guid] then
+            -- Vorinclex and the like: skips this one untap step.
+            skip[guid] = nil
+            table.insert(held, obj.getName() .. " (" .. tostring(skip[guid .. "|why"] or "skips this untap") .. ")")
+            skip[guid .. "|why"] = nil
+            Counters.render(obj)
+          elseif neverUntaps(obj) then
+            table.insert(held, obj.getName() .. " (doesn't untap)")
+          else
+            obj.setRotationSmooth({ r.x, s.yaw, r.z }, false, true)
+            count = count + 1
+          end
         end
       end
     end
+  end
+  if #held > 0 then
+    log(color .. ": stays tapped: " .. table.concat(held, ", "))
   end
   if not quiet or count > 0 then
     log(color .. " untaps " .. count .. " permanent" .. (count == 1 and "" or "s"))
   end
   return count
+end
+
+-- Mark / unmark a permanent to stay tapped in its controller's next untap step.
+function Actions.setSkipUntap(obj, on, why)
+  GameState.data.skipUntap = GameState.data.skipUntap or {}
+  local t = GameState.data.skipUntap
+  local guid = obj.getGUID()
+  t[guid] = on and true or nil
+  t[guid .. "|why"] = on and why or nil
+  Counters.render(obj)
+end
+
+function Actions.skipsUntap(obj)
+  local t = GameState.data and GameState.data.skipUntap
+  return t ~= nil and t[obj.getGUID()] == true
+end
+
+-- A card was turned (main.lua: onObjectRotate). A land an opponent of
+-- Vorinclex, Voice of Hunger taps for mana stays tapped next untap step.
+function Actions.onRotate(obj, spin, oldSpin, color)
+  -- Only a player turning it (not the table tapping a land that enters tapped).
+  if obj == nil or obj.isDestroyed() or obj.type ~= "Card" or not GameState.data.started or spin == oldSpin
+      or color == nil or color == "" then
+    return
+  end
+  local loc = Zones.regionAt(obj.getPosition())
+  if loc.seat == nil or not (loc.region == "battlefield" or loc.region == "lands") then
+    return
+  end
+  local s = TableSetup.seat(loc.seat)
+  local function tapped(y)
+    return math.abs((((y or 0) - s.yaw + 540) % 360) - 180) > 30
+  end
+  if not tapped(spin) or tapped(oldSpin) then
+    return
+  end
+  local isLand = false
+  pcall(function()
+    local d = JSON.decode(obj.getGMNotes())
+    for _, t in ipairs(type(d) == "table" and d.types or {}) do
+      if tostring(t):lower() == "land" then
+        isLand = true
+      end
+    end
+  end)
+  if not isLand then
+    return
+  end
+  for _, other in ipairs(getObjectsWithTag("MTGCard")) do
+    if other.type == "Card" and not other.is_face_down and other ~= obj then
+      local ol = Zones.regionAt(other.getPosition())
+      if ol.seat and ol.seat ~= loc.seat and (ol.region == "battlefield" or ol.region == "lands") then
+        local text = ""
+        pcall(function()
+          local d = JSON.decode(other.getGMNotes())
+          text = type(d) == "table" and tostring(d.oracle or ""):lower() or ""
+        end)
+        if text:find("whenever an opponent taps a land for mana, that land doesn't untap", 1, true) then
+          Actions.setSkipUntap(obj, true, other.getName())
+          broadcastToAll(obj.getName() .. " won't untap in " .. loc.seat .. "'s next untap step (" .. other.getName()
+            .. "). Right-click > Skip next untap / untap normally, if it wasn't tapped for mana.", INFO)
+          return
+        end
+      end
+    end
+  end
 end
 
 ---------------------------------------------------------------------------

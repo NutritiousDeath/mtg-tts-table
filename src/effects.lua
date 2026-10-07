@@ -159,12 +159,20 @@ function Effects.parse(text, sourceName)
             c.prev = prev
           end
         end
+        c.lastPos = stop and (stop + 2) or (#t + 1)
         table.insert(conds, c)
       elseif clean ~= "" then
         table.insert(notes, clean)
       end
     else
-      table.insert(kept, sentence)
+      -- "Otherwise, ..." right after an "If ..." sentence: the NO answer.
+      local clean = sentence:gsub("^%s+", "")
+      local other = clean:match("^otherwise, (.+)$")
+      if other and #conds > 0 and conds[#conds].lastPos == pos then
+        conds[#conds].otherwise = other
+      else
+        table.insert(kept, sentence)
+      end
     end
     pos = stop and (stop + 2) or (#t + 1)
   end
@@ -228,6 +236,23 @@ function Effects.parse(text, sourceName)
   add("gain", "you", num(w))
   w = t:match("you lose (%w+) life")
   add("lose", "you", num(w))
+  -- "As an additional cost to cast this spell, pay 3 life" (X filled in).
+  do
+    local pAt = t:find("pay %w+ life")
+    if pAt and not t:sub(math.max(1, pAt - 12), pAt):find("unless", 1, true) then
+      add("lose", "you", num(t:match("pay (%w+) life")))
+    end
+  end
+  if t:find("you win the game", 1, true) then
+    table.insert(actions, { what = "win", who = "you", n = 1 })
+  end
+  do
+    local ord = t:match("put ~ into its owner's library (%a+) from the top")
+    local ORD = { second = 2, third = 3, fourth = 4, fifth = 5, sixth = 6, seventh = 7, eighth = 8, ninth = 9, tenth = 10 }
+    if ord and ORD[ord] then
+      table.insert(actions, { what = "toLibrary", who = "you", n = ORD[ord] })
+    end
+  end
   w = t:match("each player draws (%w+) cards?")
   if w then
     add("draw", "all", num(w))
@@ -565,6 +590,10 @@ local function describe(a, target, controller)
     return "it transforms"
   elseif a.what == "manifest" then
     return who .. " " .. a.kind .. "s the top card"
+  elseif a.what == "win" then
+    return who .. " wins the game"
+  elseif a.what == "toLibrary" then
+    return "it goes " .. a.n .. "th from the top of the library"
   end
   if a.what == "gain" then
     return who .. (you and " gain " or " gains ") .. a.n .. " life"
@@ -647,6 +676,17 @@ local function apply(it, plan, target)
           Effects.pickRemove(seat, a, it.name, it.source)
         elseif a.what == "sacrifice" then
           Effects.pickSacrifice(seat, a, it)
+        elseif a.what == "win" then
+          broadcastToAll(seat .. " WINS THE GAME (" .. it.name .. ")!", { 1, 0.85, 0.2 })
+          printToAll("MTG > " .. seat .. " wins the game (" .. it.name .. ").", GOOD)
+        elseif a.what == "toLibrary" then
+          local card = it.card and getObjectFromGUID(it.card)
+          if card and not card.isDestroyed() then
+            it.cardHandled = true
+            Library.putAt(seat, card, a.n - 1)
+          else
+            broadcastToColor(it.name .. ": put it " .. a.n .. "th from the top of your library yourself.", seat, INFO)
+          end
         elseif a.what == "manifest" then
           Faces.manifest(seat, a.kind, it.name)
         elseif a.what == "transform" then
@@ -718,6 +758,8 @@ local function refreshCards()
   end
 end
 
+local numTyped = {}   -- [seat] = what's typed in the number box
+
 local function render()
   local picking = current ~= nil and current.pick ~= nil
   if picking or pickShown then
@@ -730,6 +772,11 @@ local function render()
     if q then
       UI.setValue("effTitle_" .. c, q.title)
       UI.setValue("effText_" .. c, q.text)
+      UI.setAttribute("effNum_" .. c, "active", q.number and "true" or "false")
+      if q.number then
+        numTyped[c] = nil
+        UI.setAttribute("effNumIn_" .. c, "text", "")
+      end
       for i = 1, MAX_CHOICES do
         local ch = q.choices[i]
         UI.setAttribute("effChoice_" .. c .. "_" .. i, "active", ch and "true" or "false")
@@ -773,8 +820,9 @@ local function nextQuestion()
   render()
 end
 
-local function ask(seat, title, text, choices, onPick, pick)
-  table.insert(queue, { seat = seat, title = title, text = text, choices = choices, onPick = onPick, pick = pick })
+local function ask(seat, title, text, choices, onPick, pick, number)
+  table.insert(queue, { seat = seat, title = title, text = text, choices = choices, onPick = onPick, pick = pick,
+    number = number })
   if current == nil then
     nextQuestion()
   end
@@ -803,6 +851,30 @@ function ui_effPick(player, arg)
   end
 end
 
+function ui_effNumText(player, value)
+  numTyped[player.color] = value
+end
+
+function ui_effNumOk(player, seat)
+  local q = current
+  if q == nil or not q.number or seat ~= q.seat then
+    return
+  end
+  if player.color ~= seat and not GameState.solo() then
+    return
+  end
+  local n = tonumber(numTyped[player.color] or numTyped[seat] or "")
+  if n == nil or n < 0 then
+    broadcastToColor("Type a number first.", player.color, INFO)
+    return
+  end
+  current = nil
+  q.onPick(math.floor(n))
+  if current == nil then
+    nextQuestion()
+  end
+end
+
 function Effects.xml()
   local parts = {}
   for _, c in ipairs(TableSetup.activeSeats()) do
@@ -814,18 +886,22 @@ function Effects.xml()
         :format(c, i, c, i, c, i))
     end
     table.insert(parts, ([[
-<Panel id="effAsk_%s" visibility="%s" active="false" rectAlignment="MiddleCenter" offsetXY="0 -60" width="560" height="190"
+<Panel id="effAsk_%s" visibility="%s" active="false" rectAlignment="MiddleCenter" offsetXY="0 -60" width="560" height="236"
        color="#0B0F17F5" outline="#5AF0FF" outlineSize="2 2" allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="14 14 12 12" spacing="8" childForceExpandHeight="false">
     <Text id="effTitle_%s" fontSize="17" fontStyle="Bold" color="#5AF0FF" alignment="MiddleLeft" preferredHeight="24">-</Text>
     <Text id="effText_%s" fontSize="13" color="#E6F1FF" alignment="UpperLeft" preferredHeight="60">-</Text>
+    <HorizontalLayout id="effNum_%s" active="false" spacing="8" preferredHeight="38" childForceExpandWidth="false" childAlignment="MiddleLeft">
+      <InputField id="effNumIn_%s" characterValidation="Integer" onValueChanged="ui_effNumText" preferredWidth="120" fontSize="18" placeholder="X" />
+      <Button onClick="ui_effNumOk(%s)" preferredWidth="96" color="#00B3A4" textColor="#06130B" fontStyle="Bold">OK</Button>
+    </HorizontalLayout>
     <HorizontalLayout spacing="8" preferredHeight="40" childForceExpandWidth="false" childAlignment="MiddleLeft">
       ]] .. table.concat(choices, "\n      ") .. [[
 
     </HorizontalLayout>
   </VerticalLayout>
 </Panel>
-]]):format(c, c, c, c))
+]]):format(c, c, c, c, c, c, c))
   end
   return table.concat(parts)
 end
@@ -926,6 +1002,37 @@ function Effects.resolve(it)
     end
     it = copy
   end
+  -- X chosen when it was cast ("pay X life", {X} in the cost): ask for it,
+  -- then read the text with the number in place of X.
+  if not it.xDone then
+    local lowX = " " .. tostring(it.text or ""):lower() .. " "
+    local hasX = lowX:find("[^%a]x[^%a]") ~= nil
+    local defined = lowX:find("where x", 1, true) or lowX:find(" x is ", 1, true)
+    local chosen = tostring(it.manaCost or ""):find("{X}", 1, true) or lowX:find("pay x life", 1, true)
+      or lowX:find("{x}", 1, true)
+    if hasX and chosen and not defined then
+      ask(it.controller, it.name .. ": what is X?", "Type the X it was cast with, then OK.\n" .. tostring(it.text),
+        { { label = "SKIP", value = false } }, function(n)
+          if n == false then
+            printToAll("MTG > " .. it.name .. ": resolve it by hand.", INFO)
+            return
+          end
+          local copy = {}
+          for k, v in pairs(it) do
+            copy[k] = v
+          end
+          local s = " " .. tostring(it.text) .. " "
+          for _ = 1, 2 do
+            s = s:gsub("([^%a])[Xx]([^%a])", "%1" .. n .. "%2")
+          end
+          copy.text = s:gsub("^ ", ""):gsub(" $", "")
+          copy.xDone = true
+          printToAll("MTG > " .. it.name .. ": X = " .. n .. ".", INFO)
+          Effects.resolve(copy)
+        end, nil, true)
+      return
+    end
+  end
   local plan, why = Effects.parse(it.text, it.name)
   if plan == nil then
     printToAll("MTG > " .. it.name .. ": resolve it by hand (" .. tostring(why) .. ").", INFO)
@@ -934,11 +1041,37 @@ function Effects.resolve(it)
   local seat = it.controller
   -- "If ..., ..." parts: the controller says whether it's true, then the
   -- rest resolves like any other effect.
+  local function branch(c, yes)
+    local text = yes and c.rest or c.otherwise
+    if text == nil then
+      printToAll("MTG > " .. it.name .. ": not true, so that part does nothing.", INFO)
+      return
+    end
+    local copy = {}
+    for k, v in pairs(it) do
+      copy[k] = v
+    end
+    copy.text = text
+    copy.modePicked = true
+    copy.unlessDone = true
+    Effects.resolve(copy)
+  end
   local function askConds()
+    for _, c in ipairs(plan.conds or {}) do
+      -- Approach of the Second Sun: the table knows what was cast.
+      if c.cond:find("cast another spell named ~ this game", 1, true) then
+        local n = Effects.castCount(seat, it.name)
+        printToAll("MTG > " .. it.name .. ": " .. seat .. " has cast it " .. n .. " time" .. (n == 1 and "" or "s")
+          .. " this game.", INFO)
+        c.auto = n >= 2
+      end
+    end
     for _, c in ipairs(plan.conds or {}) do
       local ordWord = c.cond:match("^this is the (%a+) time this ability has resolved this turn")
       local nth = ordWord and ORDINAL[ordWord]
-      if nth then
+      if c.auto ~= nil then
+        branch(c, c.auto)
+      elseif nth then
         -- The table counts it: no need to ask.
         if it.resolvedTimes == nth then
           local copy = {}
@@ -960,19 +1093,11 @@ function Effects.resolve(it)
         else
           title, text = it.name .. ": is this true?", "If " .. c.cond .. "?\nThen: " .. c.rest
         end
+        if c.otherwise then
+          text = text .. "\nOtherwise: " .. c.otherwise
+        end
         ask(seat, title, text, { { label = "YES", value = true }, { label = "NO", value = false } }, function(yes)
-          if yes then
-            local copy = {}
-            for k, v in pairs(it) do
-              copy[k] = v
-            end
-            copy.text = c.rest
-            copy.modePicked = true
-            copy.unlessDone = true
-            Effects.resolve(copy)
-          else
-            printToAll("MTG > " .. it.name .. ": not true, so that part does nothing.", INFO)
-          end
+          branch(c, yes)
         end)
       end
     end
@@ -1037,17 +1162,39 @@ function Effects.resolveSpell(obj, controller)
   if not enabled() or not GameState.data.started or obj == nil then
     return
   end
-  local text = ""
+  local text, cost = "", ""
   pcall(function()
     local d = JSON.decode(obj.getGMNotes())
     if type(d) == "table" and type(d.oracle) == "string" then
       text = d.oracle
+      cost = tostring(d.manaCost or "")
     end
   end)
   if text == "" then
+    return false
+  end
+  Effects.resolve({ name = obj.getName(), controller = controller, text = text, auto = true, manaCost = cost,
+    card = obj.getGUID() })
+  -- "Put ~ into its owner's library seventh from the top": the effect moves
+  -- the card, so the stack shouldn't send it to the graveyard.
+  return text:lower():find("into its owner's library", 1, true) ~= nil
+end
+
+-- Spells each player has cast this game, by name (Approach of the Second Sun).
+Events.on("spellCast", function(d)
+  if d.card == nil or d.controller == nil or GameState.data == nil then
     return
   end
-  Effects.resolve({ name = obj.getName(), controller = controller, text = text, auto = true })
+  GameState.data.castNames = GameState.data.castNames or {}
+  local t = GameState.data.castNames
+  t[d.controller] = t[d.controller] or {}
+  local n = d.card.getName()
+  t[d.controller][n] = (t[d.controller][n] or 0) + 1
+end)
+
+function Effects.castCount(seat, name)
+  local t = GameState.data.castNames or {}
+  return (t[seat] or {})[name] or 0
 end
 
 ---------------------------------------------------------------------------

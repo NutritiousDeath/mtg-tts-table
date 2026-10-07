@@ -180,6 +180,9 @@ function Counters.render(obj)
     table.insert(lines, "Counters")
     table.insert(lines, tostring(c.other))
   end
+  if Actions and Actions.skipsUntap and Actions.skipsUntap(obj) then
+    table.insert(lines, "NO UNTAP")
+  end
   if #lines == 0 then
     Counters.decorate(obj)
     return
@@ -401,6 +404,12 @@ function Counters.setup(obj)
     end, true)
   end
   obj.addContextMenuItem("Clear counters", function() Counters.clear(obj) end)
+  obj.addContextMenuItem("Skip next untap / untap normally", function(playerColor)
+    local on = not Actions.skipsUntap(obj)
+    Actions.setSkipUntap(obj, on, playerColor)
+    printToAll("MTG > " .. obj.getName() .. (on and " won't untap in its next untap step." or " untaps normally again."),
+      { 0.75, 0.8, 0.9 })
+  end)
   -- Anyone can delete a card this way (TTS normally needs a promoted player).
   obj.addContextMenuItem("Delete card", function(playerColor) Counters.deleteCard(obj, playerColor) end)
   if Stack then

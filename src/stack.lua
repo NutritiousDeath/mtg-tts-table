@@ -319,10 +319,22 @@ function Stack.resolveTop()
   if (types.Instant or types.Sorcery) and not permanent then
     log(it.name .. " resolves (to " .. it.controller .. "'s graveyard).")
     -- Read its text before it merges into the graveyard pile.
+    local keep = false
     if Effects and Effects.resolveSpell then
-      Effects.resolveSpell(obj, it.controller)
+      keep = Effects.resolveSpell(obj, it.controller) == true
     end
-    sendCard(obj, it, "graveyard")
+    if keep then
+      -- Its effect puts it somewhere (library): unlock it; if nothing moved
+      -- it, it goes to the graveyard after a while.
+      obj.setLock(false)
+      Wait.time(function()
+        if not obj.isDestroyed() and Zones.regionAt(obj.getPosition()).region == "stack" and not indexOf(obj.getGUID()) then
+          sendCard(obj, it, "graveyard")
+        end
+      end, 30)
+    else
+      sendCard(obj, it, "graveyard")
+    end
   else
     log(it.name .. " resolves (onto " .. it.controller .. "'s battlefield).")
     sendCard(obj, it, "battlefield")

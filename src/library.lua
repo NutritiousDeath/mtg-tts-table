@@ -403,6 +403,51 @@ function Library.moveToBottom(color, index, onDone)
     callback_function = function(obj) if onDone then onDone(obj) end end })
 end
 
+-- Put a card into the library at depth (0 = top): Approach of the Second
+-- Sun goes 7th from the top. The deck is rebuilt with the card in place.
+function Library.putAt(color, card, depth, onDone)
+  if #libraryPiles(color) > 1 then
+    Library.consolidate(color, function() Library.putAt(color, card, depth, onDone) end)
+    return
+  end
+  card.setLock(false)
+  local lib = Library.find(color)
+  if lib == nil or lib.type ~= "Deck" then
+    -- No deck to rebuild: on top of what's there (or where the library goes).
+    if lib then
+      lib.putObject(card)
+    else
+      card.setPosition(TableSetup.slot(color, "library", 2))
+      card.setRotation({ 0, TableSetup.seat(color).yaw, 180 })
+    end
+    if onDone then onDone(lib) end
+    return
+  end
+  local data = lib.getData()
+  data.ContainedObjects = data.ContainedObjects or {}
+  data.DeckIDs = data.DeckIDs or {}
+  data.CustomDeck = data.CustomDeck or {}
+  local cd = card.getData()
+  local at = math.min(depth, #data.ContainedObjects) + 1
+  table.insert(data.ContainedObjects, at, cd)
+  table.insert(data.DeckIDs, math.min(at, #data.DeckIDs + 1), cd.CardID)
+  for k, v in pairs(cd.CustomDeck or {}) do
+    if not hasKey(data.CustomDeck, k) then
+      data.CustomDeck[k] = v
+    end
+  end
+  if Zones.forget then
+    Zones.forget(card.getGUID())
+  end
+  card.destruct()
+  local pos, rot = lib.getPosition(), lib.getRotation()
+  lib.destruct()
+  printToAll("MTG > " .. tostring(cd.Nickname or "A card") .. " went into " .. color .. "'s library, "
+    .. (depth + 1) .. " from the top.", { 0.75, 0.8, 0.9 })
+  spawnObjectData({ data = data, position = pos, rotation = rot,
+    callback_function = function(obj) if onDone then onDone(obj) end end })
+end
+
 -- Move the top k cards to the bottom, in the same order (one rebuild).
 function Library.topToBottom(color, k, onDone)
   local lib = Library.find(color)
