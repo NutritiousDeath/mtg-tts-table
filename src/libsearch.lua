@@ -31,6 +31,8 @@ local zoneOf = {}    -- [color] = "library" (default) or "graveyard" (Eternal Wi
 -- "Look at the top N cards": { left = cards still in that top group, picks =
 -- how many may still be taken }. Not cleared by typing a new search.
 local look = {}
+-- "Up to N cards" (Collective Voyage): the panel closes by itself after N.
+local limit = {}
 
 -- The pile being searched: the library, or the graveyard.
 local function pileFor(color)
@@ -239,6 +241,7 @@ function LibSearch.open(color, preset, note, where, tapped, opts)
   filters[color] = opts
   zoneOf[color] = opts and opts.zone or "library"
   look[color] = (opts and opts.topN) and { left = opts.topN, picks = opts.picks or 1 } or nil
+  limit[color] = (opts and opts.limit) and { left = opts.limit } or nil
   UI.setValue("lsTitle_" .. color, look[color] and ("TOP " .. opts.topN .. " CARDS")
     or (zoneOf[color] == "graveyard" and "SEARCH GRAVEYARD" or "SEARCH LIBRARY"))
   renderDest(color)
@@ -264,6 +267,7 @@ function LibSearch.close(color, quiet)
   UI.setAttribute("libsearch_" .. color, "active", "false")
   local lk = look[color]
   look[color] = nil
+  limit[color] = nil
   if lk then
     -- Looked at the top cards: the rest go on the bottom, no shuffle.
     if lk.left > 0 then
@@ -343,6 +347,16 @@ local function take(color, slot, toBattlefield, tapped)
     lk.left = math.max(0, lk.left - 1)
     lk.picks = lk.picks - 1
     if lk.picks <= 0 then
+      Wait.frames(function()
+        LibSearch.close(color)
+      end, 5)
+      return
+    end
+  end
+  local lim = limit[color]
+  if lim then
+    lim.left = lim.left - 1
+    if lim.left <= 0 then
       Wait.frames(function()
         LibSearch.close(color)
       end, 5)

@@ -424,6 +424,29 @@ function TableSetup.applyLighting()
   end)
 end
 
+-- The play surface, the frame and the mat labels shouldn't take the mouse:
+-- holding Alt with nothing else under the cursor then shows no zoom, instead
+-- of zooming on the empty table. (Saved objects can predate the setting, so
+-- it's applied again on every load.)
+function TableSetup.ignorePointer()
+  local state = GameState.data.table or {}
+  local list = { state.surface, state.frame }
+  for _, g in ipairs(state.labels or {}) do
+    table.insert(list, g)
+  end
+  for _, g in ipairs(list) do
+    local o = g and getObjectFromGUID(g)
+    if o and not o.isDestroyed() then
+      pcall(function() o.interactable = false end)
+    end
+  end
+  for _, tag in ipairs({ "PlaySurface", "TableFrame", "MatLabel" }) do
+    for _, o in ipairs(getObjectsWithTag(tag)) do
+      pcall(function() o.interactable = false end)
+    end
+  end
+end
+
 -- Make sure the table exists and matches the current layout. Safe to call
 -- every load: the surface is only created once.
 function TableSetup.ensure()
@@ -439,6 +462,7 @@ function TableSetup.ensure()
     spawnSurface(state)
   end
   TableSetup.ensureFrame()
+  TableSetup.ignorePointer()
   TableSetup.applyLighting()
 
   applyHandZones()

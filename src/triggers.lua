@@ -547,7 +547,7 @@ end
 local function push(f)
   -- that = "that player" in the effect (the one who drew, cast, whose
   -- creature entered...), for auto-resolve (effects.lua).
-  Stack.pushAbility(f.controller, f.name or "?", f.text, f.face or "", { trigger = true, that = f.that, source = f.guid, thatCard = f.thatCard })
+  Stack.pushAbility(f.controller, f.name or "?", f.text, f.face or "", { trigger = true, that = f.that, source = f.guid, thatCard = f.thatCard, amount = f.amount })
 end
 
 local function shortText(f)
@@ -956,7 +956,7 @@ function Triggers.onCombatDamage(list)
     if not h.obj.isDestroyed() then
       for _, a in ipairs(abilitiesOf(h.obj)) do
         if a.trig.kind == "combatDamage" and a.trig.self then
-          table.insert(found, { obj = h.obj, controller = h.controller, text = a.text })
+          table.insert(found, { obj = h.obj, controller = h.controller, text = a.text, amount = h.amount })
         end
       end
     end
@@ -974,6 +974,15 @@ function Triggers.onCombatDamage(list)
         for _ = 1, (t.once and math.min(n, 1) or n) do
           table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
         end
+      end
+    end
+  end
+  -- The damaged player ("they get that many poison counters"): each trigger
+  -- is about the player its creature hit.
+  for _, f in ipairs(found) do
+    for _, h in ipairs(list) do
+      if f.obj == h.obj and f.that == nil then
+        f.that = h.seat
       end
     end
   end

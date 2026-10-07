@@ -235,6 +235,7 @@ function Stack.pushAbility(controller, sourceName, text, image, opts)
   -- can't move on in the meantime.
   table.insert(items(), { guid = obj.getGUID(), kind = "ability", name = sourceName, controller = controller,
     text = text, trigger = opts.trigger, that = opts.that, source = opts.source, thatCard = opts.thatCard,
+    amount = opts.amount,
     auto = (opts.trigger or opts.loyalty or opts.activated) and true or nil })
   Stack.render()
   if opts.trigger then

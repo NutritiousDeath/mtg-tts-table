@@ -67,7 +67,22 @@ local function state()
   c.marked = c.marked or {}         -- damage marked on creatures this combat
   c.gone = c.gone or {}             -- [guid] = true: died / left this combat
   c.keep = c.keep or {}             -- [guid] = true: player flipped DIES -> KEEPS
+  c.prevented = c.prevented or {}   -- [guid] = true: all combat damage to / by it is prevented (Maze of Ith)
   return c
+end
+
+-- Is this creature attacking right now?
+function Combat.isAttacking(card)
+  local c = GameState.data.combat
+  return c ~= nil and card ~= nil and not card.isDestroyed() and c.attackers ~= nil
+    and c.attackers[card.getGUID()] ~= nil and not (c.gone and c.gone[card.getGUID()])
+end
+
+-- Prevent all combat damage that would be dealt to and by this creature
+-- this combat (Maze of Ith). Applied when the damage list is built.
+function Combat.preventDamage(card)
+  local c = state()
+  c.prevented[card.getGUID()] = true
 end
 
 -- When each permanent entered (turns taken count), for summoning sickness.
@@ -751,6 +766,17 @@ local function buildRows(phase)
       end
     end
   end
+  -- Maze of Ith and the like: nothing is dealt to or by those creatures.
+  local pv = c.prevented or {}
+  if next(pv) ~= nil then
+    local kept = {}
+    for _, row in ipairs(rows) do
+      if not pv[row.src] and not pv[row.dst] then
+        table.insert(kept, row)
+      end
+    end
+    rows = kept
+  end
   return rows
 end
 
@@ -1071,7 +1097,7 @@ local function applyRound(byColor)
         if tx > 0 then
           Trackers.changePoison(r.dst, tx, "toxic")
         end
-        table.insert(damaged, { obj = src, controller = controller(src), seat = r.dst })
+        table.insert(damaged, { obj = src, controller = controller(src), seat = r.dst, amount = r.amount })
       elseif r.kind == "pw" then
         local pw = obj(r.dst)
         if pw then

@@ -403,6 +403,63 @@ function Library.moveToBottom(color, index, onDone)
     callback_function = function(obj) if onDone then onDone(obj) end end })
 end
 
+-- Exile cards from the top of a library: until a nonland card is exiled
+-- (Etali, Primal Conqueror), or just the top card (onlyOne). Calls
+-- onDone(nonland card or nil, all exiled cards).
+function Library.exileUntilNonland(color, onlyOne, onDone)
+  if #libraryPiles(color) > 1 then
+    Library.consolidate(color, function() Library.exileUntilNonland(color, onlyOne, onDone) end)
+    return
+  end
+  local s = TableSetup.seat(color)
+  local count, found, exiled = 0, nil, {}
+  local function finish()
+    if onDone then onDone(found, exiled) end
+  end
+  local function step()
+    local lib = Library.find(color)
+    if lib == nil then
+      finish()
+      return
+    end
+    count = count + 1
+    local pos = TableSetup.slot(color, "exile", 2 + count * 0.3)
+    local function got(card)
+      table.insert(exiled, card)
+      local isLand = false
+      pcall(function()
+        local d = JSON.decode(card.getGMNotes())
+        for _, t in ipairs(type(d) == "table" and d.types or {}) do
+          if tostring(t):lower() == "land" then
+            isLand = true
+          end
+        end
+      end)
+      Wait.time(function()
+        if not card.isDestroyed() then
+          Zones.refresh(card)
+        end
+      end, 0.6)
+      if not isLand then
+        found = card
+      end
+      if onlyOne or found then
+        finish()
+      else
+        step()
+      end
+    end
+    if lib.type == "Deck" then
+      lib.takeObject({ index = 0, position = pos, rotation = { 0, s.yaw, 0 }, smooth = false, callback_function = got })
+    else
+      lib.setPosition(pos)
+      lib.setRotation({ 0, s.yaw, 0 })
+      got(lib)
+    end
+  end
+  step()
+end
+
 -- Put a card into the library at depth (0 = top): Approach of the Second
 -- Sun goes 7th from the top. The deck is rebuilt with the card in place.
 function Library.putAt(color, card, depth, onDone)

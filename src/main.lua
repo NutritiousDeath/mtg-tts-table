@@ -16,6 +16,7 @@
     !seats       print the script version and every seat's hand zone
     !moves       toggle printing every card move between areas
     !where       show which zones the card under your mouse is in
+    !hover       show what is under your mouse (for alt-zoom problems)
     !zones       count the cards tracked in each of your areas
     !counters    show the counters stored on the card under your mouse
     !trackers    list the tracker tiles on the table and their buttons
@@ -84,7 +85,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.09 (X spells, Approach, Vorinclex untap)"
+SCRIPT_VERSION = "1.10 (Etali, Collective Voyage, Maze of Ith, Sothera)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -308,6 +309,40 @@ function onChat(message, sender)
       local b = surface.getBounds()
       print(string.format("MTG > Table surface top is at height %.2f", b.center.y + b.size.y / 2))
     end
+    return false
+  end
+
+  -- What is under the mouse (for alt-zoom problems): its name, kind, tags,
+  -- whether players can interact with it, and every object stacked there.
+  if message == "!hover" then
+    local p = Player[sender.color]
+    local obj = p and p.getHoverObject()
+    if obj == nil then
+      print("MTG > Nothing under the mouse (the zoom has nothing to show).")
+      return false
+    end
+    local function line(o)
+      local tags = ""
+      pcall(function() tags = table.concat(o.getTags(), ",") end)
+      local locked, inter = "?", "?"
+      pcall(function() locked = tostring(o.getLock()) end)
+      pcall(function() inter = tostring(o.interactable) end)
+      return string.format("%s [%s] tags=%s locked=%s interactable=%s", tostring(o.getName()), tostring(o.type), tags,
+        locked, inter)
+    end
+    print("MTG > Under the mouse: " .. line(obj))
+    pcall(function()
+      local pos = p.getPointerPosition()
+      if pos then
+        local hits = Physics.cast({ origin = { pos.x, pos.y + 10, pos.z }, direction = { 0, -1, 0 }, max_distance = 30,
+          type = 1 })
+        for i, h in ipairs(hits or {}) do
+          if h.hit_object then
+            print("MTG >   " .. i .. ". " .. line(h.hit_object) .. string.format(" y=%.2f", h.point and h.point.y or 0))
+          end
+        end
+      end
+    end)
     return false
   end
 

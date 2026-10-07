@@ -480,6 +480,52 @@ function Effects.parse(text, sourceName)
         tapped = after:find("battlefield tapped", 1, true) ~= nil })
     end
   end
+  -- Etali: "each player exiles cards from the top of their library until
+  -- they exile a nonland card. You may cast any number of spells from among
+  -- the nonland cards exiled this way without paying their mana costs."
+  do
+    local free = t:find("without paying their mana costs", 1, true) or t:find("without paying its mana cost", 1, true)
+    local everyone = t:find("each player exiles cards from the top of their library until they exile a nonland card", 1, true)
+    if everyone then
+      -- (the "you may cast" sentence can be on its own line: the offer is always made)
+      table.insert(actions, { what = "exileCast", who = "you", n = 1, everyone = true, untilNonland = true })
+    elseif free and (t:find("until you exile a nonland card", 1, true) or t:find("until they exile a nonland card", 1, true)) then
+      table.insert(actions, { what = "exileCast", who = "you", n = 1, everyone = false, untilNonland = true })
+    elseif free and t:find("exile the top card of each player's library", 1, true) then
+      table.insert(actions, { what = "exileCast", who = "you", n = 1, everyone = true, untilNonland = false })
+    end
+  end
+  -- "they get that many poison counters" (Etali, Primal Sickness).
+  if t:find("get that many poison counters", 1, true) or t:find("gets that many poison counters", 1, true) then
+    table.insert(actions, { what = "poison", who = "that", n = 1, fromTrigger = true })
+  end
+  -- Maze of Ith: "Untap target attacking creature. Prevent all combat damage
+  -- that would be dealt to and dealt by that creature this turn."
+  if t:find("untap target attacking creature", 1, true) then
+    table.insert(actions, { what = "untapAttacker", who = "you", n = 1,
+      prevent = t:find("prevent all combat damage that would be dealt to and dealt by that creature", 1, true) ~= nil })
+  end
+  -- Sothera: "each opponent chooses a creature they control and exiles it".
+  do
+    local ty = t:match("each opponent chooses an? (%a+) they control and exiles it")
+    if ty then
+      table.insert(actions, { what = "oppExile", who = "you", n = 1, type = ty })
+    end
+  end
+  -- "sacrifice ~, then put a creature card exiled with ~ onto the battlefield
+  -- under your control with two additional +1/+1 counters on it".
+  if t:find("sacrifice ~", 1, true) and not t:find("you may sacrifice ~", 1, true) then
+    table.insert(actions, { what = "sacSelf", who = "you", n = 1 })
+  end
+  do
+    local ty = t:match("put an? (%a+) card exiled with [%w~]+ onto the battlefield under your control")
+    if ty then
+      local cw = t:match("with (%w+) additional %+1/%+1 counters? on it")
+      local gains = t:find("gains haste", 1, true) ~= nil or t:find("gain haste", 1, true) ~= nil
+      table.insert(actions, { what = "returnExiledWith", who = "you", n = 1, type = ty, counters = num(cw) or 0,
+        haste = gains })
+    end
+  end
   -- "Manifest the top card of your library" / "cloak the top card".
   local mk = t:match("(manifest) the top card of your library") or t:match("(cloak) the top card of your library")
   if mk then
@@ -534,6 +580,12 @@ function Effects.parse(text, sourceName)
   -- "You may reveal a creature card": the look panel is already optional.
   if #actions == 1 and actions[1].what == "look" then
     optional = false
+  end
+  -- Etali: the exile happens; only the casting is optional (asked per card).
+  for _, act in ipairs(actions) do
+    if act.what == "exileCast" or act.what == "untapAttacker" then
+      optional = false
+    end
   end
   return { optional = optional, actions = actions, notes = notes, conds = conds }
 end
@@ -592,6 +644,18 @@ local function describe(a, target, controller)
     return who .. " " .. a.kind .. "s the top card"
   elseif a.what == "win" then
     return who .. " wins the game"
+  elseif a.what == "exileCast" then
+    return who .. " exiles cards and may cast them free"
+  elseif a.what == "poison" then
+    return "poison counters"
+  elseif a.what == "untapAttacker" then
+    return "untap an attacking creature"
+  elseif a.what == "oppExile" then
+    return "each opponent exiles a " .. tostring(a.type)
+  elseif a.what == "sacSelf" then
+    return "it is sacrificed"
+  elseif a.what == "returnExiledWith" then
+    return "a " .. tostring(a.type) .. " exiled with it comes back"
   elseif a.what == "toLibrary" then
     return "it goes " .. a.n .. "th from the top of the library"
   end
@@ -676,6 +740,24 @@ local function apply(it, plan, target)
           Effects.pickRemove(seat, a, it.name, it.source)
         elseif a.what == "sacrifice" then
           Effects.pickSacrifice(seat, a, it)
+        elseif a.what == "poison" then
+          Trackers.changePoison(seat, a.fromTrigger and (it.amount or 0) or a.n, it.name)
+        elseif a.what == "exileCast" then
+          Effects.exileCast(seat, a, it)
+        elseif a.what == "untapAttacker" then
+          Effects.untapAttacker(seat, a, it)
+        elseif a.what == "oppExile" then
+          Effects.oppExile(seat, a, it)
+        elseif a.what == "sacSelf" then
+          local src = it.source and getObjectFromGUID(it.source)
+          if src and not src.isDestroyed() then
+            printToAll("MTG > " .. it.name .. " is sacrificed.", GOOD)
+            Combat.removeCard(src, "graveyard")
+          else
+            broadcastToColor(it.name .. ": sacrifice it yourself.", seat, INFO)
+          end
+        elseif a.what == "returnExiledWith" then
+          Effects.returnExiledWith(seat, a, it)
         elseif a.what == "win" then
           broadcastToAll(seat .. " WINS THE GAME (" .. it.name .. ")!", { 1, 0.85, 0.2 })
           printToAll("MTG > " .. seat .. " wins the game (" .. it.name .. ").", GOOD)
@@ -1002,6 +1084,11 @@ function Effects.resolve(it)
     end
     it = copy
   end
+  -- Join forces (Collective Voyage): everyone may pay, then everyone searches.
+  if low:find("join forces", 1, true) then
+    Effects.joinForces(it)
+    return
+  end
   -- X chosen when it was cast ("pay X life", {X} in the cost): ask for it,
   -- then read the text with the number in place of X.
   if not it.xDone then
@@ -1043,6 +1130,9 @@ function Effects.resolve(it)
   -- rest resolves like any other effect.
   local function branch(c, yes)
     local text = yes and c.rest or c.otherwise
+    if text == nil and c.silent then
+      return
+    end
     if text == nil then
       printToAll("MTG > " .. it.name .. ": not true, so that part does nothing.", INFO)
       return
@@ -1058,6 +1148,12 @@ function Effects.resolve(it)
   end
   local function askConds()
     for _, c in ipairs(plan.conds or {}) do
+      -- Conditions the table can see for itself.
+      local auto = Effects.condValue(c.cond, seat)
+      if auto ~= nil then
+        c.auto = auto
+        c.silent = true
+      end
       -- Approach of the Second Sun: the table knows what was cast.
       if c.cond:find("cast another spell named ~ this game", 1, true) then
         local n = Effects.castCount(seat, it.name)
@@ -1673,4 +1769,249 @@ function Effects.pump(seat, a, it)
     end
   end
   return n
+end
+
+---------------------------------------------------------------------------
+-- Conditions the table can check, and the bigger card effects
+---------------------------------------------------------------------------
+
+local function creatureCount(seat)
+  local n = 0
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) and fieldSeat(obj) == seat
+        and cardTypes(obj).creature then
+      n = n + 1
+    end
+  end
+  return n
+end
+
+-- true / false for the conditions it knows, nil for the rest (asked as YES / NO).
+function Effects.condValue(cond, seat)
+  if cond == "a player controls no creatures" then
+    for _, c in ipairs(players()) do
+      if creatureCount(c) == 0 then
+        return true
+      end
+    end
+    return false
+  elseif cond == "you control no creatures" then
+    return creatureCount(seat) == 0
+  end
+  return nil
+end
+
+-- Players in turn order starting with `first`.
+local function orderFrom(first)
+  local all = players()
+  local list, at = {}, 1
+  for i, c in ipairs(all) do
+    if c == first then
+      at = i
+    end
+  end
+  for k = 0, #all - 1 do
+    table.insert(list, all[(at - 1 + k) % #all + 1])
+  end
+  return list
+end
+
+-- Etali: exile from the top of the libraries, then offer each nonland card
+-- as a free cast (onto the stack).
+function Effects.exileCast(seat, a, it)
+  local who = a.everyone and orderFrom(seat) or { seat }
+  local pending, cards = #who, {}
+  local function offer()
+    if #cards == 0 then
+      printToAll("MTG > " .. it.name .. ": no nonland cards were exiled.", INFO)
+      return
+    end
+    for _, card in ipairs(cards) do
+      local name = card.getName()
+      local oracle = ""
+      pcall(function()
+        local d = JSON.decode(card.getGMNotes())
+        oracle = type(d) == "table" and tostring(d.oracle or "") or ""
+      end)
+      ask(seat, it.name .. ": cast " .. name .. " free?", (#oracle > 150 and (oracle:sub(1, 148) .. "...") or oracle),
+        { { label = "CAST", value = true }, { label = "NO", value = false } }, function(yes)
+          if yes and not card.isDestroyed() then
+            printToAll("MTG > " .. seat .. " casts " .. name .. " without paying its mana cost (" .. it.name .. ").", GOOD)
+            Stack.pushCard(card, seat)
+          else
+            printToAll("MTG > " .. seat .. " doesn't cast " .. name .. " (stays exiled).", INFO)
+          end
+        end)
+    end
+  end
+  for _, s in ipairs(who) do
+    Library.exileUntilNonland(s, not a.untilNonland, function(card, exiled)
+      printToAll("MTG > " .. s .. " exiled " .. #exiled .. " card" .. (#exiled == 1 and "" or "s") .. " from their library ("
+        .. it.name .. ").", INFO)
+      if card then
+        table.insert(cards, card)
+      end
+      pending = pending - 1
+      if pending == 0 then
+        offer()
+      end
+    end)
+  end
+end
+
+-- Collective Voyage: starting with the controller, each player says how much
+-- mana they pay; then each searches for up to that many basic lands.
+function Effects.joinForces(it)
+  local order = orderFrom(it.controller)
+  local total = 0
+  local query = tostring(it.text or ""):lower():match("up to x ([%a ]-) cards") or "basic land"
+  local function finish()
+    printToAll("MTG > " .. it.name .. ": " .. total .. " mana paid in all.", INFO)
+    if total <= 0 then
+      return
+    end
+    for _, s in ipairs(order) do
+      if seated(s) or GameState.solo() then
+        LibSearch.open(s, query, it.name .. ": take up to " .. total .. " (" .. query .. ", they enter tapped). It closes and shuffles by itself.",
+          "battlefield", true, { typeOnly = true, limit = total })
+      end
+    end
+  end
+  local function nextPlayer(i)
+    if i > #order then
+      finish()
+      return
+    end
+    local s = order[i]
+    ask(s, it.name .. ": join forces",
+      "How much mana do you pay? Type a number and OK, or NONE." .. (total > 0 and ("\nPaid so far: " .. total) or ""),
+      { { label = "NONE", value = false } }, function(n)
+        n = tonumber(n) or 0
+        total = total + n
+        if n > 0 then
+          printToAll("MTG > " .. s .. " pays " .. n .. " (" .. it.name .. ").", INFO)
+        end
+        nextPlayer(i + 1)
+      end, nil, true)
+  end
+  nextPlayer(1)
+end
+
+-- Maze of Ith: untap an attacking creature; its combat damage is prevented.
+function Effects.untapAttacker(seat, a, it)
+  ask(seat, it.name .. ": untap an attacking creature", "Click TARGET on the attacking creature.",
+    { { label = "SKIP", value = false } }, function(obj)
+      if not obj then
+        return
+      end
+      local owner = fieldSeat(obj)
+      if owner then
+        local r = obj.getRotation()
+        obj.setRotationSmooth({ r.x, TableSetup.seat(owner).yaw, r.z }, false, true)
+      end
+      if a.prevent then
+        Combat.preventDamage(obj)
+      end
+      printToAll("MTG > " .. it.name .. ": " .. obj.getName() .. " untaps" .. (a.prevent and "; no combat damage is dealt to or by it." or "."), GOOD)
+    end, { filter = function(obj) return Combat.isAttacking(obj) end, label = "TARGET" })
+end
+
+-- Sothera: each opponent exiles a creature they control. The table
+-- remembers which cards went, for "put a creature card exiled with it".
+local function isCommanderGuid(guid)
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    local p = GameState.player(c)
+    for _, g in pairs(p and p.commanders or {}) do
+      if g == guid then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function Effects.oppExile(seat, a, it)
+  for _, opp in ipairs(orderFrom(seat)) do
+    if opp ~= seat and creatureCount(opp) > 0 then
+      ask(opp, it.name .. ": exile a " .. tostring(a.type), "Click EXILE on a " .. tostring(a.type) .. " you control.",
+        { { label = "NONE", value = false } }, function(obj)
+          if not obj then
+            return
+          end
+          local name, guid = obj.getName(), obj.getGUID()
+          local token = obj.hasTag("Token")
+          if removeOne(obj, "exile") then
+            printToAll("MTG > " .. opp .. " exiles " .. name .. " (" .. it.name .. ").", GOOD)
+            if not token and it.source and not isCommanderGuid(guid) then
+              GameState.data.exiledWith = GameState.data.exiledWith or {}
+              local list = GameState.data.exiledWith[it.source] or {}
+              table.insert(list, guid)
+              GameState.data.exiledWith[it.source] = list
+            end
+          end
+        end, { filter = function(obj, owner) return owner == opp and cardTypes(obj).creature == true end, label = "EXILE" })
+    end
+  end
+end
+
+-- "Put a creature card exiled with it onto the battlefield under your
+-- control with two additional +1/+1 counters on it."
+function Effects.returnExiledWith(seat, a, it)
+  local list = (GameState.data.exiledWith or {})[it.source or ""] or {}
+  local cards = {}
+  for _, g in ipairs(list) do
+    local o = getObjectFromGUID(g)
+    if o and not o.isDestroyed() and cardTypes(o)[tostring(a.type)] then
+      table.insert(cards, o)
+    end
+  end
+  local function put(card)
+    local s = TableSetup.seat(seat)
+    card.setLock(false)
+    card.setRotation({ 0, s.yaw, 0 })
+    card.setPosition(TableSetup.slot(seat, "battlefield", 2))
+    printToAll("MTG > " .. seat .. " puts " .. card.getName() .. " onto the battlefield from exile (" .. it.name .. ").", GOOD)
+    local ex = GameState.data.exiledWith or {}
+    local rest = {}
+    for _, g in ipairs(ex[it.source or ""] or {}) do
+      if g ~= card.getGUID() then
+        table.insert(rest, g)
+      end
+    end
+    ex[it.source or ""] = rest
+    Wait.time(function()
+      if not card.isDestroyed() then
+        Zones.refresh(card)
+      end
+    end, 1)
+    Wait.time(function()
+      if card.isDestroyed() then
+        return
+      end
+      if (a.counters or 0) > 0 then
+        Counters.change(card, "plus", a.counters, seat)
+      end
+      if a.haste then
+        Counters.addTempKeyword(card, "haste")
+      end
+    end, 1.8)
+  end
+  if #cards == 0 then
+    broadcastToColor(it.name .. ": no " .. tostring(a.type) .. " card is exiled with it (the table only knows the ones it exiled itself).", seat, INFO)
+    return
+  end
+  if #cards == 1 then
+    put(cards[1])
+    return
+  end
+  local lines, choices = {}, {}
+  for i, c in ipairs(cards) do
+    if i <= MAX_CHOICES then
+      table.insert(lines, i .. ") " .. c.getName())
+      table.insert(choices, { label = tostring(i), value = i })
+    end
+  end
+  ask(seat, it.name .. ": choose a card to put onto the battlefield", table.concat(lines, "\n"), choices, function(i)
+    put(cards[i])
+  end)
 end
