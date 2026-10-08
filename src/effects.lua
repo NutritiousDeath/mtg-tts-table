@@ -133,6 +133,24 @@ function Effects.parse(text, sourceName)
       t = t:sub(1, a - 1) .. t:sub(a + #phrase)
     end
   end
+  -- Smaug, the Magnificent: "deals damage equal to the number of Treasures
+  -- you control to any target." / Smaug, Wicked Worm: "create X tapped
+  -- Treasure tokens, where X is the number of artifacts your opponents
+  -- control." The table counts them when the ability resolves.
+  local counted
+  do
+    local a, b, word = t:find("deals damage equal to the number of (%a+) you control to any target", 1)
+    if a then
+      counted = { kind = "lose", word = word, scope = "mine" }
+      t = t:sub(1, a - 1) .. "deals 1 damage to any target" .. t:sub(b + 1)
+    end
+    local c, d, w2, who = t:find(", where x is the number of (%a+) (%a+ ?%a*) control", 1)
+    if c and t:find("create x ", 1, true) then
+      counted = { kind = "token", word = w2, scope = who:find("opponent", 1, true) and "opponents" or "mine" }
+      t = t:sub(1, c - 1) .. t:sub(d + 1)
+      t = t:gsub("create x ", "create 1 ", 1)
+    end
+  end
   -- Sentence by sentence: one with a condition ("Then if you control four
   -- or more lands, untap that land.") is left to the players; the plain
   -- sentences around it still happen.
@@ -414,6 +432,14 @@ function Effects.parse(text, sourceName)
       end
     end
   end
+  if counted then
+    for _, ac in ipairs(actions) do
+      if (counted.kind == "lose" and ac.what == "lose" and ac.who == "any")
+          or (counted.kind == "token" and ac.what == "token") then
+        ac.countWord, ac.countScope = counted.word, counted.scope
+      end
+    end
+  end
   -- "Amass Zombies 1": put N +1/+1 counters on your Army (make a 0/0 Army
   -- token first if you have none).
   local amType, amN = t:match("amass (%a+) (%d+)")
@@ -674,7 +700,11 @@ local function describe(a, target, controller)
   elseif a.what == "untap" or a.what == "tap" then
     return tostring(a.cardName or "it") .. (a.what == "untap" and " untapped" or " tapped")
   elseif a.what == "token" then
-    return who .. (you and " create " or " creates ") .. tostring(a.phrase) .. " token"
+    local ph = tostring(a.phrase)
+    if a.countWord then
+      ph = ph:gsub("^1 ", "one per " .. a.countWord:gsub("s$", "") .. (a.countScope == "opponents" and " your opponents control: " or " you control: "), 1)
+    end
+    return who .. (you and " create " or " creates ") .. ph .. " token"
   elseif a.what == "amass" then
     return who .. (you and " amass " or " amasses ") .. a.n
   elseif a.what == "pump" then
@@ -724,11 +754,23 @@ local function describe(a, target, controller)
     return who .. (you and " gain " or " gains ") .. a.n .. " life"
   elseif a.what == "lose" then
     if target == "other" then
-      return a.n .. " damage to a creature or planeswalker (by hand)"
+      return (a.countWord and "damage" or (a.n .. " damage")) .. " to a creature or planeswalker (by hand)"
+    end
+    if a.countWord then
+      return who .. (you and " lose" or " loses") .. " life equal to your " .. a.countWord .. " count"
     end
     return who .. (you and " lose " or " loses ") .. a.n .. " life"
   end
   return who .. (you and " draw " or " draws ") .. a.n
+end
+
+local function amountOf(a, controller, name)
+  if a.countWord then
+    local n = Effects.countPermanents(controller, a.countWord, a.countScope)
+    printToAll("MTG > " .. tostring(name) .. ": " .. n .. " " .. a.countWord .. (a.countScope == "opponents" and " your opponents control." or " you control."), INFO)
+    return n
+  end
+  return a.n
 end
 
 local function apply(it, plan, target)
@@ -766,7 +808,10 @@ local function apply(it, plan, target)
           end
           Trackers.changeLife(seat, gain, it.name)
         elseif a.what == "lose" then
-          Trackers.changeLife(seat, -a.n, it.name)
+          local lost = amountOf(a, controller, it.name)
+          if lost > 0 then
+            Trackers.changeLife(seat, -lost, it.name)
+          end
         elseif a.what == "draw" then
           Actions.draw(seat, a.n, it.name)
         elseif a.what == "search" then
@@ -794,8 +839,13 @@ local function apply(it, plan, target)
         elseif a.what == "bounce" then
           Effects.pickBounce(seat, a, it.name)
         elseif a.what == "token" then
-          Tokens.create(seat, a.spec, a.n, it.name,
-            (a.tapped or a.attacking) and { tapped = a.tapped, attacking = a.attacking, from = it.thatCard or it.source } or nil)
+          local made = amountOf(a, controller, it.name)
+          if made < 1 then
+            printToAll("MTG > " .. it.name .. ": no tokens (the count is 0).", INFO)
+          else
+            Tokens.create(seat, a.spec, made, it.name,
+              (a.tapped or a.attacking) and { tapped = a.tapped, attacking = a.attacking, from = it.thatCard or it.source } or nil)
+          end
         elseif a.what == "amass" then
           Effects.amass(seat, a.kind, a.n, it.name)
         elseif a.what == "pump" then
@@ -1423,6 +1473,36 @@ local function fieldSeat(obj)
   end
   return nil
 end
+
+-- How many permanents of a kind a seat (or its opponents) control: "Treasures
+-- you control", "artifacts your opponents control". Tokens count by name.
+local ARTIFACT_TOKENS = { treasure = true, clue = true, food = true, blood = true, powerstone = true, gold = true,
+  junk = true, map = true, incubator = true, shard = true }
+
+function Effects.countPermanents(seat, word, scope)
+  word = tostring(word or ""):lower():gsub("ies$", "y"):gsub("s$", "")
+  local n = 0
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) and obj.held_by_color == nil then
+      local owner = fieldSeat(obj)
+      if owner and ((scope == "mine" and owner == seat) or (scope == "opponents" and owner ~= seat)) then
+        local name = tostring(obj.getName()):lower()
+        local hit = cardTypes(obj)[word] or name:find(word, 1, true) ~= nil
+        if not hit and word == "artifact" then
+          hit = ARTIFACT_TOKENS[name] or ARTIFACT_TOKENS[name:match("^(%a+) token") or ""] or false
+          if not hit then
+            pcall(function() hit = tostring(obj.getDescription()):lower():find("artifact", 1, true) ~= nil end)
+          end
+        end
+        if hit then
+          n = n + 1
+        end
+      end
+    end
+  end
+  return n
+end
+
 
 -- A card button on each permanent that can be picked.
 function Effects.decorate(obj)

@@ -66,6 +66,8 @@ require("src/faces")
 require("src/tokens")
 require("src/ui")
 require("src/importcards")
+require("src/music_tracks")
+require("src/music")
 
 local SAMPLE_DECK = [[
 Commander
@@ -85,7 +87,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.16 (Aetherflux Reservoir: spells this turn, any-target damage)"
+SCRIPT_VERSION = "1.18 (music player, !music)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -231,6 +233,10 @@ local function printDeck(deck)
 end
 
 function onChat(message, sender)
+  if Music and Music.chat(message) then
+    return false
+  end
+
   if message == "!state" then
     print(GameState.summary())
     return false
