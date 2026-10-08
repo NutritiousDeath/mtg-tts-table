@@ -208,6 +208,10 @@ function Faces.addMenu(obj)
   if not Faces.isDoubleFaced(obj) then
     return
   end
+  local where = Counters.regionOf(obj)
+  if where ~= "battlefield" and where ~= "lands" then
+    return   -- Transform only matters on the battlefield
+  end
   obj.addContextMenuItem("Transform / other face", function(playerColor)
     if obj.isDestroyed() then
       return
@@ -415,6 +419,9 @@ function Faces.addFaceDownMenu(obj)
   end
   if kindOf(obj) == "face down" then
     return
+  end
+  if Counters.regionOf(obj) ~= "hand" then
+    return   -- Cast face down works from a hand
   end
   obj.addContextMenuItem("Cast face down", function(color)
     if not obj.isDestroyed() then

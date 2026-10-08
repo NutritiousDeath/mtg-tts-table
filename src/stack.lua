@@ -728,7 +728,7 @@ function Stack.activate(obj, playerColor, ab)
 end
 
 -- Right-click on a card: put one of its abilities on the stack.
-function Stack.addCardMenu(obj)
+function Stack.addCardMenu(obj, full)
   for _, ab in ipairs(Stack.activatedAbilities(obj)) do
     local label = "Activate: " .. ab.cost
     if #label > 38 then
@@ -737,6 +737,9 @@ function Stack.addCardMenu(obj)
     obj.addContextMenuItem(label, function(playerColor)
       Stack.activate(obj, playerColor, ab)
     end)
+  end
+  if not full then
+    return   -- off the battlefield only the Activate items apply
   end
   obj.addContextMenuItem("Ability to stack", function(playerColor)
     local face = ""

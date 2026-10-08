@@ -85,7 +85,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.11 (multi-block, damage order)"
+SCRIPT_VERSION = "1.12 (shorter right-click menus)"
 
 function onLoad(saved)
   GameLog.setup()

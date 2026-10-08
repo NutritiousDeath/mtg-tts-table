@@ -309,6 +309,7 @@ function Counters.endOfTurn()
 end
 
 Events.on("stepStarted", function(d)
+  Wait.frames(Counters.refreshMenus, 2)
   if d.step == "cleanup" then
     local had = GameState.data.tempKeywords and next(GameState.data.tempKeywords) ~= nil
     Counters.endOfTurn()
@@ -381,6 +382,46 @@ local function startingLoyalty(obj)
   end
 end
 
+local menuSigs = {}   -- [guid] = what the card's menu was built for
+
+-- What decides a card's menu: where it is, and (on the battlefield) the
+-- combat step.
+-- Where a card is: tracked location first (that's how hands are known),
+-- else the area under it.
+function Counters.regionOf(obj)
+  if Zones == nil then
+    return ""
+  end
+  local loc = Zones.locationOf(obj)
+  if loc then
+    return loc.region
+  end
+  return Zones.regionAt(obj.getPosition()).region
+end
+
+function Counters.menuSig(obj)
+  local region = Counters.regionOf(obj)
+  local step = ""
+  if ON_BATTLEFIELD[region] and Combat and Combat.menuStep then
+    step = Combat.menuStep()
+  end
+  return region .. "|" .. step
+end
+
+-- Rebuild the menu if what it was built for has changed.
+function Counters.refreshMenu(obj)
+  if obj ~= nil and not obj.isDestroyed() and obj.type == "Card" and obj.hasTag("MTGCard")
+      and menuSigs[obj.getGUID()] ~= Counters.menuSig(obj) then
+    Counters.setup(obj)
+  end
+end
+
+function Counters.refreshMenus()
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    Counters.refreshMenu(obj)
+  end
+end
+
 -- Give a card its right-click menu items and draw its counters.
 function Counters.setup(obj)
   if not isCard(obj) then
@@ -398,29 +439,41 @@ function Counters.setup(obj)
   if onField then
     startingLoyalty(obj)
   end
-  for _, item in ipairs(menuFor(obj)) do
-    obj.addContextMenuItem(item[1], function(playerColor)
-      Counters.change(obj, item[2], item[3], playerColor)
-    end, true)
+  -- The right-click list only holds what makes sense where the card is:
+  -- counters and abilities on the battlefield, Cast face down in a hand,
+  -- combat items during combat. Rebuilt when the card moves or the step
+  -- changes (see menuSig below).
+  local region = Counters.regionOf(obj)
+  obj.clearContextMenu()
+  menuSigs[obj.getGUID()] = Counters.menuSig(obj)
+  if LibSearch and LibSearch.addMenu then
+    LibSearch.addMenu(obj)
   end
-  obj.addContextMenuItem("Clear counters", function() Counters.clear(obj) end)
-  obj.addContextMenuItem("Skip next untap / untap normally", function(playerColor)
-    local on = not Actions.skipsUntap(obj)
-    Actions.setSkipUntap(obj, on, playerColor)
-    printToAll("MTG > " .. obj.getName() .. (on and " won't untap in its next untap step." or " untaps normally again."),
-      { 0.75, 0.8, 0.9 })
-  end)
-  -- Anyone can delete a card this way (TTS normally needs a promoted player).
-  obj.addContextMenuItem("Delete card", function(playerColor) Counters.deleteCard(obj, playerColor) end)
-  if Stack then
-    Stack.addCardMenu(obj)
+  if onField then
+    for _, item in ipairs(menuFor(obj)) do
+      obj.addContextMenuItem(item[1], function(playerColor)
+        Counters.change(obj, item[2], item[3], playerColor)
+      end, true)
+    end
+    obj.addContextMenuItem("Clear counters", function() Counters.clear(obj) end)
+    obj.addContextMenuItem("Skip next untap / untap normally", function(playerColor)
+      local on = not Actions.skipsUntap(obj)
+      Actions.setSkipUntap(obj, on, playerColor)
+      printToAll("MTG > " .. obj.getName() .. (on and " won't untap in its next untap step." or " untaps normally again."),
+        { 0.75, 0.8, 0.9 })
+    end)
   end
-  if Combat then
+  if Stack and (onField or region == "hand" or region == "graveyard" or region == "exile" or region == "command") then
+    Stack.addCardMenu(obj, onField)
+  end
+  if onField and Combat then
     Combat.addCardMenu(obj)
   end
   if Faces then
     Faces.addMenu(obj)
   end
+  -- Anyone can delete a card this way (TTS normally needs a promoted player).
+  obj.addContextMenuItem("Delete card", function(playerColor) Counters.deleteCard(obj, playerColor) end)
   Counters.render(obj)
 end
 
@@ -488,6 +541,7 @@ Events.on("cardMoved", function(d)
   if d.card == nil or d.card.isDestroyed() then
     return
   end
+  Wait.frames(function() Counters.refreshMenu(d.card) end, 2)
   if wasOn and not isOn then
     -- Left the battlefield: counters go away.
     if d.card.memo and d.card.memo ~= "" then

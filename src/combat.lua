@@ -1292,18 +1292,34 @@ function Combat.cycleOrder(card, color)
   broadcastToAll(card.getName() .. " damage order: " .. table.concat(names, " then "), { 0.4, 0.7, 1 })
 end
 
+-- Which combat step the right-click menus are built for ("" outside combat).
+function Combat.menuStep()
+  local step = stepId()
+  if step == "attackers" or step == "blockers" then
+    return step
+  end
+  return ""
+end
+
+-- Combat items show only in the steps where they do something.
 function Combat.addCardMenu(card)
-  card.addContextMenuItem("Also block next attacker", function(playerColor)
-    if not card.isDestroyed() then
-      Combat.alsoBlock(card, playerColor)
-    end
-  end)
-  card.addContextMenuItem("Damage order (cycle blockers)", function(playerColor)
-    if not card.isDestroyed() then
-      Combat.cycleOrder(card, playerColor)
-    end
-  end)
-  card.addContextMenuItem("Attack / Block", function(playerColor)
+  local step = Combat.menuStep()
+  if step == "" or not isCreature(card) then
+    return
+  end
+  if step == "blockers" then
+    card.addContextMenuItem("Also block next attacker", function(playerColor)
+      if not card.isDestroyed() then
+        Combat.alsoBlock(card, playerColor)
+      end
+    end)
+    card.addContextMenuItem("Damage order (cycle blockers)", function(playerColor)
+      if not card.isDestroyed() then
+        Combat.cycleOrder(card, playerColor)
+      end
+    end)
+  end
+  card.addContextMenuItem(step == "attackers" and "Attack" or "Block", function(playerColor)
     if not card.isDestroyed() then
       click(card, playerColor, false)
     end
