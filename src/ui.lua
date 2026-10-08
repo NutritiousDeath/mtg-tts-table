@@ -114,23 +114,36 @@ local function seated(color)
   return true
 end
 
+-- Show the (single) import panel only to the players who have it open.
+local function syncImportPanel()
+  local who = {}
+  for color in pairs(importOpen) do
+    table.insert(who, color)
+  end
+  table.sort(who)
+  if #who == 0 then
+    UI.setAttribute("importPanel", "active", "false")
+    return
+  end
+  UI.setAttribute("importPanel", "visibility", table.concat(who, "|"))
+  UI.setAttribute("importPanel", "active", "true")
+end
+
 -- Open the import panel for one player only (the table's Deck Importer cards
 -- and the screen button both use this).
 function TableUI.openImport(color)
   if not seated(color) then
     return
   end
-  UI.setValue("importTitle", "Import Commander Deck (" .. string.upper(color) .. ")")
-  UI.setAttribute("importPanel", "active", "true")
+  UI.setValue("importTitle", "Import Commander Deck (to your seat)")
   importOpen[color] = true
+  syncImportPanel()
 end
 
 local function closeImport(color)
   importOpen[color] = nil
-  -- Shared panel: hide it once nobody has it open.
-  if next(importOpen) == nil then
-    UI.setAttribute("importPanel", "active", "false")
-  end
+  -- Shared panel: hide it for this player, and for all once nobody has it open.
+  syncImportPanel()
 end
 
 function ui_toggleImport(player)
