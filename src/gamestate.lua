@@ -74,8 +74,47 @@ function GameState.player(color)
 end
 
 -- Serialize for onSave.
+-- Copy of the state that JSON can always encode: only text / number keys,
+-- and no functions or game objects. Anything dropped is reported once, with
+-- where it was, so the cause can be found and fixed.
+local reportedBad = {}
+
+local function clean(t, path, depth, seen)
+  local out = {}
+  if depth > 30 or seen[t] then
+    return out
+  end
+  seen[t] = true
+  for k, v in pairs(t) do
+    local tk, tv = type(k), type(v)
+    if tk ~= "string" and tk ~= "number" then
+      local where = path .. "/<" .. tk .. " key>"
+      if not reportedBad[where] then
+        reportedBad[where] = true
+        print("MTG > Save: skipped a bad entry at " .. where)
+      end
+    elseif tv == "table" then
+      out[k] = clean(v, path .. "/" .. tostring(k), depth + 1, seen)
+    elseif tv == "string" or tv == "number" or tv == "boolean" then
+      out[k] = v
+    else
+      local where = path .. "/" .. tostring(k) .. " (" .. tv .. ")"
+      if not reportedBad[where] then
+        reportedBad[where] = true
+        print("MTG > Save: skipped a bad entry at " .. where)
+      end
+    end
+  end
+  seen[t] = nil
+  return out
+end
+
 function GameState.encode()
-  return JSON.encode(GameState.data)
+  local ok, text = pcall(JSON.encode, GameState.data)
+  if ok then
+    return text
+  end
+  return JSON.encode(clean(GameState.data, "", 0, {}))
 end
 
 -- Restore from onLoad's saved string. Returns true if an existing game was restored.

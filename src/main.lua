@@ -85,7 +85,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.13 (import panel private to the player)"
+SCRIPT_VERSION = "1.14 (safe save, reports bad state)"
 
 function onLoad(saved)
   GameLog.setup()
