@@ -68,6 +68,8 @@ require("src/ui")
 require("src/importcards")
 require("src/music_tracks")
 require("src/music")
+require("src/planechase_data")
+require("src/planechase")
 
 local SAMPLE_DECK = [[
 Commander
@@ -87,7 +89,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.18 (music player, !music)"
+SCRIPT_VERSION = "1.19 (Planechase: chest, planar deck, planar die)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -103,6 +105,7 @@ function onLoad(saved)
   Actions.ensure()
   Turns.ensureStrips()
   ImportCards.ensure()
+  Planechase.ensure()
   ManaChips.ensure()
   Stack.ensure()
   TableSetup.applyBackground()
@@ -234,6 +237,9 @@ end
 
 function onChat(message, sender)
   if Music and Music.chat(message) then
+    return false
+  end
+  if Planechase and Planechase.chat(message, sender and sender.color) then
     return false
   end
 
@@ -479,6 +485,7 @@ function onChat(message, sender)
       Actions.ensure()
       Turns.ensureStrips()
       ImportCards.ensure()
+      Planechase.ensure()
       ManaChips.ensure()
       Stack.ensure()
       broadcastToAll("Table tiles rebuilt.", { 0.7, 0.85, 1 })
