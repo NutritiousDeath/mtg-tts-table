@@ -25,8 +25,12 @@
   Chat: !planechase  (help), !planechase unpack | pack | roll | walk | turn
         ("turn" swaps which way the plane cards face, if they read upside down)
 
-  The plane pictures are Scryfall's upright landscape images, so zooming a
-  card works like any other card.
+  Plane pictures: Scryfall's planar images are sideways (turned 90 degrees
+  inside the picture), which makes TTS's zoom show them sideways. Upright
+  copies go in assets/planechase/cards (tools/rotate_planes.html makes them).
+  UNPACK checks for them: with them the cards are landscape and zoom upright;
+  without them the sideways pictures are used (they still read right on the
+  table, just not in the zoom).
 
   Cards come from planechase_data.lua (tools/make_planechase_data.py).
 --]]
@@ -42,8 +46,8 @@ local CHEST = { x = 38, z = -38, yaw = 135 }       -- between White (south) and 
 local DECK_AT = { x = -8.5, z = 3.8 }              -- west of the stack mat
 local PLANE_AT = { x = -8.5, z = -3.8 }
 local LAND = { x = 31, z = -31 }                    -- the planar die waits in front of the chest
-local CARD_SCALE = 1.4
-local YAW = 180                                     -- landscape plane cards, readable from White (like cards at that seat)
+local CARD_SCALE_UPRIGHT, CARD_SCALE_SIDEWAYS = 1.4, 1.6
+local YAW_UPRIGHT, YAW_SIDEWAYS = 180, 270   -- upright landscape pictures / sideways Scryfall ones
 local ID_BASE = 31000
 local INFO, GOOD, WARN = { 0.75, 0.8, 0.9 }, { 0.3, 1, 0.6 }, { 1, 0.6, 0.2 }
 local CYAN = { 0.35, 0.95, 1 }
@@ -58,8 +62,39 @@ local function data()
   return d.planechase
 end
 
+local function upright()
+  return data().upright == true
+end
+
 local function yaw()
-  return (YAW + (data().flip and 180 or 0)) % 360
+  return ((upright() and YAW_UPRIGHT or YAW_SIDEWAYS) + (data().flip and 180 or 0)) % 360
+end
+
+local function cardScale()
+  return upright() and CARD_SCALE_UPRIGHT or CARD_SCALE_SIDEWAYS
+end
+
+local function slug(name)
+  local s2 = tostring(name):lower():gsub("[^a-z0-9]+", "-"):gsub("^%-", ""):gsub("%-$", "")
+  return s2
+end
+
+local CARDS_VERSION = "?v=1"
+
+local function faceUrl(c)
+  if upright() then
+    return BASE .. "cards/" .. slug(c.n) .. ".jpg" .. CARDS_VERSION
+  end
+  -- Scryfall blocks TTS's image downloader: go through the relay like the importer.
+  local host = (Importer and Importer.relayHost and Importer.relayHost() ~= "" and Importer.relayHost()) or "img.klrmngr.com"
+  return (c.u:gsub("cards%.scryfall%.io", host))
+end
+
+local function backUrl()
+  if upright() then
+    return BASE .. "back.png" .. "?v=2"
+  end
+  return PLANECHASE_BACK
 end
 
 local function say(msg, color)
@@ -124,7 +159,7 @@ local function cardData(c, i)
     GMNotes = JSON.encode({ planar = true, name = c.n, type = c.t }),
     CardID = id * 100,
     CustomDeck = {
-      [tostring(id)] = { FaceURL = c.u, BackURL = PLANECHASE_BACK, NumWidth = 1, NumHeight = 1,
+      [tostring(id)] = { FaceURL = faceUrl(c), BackURL = backUrl(), NumWidth = 1, NumHeight = 1,
         BackIsHidden = true, UniqueBack = false, Type = 0 },
     },
     Tags = { "PlanarCard" },
@@ -144,7 +179,7 @@ end
 local function finishDeck(o)
   if o and not o.isDestroyed() then
     o.setName("Planar Deck")
-    o.setScale({ CARD_SCALE, 1, CARD_SCALE })
+    o.setScale({ cardScale(), 1, cardScale() })
     o.addTag("PlanarCard")
   end
 end
@@ -178,9 +213,18 @@ end
 
 local function turnTop(deckObj, cb)
   local function taken(card)
-    card.setScale({ CARD_SCALE, 1, CARD_SCALE })
+    card.setScale({ cardScale(), 1, cardScale() })
     card.addTag("PlanarCard")
     planeMenu(card)
+    -- Make sure it rests on the table.
+    Wait.time(function()
+      if not card.isDestroyed() then
+        pcall(function()
+          card.use_gravity = true
+          card.setLock(false)
+        end)
+      end
+    end, 0.4)
     if cb then cb(card) end
   end
   if deckObj.type == "Deck" then
@@ -303,6 +347,19 @@ function Planechase.build(color)
   end
   buildIndex()
   local st = data()
+  if not st.probed then
+    -- Are the upright pictures on GitHub yet?
+    busy = true
+    local probe = BASE .. "cards/" .. slug((PLANECHASE_CARDS[1] or {}).n) .. ".jpg" .. CARDS_VERSION
+    WebRequest.get(probe, function(req)
+      busy = false
+      st.upright = (not req.is_error) and #tostring(req.text or "") > 2000
+      st.probed = true
+      say(st.upright and "upright plane pictures found." or "no upright plane pictures yet: using Scryfall's sideways ones (zoom shows them sideways).", INFO)
+      Planechase.build(color)
+    end)
+    return
+  end
   local list = {}
   for _, c in ipairs(PLANECHASE_CARDS or {}) do
     if (c.g ~= "who" or st.noWho ~= true) and (c.t ~= "Phenomenon" or st.noPhenomena ~= true) then
@@ -329,7 +386,7 @@ function Planechase.build(color)
     table.insert(list, table.remove(list, 1))
   end
   local deck = { Name = "Deck", Transform = { posX = 0, posY = 0, posZ = 0, rotX = 0, rotY = yaw(), rotZ = 180,
-      scaleX = CARD_SCALE, scaleY = 1, scaleZ = CARD_SCALE },
+      scaleX = cardScale(), scaleY = 1, scaleZ = cardScale() },
     Nickname = "Planar Deck", DeckIDs = {}, CustomDeck = {}, ContainedObjects = {}, Tags = { "PlanarCard" } }
   for i, c in ipairs(list) do
     local cd = cardData(c, i)
@@ -515,6 +572,7 @@ end
 
 function Planechase.stow(color)
   clearTable()
+  data().probed = false
   rolling = false
   data().aether = false
   busy = false

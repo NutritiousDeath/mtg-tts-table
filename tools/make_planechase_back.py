@@ -38,7 +38,7 @@ g.ellipse([W / 2 - 150, H / 2 - 150, W / 2 + 150, H / 2 + 150], outline=CYAN, wi
 g.ellipse([W / 2 - 100, H / 2 - 100, W / 2 + 100, H / 2 + 100], outline=CYAN, width=3)
 import math
 for a in (45, 135, 225, 315, 90, 270):
-    r0, r1 = 150, 230
+    r0, r1 = 150, 235
     g.line([(W / 2 + r0 * math.cos(math.radians(a)), H / 2 + r0 * math.sin(math.radians(a))),
             (W / 2 + r1 * math.cos(math.radians(a)), H / 2 + r1 * math.sin(math.radians(a)))], fill=CYAN, width=4)
 blur = glow.filter(ImageFilter.GaussianBlur(10))
@@ -47,14 +47,10 @@ from PIL import ImageChops
 img = ImageChops.add(img, blur)
 img = ImageChops.add(img, glow.point(lambda v: int(v * 0.85)))
 d = ImageDraw.Draw(img)
-text = "PLANAR"
-f = font(74)
+text = "PLANECHASE"
+f = font(78)
 bb = d.textbbox((0, 0), text, font=f)
-d.text(((W - (bb[2] - bb[0])) / 2, H / 2 - 48), text, font=f, fill=(225, 250, 255))
-f2 = font(30, 600)
-t2 = "PLANECHASE"
-bb = d.textbbox((0, 0), t2, font=f2)
-d.text(((W - (bb[2] - bb[0])) / 2, H / 2 + 46), t2, font=f2, fill=CYAN)
+d.text(((W - (bb[2] - bb[0])) / 2, H / 2 - (bb[3] - bb[1]) / 2 - bb[1]), text, font=f, fill=(225, 250, 255))
 os.makedirs(OUT, exist_ok=True)
 img.save(os.path.join(OUT, "back.png"))
 print("back.png written")
