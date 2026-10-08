@@ -122,6 +122,17 @@ function Effects.parse(text, sourceName)
       t = t:sub(1, a - 1) .. t:sub(a + #lm)
     end
   end
+  -- Aetherflux Reservoir: "You gain 1 life for each spell you've cast this
+  -- turn." The table counts the spells itself.
+  local perSpell = false
+  for _, ap in ipairs({ "'", "\226\128\153" }) do
+    local phrase = " for each spell you" .. ap .. "ve cast this turn"
+    local a = t:find(phrase, 1, true)
+    if a then
+      perSpell = true
+      t = t:sub(1, a - 1) .. t:sub(a + #phrase)
+    end
+  end
   -- Sentence by sentence: one with a condition ("Then if you control four
   -- or more lands, untap that land.") is left to the players; the plain
   -- sentences around it still happen.
@@ -229,11 +240,18 @@ function Effects.parse(text, sourceName)
   add("lose", "targetOpponent", num(w))
   w = t:match("deals (%w+) damage to target player")
   add("lose", "target", num(w))
+  -- Aetherflux Reservoir: "deals 50 damage to any target". A player loses
+  -- the life here; a creature or planeswalker is handled by hand.
+  w = t:match("deals (%w+) damage to any target")
+  add("lose", "any", num(w))
   -- Nekusar: "that player draws an additional card".
   w = t:match("that player draws (%w+) additional cards?")
   add("draw", "that", num(w))
   w = t:match("you gain (%w+) life") or t:match("you may gain (%w+) life")
   add("gain", "you", num(w))
+  if perSpell and actions[#actions] and actions[#actions].what == "gain" then
+    actions[#actions].perSpell = true
+  end
   w = t:match("you lose (%w+) life")
   add("lose", "you", num(w))
   -- "As an additional cost to cast this spell, pay 3 life" (X filled in).
@@ -700,8 +718,14 @@ local function describe(a, target, controller)
     return "it goes " .. a.n .. "th from the top of the library"
   end
   if a.what == "gain" then
+    if a.perSpell then
+      return who .. (you and " gain " or " gains ") .. a.n .. " life for each spell cast this turn"
+    end
     return who .. (you and " gain " or " gains ") .. a.n .. " life"
   elseif a.what == "lose" then
+    if target == "other" then
+      return a.n .. " damage to a creature or planeswalker (by hand)"
+    end
     return who .. (you and " lose " or " loses ") .. a.n .. " life"
   end
   return who .. (you and " draw " or " draws ") .. a.n
@@ -725,13 +749,22 @@ local function apply(it, plan, target)
       seats = players()
     elseif a.who == "that" then
       seats = { it.that or target }
+    elseif a.who == "any" and target == "other" then
+      seats = {}
+      printToAll("MTG > " .. it.name .. ": " .. a.n .. " damage to a creature or planeswalker: change its damage / loyalty by hand.", INFO)
     else
       seats = { target }
     end
     for _, seat in ipairs(seats) do
       if seat and GameState.player(seat) then
         if a.what == "gain" then
-          Trackers.changeLife(seat, a.n, it.name)
+          local gain = a.n
+          if a.perSpell then
+            gain = a.n * math.max(1, Effects.spellsThisTurn(controller))
+            printToAll("MTG > " .. it.name .. ": " .. controller .. " has cast " .. math.max(1, Effects.spellsThisTurn(controller))
+              .. " spell(s) this turn.", INFO)
+          end
+          Trackers.changeLife(seat, gain, it.name)
         elseif a.what == "lose" then
           Trackers.changeLife(seat, -a.n, it.name)
         elseif a.what == "draw" then
@@ -1250,7 +1283,7 @@ function Effects.resolve(it)
   end
   local needsTarget, oppOnly = false, false
   for _, a in ipairs(plan.actions) do
-    if a.who == "target" or a.who == "targetOpponent" or (a.who == "that" and it.that == nil) then
+    if a.who == "target" or a.who == "targetOpponent" or a.who == "any" or (a.who == "that" and it.that == nil) then
       needsTarget = true
       oppOnly = oppOnly or a.who == "targetOpponent"
     end
@@ -1267,11 +1300,18 @@ function Effects.resolve(it)
         table.insert(choices, c == seat and #choices + 1 or 1, { label = string.upper(c), value = c })
       end
     end
+    local anyTarget = false
+    for _, a in ipairs(plan.actions) do
+      anyTarget = anyTarget or a.who == "any"
+    end
+    if anyTarget then
+      table.insert(choices, { label = "CREATURE", value = "other" })
+    end
     table.insert(choices, { label = "SKIP", value = false })
     while #choices > MAX_CHOICES do
-      table.remove(choices, MAX_CHOICES)
+      table.remove(choices, #choices - (anyTarget and 2 or 1))
     end
-    ask(seat, it.name .. ": choose a player", tostring(it.text), choices, function(target)
+    ask(seat, it.name .. ": choose " .. (anyTarget and "a target" or "a player"), tostring(it.text), choices, function(target)
       if target then
         apply(it, plan, target)
       else
@@ -1332,6 +1372,29 @@ Events.on("spellCast", function(d)
   local n = d.card.getName()
   t[d.controller][n] = (t[d.controller][n] or 0) + 1
 end)
+
+-- Spells each seat has cast this turn (Aetherflux Reservoir).
+Events.on("spellCast", function(d)
+  if d.card == nil or d.controller == nil or GameState.data == nil then
+    return
+  end
+  local turn = (GameState.data.turn or {}).number or 0
+  local c = GameState.data.castTurn
+  if c == nil or c.turn ~= turn then
+    c = { turn = turn }
+    GameState.data.castTurn = c
+  end
+  c[d.controller] = (c[d.controller] or 0) + 1
+end)
+
+function Effects.spellsThisTurn(seat)
+  local c = (GameState.data or {}).castTurn
+  local turn = ((GameState.data or {}).turn or {}).number or 0
+  if c == nil or c.turn ~= turn then
+    return 0
+  end
+  return c[seat] or 0
+end
 
 function Effects.castCount(seat, name)
   local t = GameState.data.castNames or {}

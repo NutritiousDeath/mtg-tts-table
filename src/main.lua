@@ -85,7 +85,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.15 (tutors on top, no click-past, Raph & Mikey, tapped and attacking)"
+SCRIPT_VERSION = "1.16 (Aetherflux Reservoir: spells this turn, any-target damage)"
 
 function onLoad(saved)
   GameLog.setup()
