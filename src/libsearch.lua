@@ -165,6 +165,16 @@ function LibSearch.run(color)
       hay = nil
     end
     local ok = hay ~= nil
+    if ok and f and f.anyOf then
+      -- "an instant or sorcery card": any one of the types will do.
+      ok = false
+      for _, ty in ipairs(f.anyOf) do
+        if hay:find(ty, 1, true) then
+          ok = true
+        end
+      end
+      want = {}
+    end
     for _, w in ipairs(ok and want or {}) do
       if not hay:find(w, 1, true) then
         ok = false
@@ -206,9 +216,12 @@ function LibSearch.run(color)
   render(color, guids, faces, #entries, #matches)
 end
 
+local held = {}   -- [color] = card taken to go on top of the library after the shuffle
+
 local function renderDest(color)
   local d = dest[color] or { where = "hand" }
-  local label = d.where == "battlefield" and ("TO: BATTLEFIELD" .. (d.tapped and " (T)" or "")) or "TO: HAND"
+  local label = d.where == "top" and "TO: TOP OF LIBRARY"
+    or (d.where == "battlefield" and ("TO: BATTLEFIELD" .. (d.tapped and " (T)" or "")) or "TO: HAND")
   UI.setValue("lsDest_" .. color, label)
   UI.setAttribute("lsDestBtn_" .. color, "color", d.where == "battlefield" and "#1B5A3A" or "#2A3346")
 end
@@ -218,6 +231,9 @@ function ui_libDest(player, c)
     return
   end
   local d = dest[c] or { where = "hand" }
+  if d.where == "top" then
+    return   -- fixed by the card ("put that card on top")
+  end
   d.where = d.where == "hand" and "battlefield" or "hand"
   if d.where == "hand" then
     d.tapped = false
@@ -285,10 +301,20 @@ function LibSearch.close(color, quiet)
       printToAll("MTG > " .. color .. " finished searching and shuffled their library.", INFO)
     end
   end
+  -- "...then shuffle and put that card on top": after the shuffle.
+  local h = held[color]
+  held[color] = nil
+  if h and not h.isDestroyed() then
+    Wait.time(function()
+      if not h.isDestroyed() then
+        Library.putAt(color, h, 0)
+      end
+    end, 1.2)
+  end
 end
 
 -- Take a shown card: to the hand, or onto the battlefield (face up).
-local function take(color, slot, toBattlefield, tapped)
+local function take(color, slot, toBattlefield, tapped, toTop)
   local key = shown[color] and shown[color][slot]
   local lib = pileFor(color)
   local fromWhere = zoneOf[color] == "graveyard" and "graveyard" or "library"
@@ -298,7 +324,19 @@ local function take(color, slot, toBattlefield, tapped)
   local index = tonumber(key) - 1         -- takeObject wants the 0-based index
   local s = TableSetup.seat(color)
   local name = "a card"
-  if toBattlefield then
+  if toTop then
+    if lib.type == "Deck" then
+      local card = lib.takeObject({ index = index, position = TableSetup.slot(color, "library", 3),
+        rotation = { 0, s.yaw, 0 }, smooth = true })
+      if card then
+        held[color] = card
+        name = card.getName()
+      end
+    else
+      name = lib.getName()   -- the only card: it is already on top
+    end
+    printToAll("MTG > " .. color .. " reveals " .. name .. " and will put it on top of their library after the shuffle.", INFO)
+  elseif toBattlefield then
     local pos = TableSetup.slot(color, "battlefield", 2)
     if lib.type == "Deck" then
       local yaw = tapped and (s.yaw + 90) % 360 or s.yaw
@@ -406,7 +444,7 @@ function ui_libPick(player, arg)
     return
   end
   local d = dest[c] or { where = "hand" }
-  take(c, tonumber(i), d.where == "battlefield", d.tapped)
+  take(c, tonumber(i), d.where == "battlefield", d.tapped, d.where == "top")
 end
 
 -- Right-click menu on the library deck.

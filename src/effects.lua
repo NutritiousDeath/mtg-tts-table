@@ -278,6 +278,20 @@ function Effects.parse(text, sourceName)
         q = ty
       end
     end
+    -- "an instant or sorcery card": more than one type joined by "or".
+    local anyOf
+    if phrase:find(" or ", 1, true) then
+      local found = {}
+      for _, ty in ipairs({ "land", "creature", "artifact", "enchantment", "planeswalker", "instant", "sorcery" }) do
+        if phrase:find(ty, 1, true) then
+          table.insert(found, ty)
+        end
+      end
+      if #found > 1 then
+        anyOf = found
+        q = table.concat(found, " or ")
+      end
+    end
     if q and phrase:find("basic", 1, true) then
       q = "basic " .. q
     end
@@ -288,10 +302,16 @@ function Effects.parse(text, sourceName)
     local bf = rest:find("onto the battlefield", 1, true) ~= nil
     local hand = rest:find("into your hand", 1, true) ~= nil
     local where = (bf and hand) and "both" or (bf and "battlefield" or "hand")
+    -- Tutors: "...then shuffle and put that card on top".
+    local top = (t:find("put that card on top", a, true) or t:find("put it on top", a, true)
+      or t:find("on top of your library", a, true)) ~= nil and not bf and not hand
+    if top then
+      where = "top"
+    end
     local mvMin = tonumber(rest:match("mana value (%d+) or greater") or "")
     local mvMax = tonumber(rest:match("mana value (%d+) or less") or "")
     table.insert(actions, { what = "search", who = "you", n = 1, query = q, where = where, mvMin = mvMin, mvMax = mvMax,
-      tapped = rest:find("battlefield tapped", 1, true) ~= nil, phrase = phrase })
+      tapped = rest:find("battlefield tapped", 1, true) ~= nil, phrase = phrase, anyOf = anyOf })
   end
   -- "untap it" / "untap that permanent" (Amulet of Vigor): the card the
   -- trigger was about.
@@ -367,7 +387,11 @@ function Effects.parse(text, sourceName)
           end
         end
         if #spec.words > 0 then
-          table.insert(actions, { what = "token", who = "you", n = n, spec = spec, phrase = phrase })
+          -- "...tokens that are tapped and attacking" (Hero of Bladehold).
+          local sentence = rest:sub(1, (rest:find(".", 1, true) or #rest + 1) - 1)
+          local atk = sentence:find("tapped and attacking", 1, true) ~= nil
+          table.insert(actions, { what = "token", who = "you", n = n, spec = spec, phrase = phrase,
+            attacking = atk, tapped = atk or sentence:find("tapped", 1, true) ~= nil })
         end
       end
     end
@@ -495,6 +519,19 @@ function Effects.parse(text, sourceName)
       table.insert(actions, { what = "exileCast", who = "you", n = 1, everyone = true, untilNonland = false })
     end
   end
+  -- "Reveal cards from the top of your library until you reveal a creature
+  -- card. Put that card onto the battlefield tapped and attacking. Put the
+  -- rest on the bottom of your library in a random order." (Raph & Mikey)
+  do
+    local ty = t:match("reveal cards from the top of your library until you reveal an? (%a+) card")
+    if ty then
+      local toHand = t:find("into your hand", 1, true) ~= nil
+      table.insert(actions, { what = "revealUntil", who = "you", n = 1, type = ty,
+        where = toHand and "hand" or "battlefield",
+        attacking = t:find("tapped and attacking", 1, true) ~= nil,
+        tapped = t:find("tapped and attacking", 1, true) ~= nil or t:find("battlefield tapped", 1, true) ~= nil })
+    end
+  end
   -- "they get that many poison counters" (Etali, Primal Sickness).
   if t:find("get that many poison counters", 1, true) or t:find("gets that many poison counters", 1, true) then
     table.insert(actions, { what = "poison", who = "that", n = 1, fromTrigger = true })
@@ -583,7 +620,7 @@ function Effects.parse(text, sourceName)
   end
   -- Etali: the exile happens; only the casting is optional (asked per card).
   for _, act in ipairs(actions) do
-    if act.what == "exileCast" or act.what == "untapAttacker" then
+    if act.what == "exileCast" or act.what == "untapAttacker" or act.what == "revealUntil" then
       optional = false
     end
   end
@@ -644,6 +681,9 @@ local function describe(a, target, controller)
     return who .. " " .. a.kind .. "s the top card"
   elseif a.what == "win" then
     return who .. " wins the game"
+  elseif a.what == "revealUntil" then
+    return who .. " reveal cards until a " .. tostring(a.type) .. " and put it "
+      .. (a.where == "hand" and "into their hand" or ("onto the battlefield" .. (a.attacking and " tapped and attacking" or "")))
   elseif a.what == "exileCast" then
     return who .. " exiles cards and may cast them free"
   elseif a.what == "poison" then
@@ -703,12 +743,14 @@ local function apply(it, plan, target)
               .. ", then switch TO: HAND for the other one"
           elseif a.where == "battlefield" then
             how = "click a card to put it onto the battlefield" .. (a.tapped and " tapped" or "")
+          elseif a.where == "top" then
+            how = "click the card: it is revealed and goes on top of your library after the shuffle"
           else
             how = "click a card to put it into your hand"
           end
-          LibSearch.open(seat, a.query, it.name .. " (" .. tostring(a.phrase) .. "): " .. how .. ", then CLOSE + SHUFFLE.",
-            a.where == "hand" and "hand" or "battlefield", a.tapped,
-            { typeOnly = true, mvMin = a.mvMin, mvMax = a.mvMax })
+          LibSearch.open(seat, a.query, it.name .. " (" .. tostring(a.phrase) .. "): " .. how .. (a.where == "top" and "." or ", then CLOSE + SHUFFLE."),
+            (a.where == "hand" or a.where == "top") and a.where or "battlefield", a.tapped,
+            { typeOnly = true, mvMin = a.mvMin, mvMax = a.mvMax, anyOf = a.anyOf, limit = a.where == "top" and 1 or nil })
         elseif a.what == "counter" then
           local src = it.source and getObjectFromGUID(it.source)
           if src and not src.isDestroyed() then
@@ -719,7 +761,8 @@ local function apply(it, plan, target)
         elseif a.what == "bounce" then
           Effects.pickBounce(seat, a, it.name)
         elseif a.what == "token" then
-          Tokens.create(seat, a.spec, a.n, it.name)
+          Tokens.create(seat, a.spec, a.n, it.name,
+            (a.tapped or a.attacking) and { tapped = a.tapped, attacking = a.attacking, from = it.thatCard or it.source } or nil)
         elseif a.what == "amass" then
           Effects.amass(seat, a.kind, a.n, it.name)
         elseif a.what == "pump" then
@@ -742,6 +785,8 @@ local function apply(it, plan, target)
           Effects.pickSacrifice(seat, a, it)
         elseif a.what == "poison" then
           Trackers.changePoison(seat, a.fromTrigger and (it.amount or 0) or a.n, it.name)
+        elseif a.what == "revealUntil" then
+          Effects.revealUntil(seat, a, it)
         elseif a.what == "exileCast" then
           Effects.exileCast(seat, a, it)
         elseif a.what == "untapAttacker" then
@@ -2013,5 +2058,42 @@ function Effects.returnExiledWith(seat, a, it)
   end
   ask(seat, it.name .. ": choose a card to put onto the battlefield", table.concat(lines, "\n"), choices, function(i)
     put(cards[i])
+  end)
+end
+
+
+-- Reveal from the top until a card of the type; it goes to the battlefield
+-- (tapped and attacking: it joins the attack) or your hand; the rest go on
+-- the bottom in a random order.
+function Effects.revealUntil(seat, a, it)
+  Library.revealUntil(seat, a.type, function(found, others)
+    if found == nil then
+      printToAll("MTG > " .. seat .. " revealed " .. #others .. " cards and found no " .. tostring(a.type) .. " (" .. it.name .. ").", INFO)
+    else
+      printToAll("MTG > " .. seat .. " reveals " .. #others + 1 .. " cards and finds " .. found.getName() .. " (" .. it.name .. ").", GOOD)
+      found.setLock(false)
+      local s = TableSetup.seat(seat)
+      if a.where == "hand" then
+        found.setPosition(Player[seat].getHandTransform().position)
+        Wait.time(function()
+          if not found.isDestroyed() then Zones.refresh(found) end
+        end, 1)
+      else
+        found.setRotation({ 0, a.tapped and (s.yaw + 90) % 360 or s.yaw, 0 })
+        found.setPosition(TableSetup.slot(seat, "battlefield", 2))
+        Wait.time(function()
+          if found.isDestroyed() then
+            return
+          end
+          Zones.refresh(found)
+          if a.attacking then
+            Wait.time(function()
+              Combat.enterAttacking(found, seat, it.thatCard or it.source)
+            end, 0.6)
+          end
+        end, 1.2)
+      end
+    end
+    Library.putBottomRandom(seat, others)
   end)
 end

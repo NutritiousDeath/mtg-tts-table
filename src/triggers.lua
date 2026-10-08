@@ -299,6 +299,10 @@ local function parseCombat(p)
   local function add(t)
     table.insert(out, t)
   end
+  -- Names that read as plural ("Raph & Mikey attack"): same trigger.
+  if plainFind(p, "whenever ~ attack,") or plainFind(p, "whenever ~ attack ") then
+    add({ kind = "attacks", self = true })
+  end
   if plainFind(p, "whenever ~ attacks") or plainFind(p, "whenever ~ enters or attacks")
       or plainFind(p, "~ enters the battlefield or attacks") or plainFind(p, "whenever ~ and at least") then
     add({ kind = "attacks", self = true })

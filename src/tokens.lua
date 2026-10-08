@@ -132,7 +132,7 @@ function Tokens.search(color, query)
 end
 
 -- Put n copies of a token onto the seat's battlefield, face up, in a row.
-function Tokens.spawn(color, r, n)
+function Tokens.spawn(color, r, n, opts)
   local s = TableSetup.seat(color)
   local base = TableSetup.slot(color, "battlefield", 2)
   for k = 1, n do
@@ -145,10 +145,18 @@ function Tokens.spawn(color, r, n)
     spawnObjectJSON({
       json = json,
       position = pos,
-      rotation = { 0, s.yaw, 0 },
+      rotation = { 0, opts and opts.tapped and (s.yaw + 90) % 360 or s.yaw, 0 },
       callback_function = function(obj)
         obj.setName(r.name)
         Zones.refresh(obj)
+        -- Tapped and attacking: joins the attack (no attack triggers).
+        if opts and opts.attacking and Combat and Combat.enterAttacking then
+          Wait.time(function()
+            if not obj.isDestroyed() then
+              Combat.enterAttacking(obj, color, opts.from)
+            end
+          end, 0.6)
+        end
       end,
     })
   end
@@ -219,11 +227,11 @@ local function best(list, spec)
   return top
 end
 
-function Tokens.create(color, spec, n, sourceName)
+function Tokens.create(color, spec, n, sourceName, opts)
   local p = GameState.player(color)
   local fromDeck = best(p and p.deckTokens or {}, spec)
   if fromDeck then
-    Tokens.spawn(color, fromDeck, n)
+    Tokens.spawn(color, fromDeck, n, opts)
     return
   end
   local query = ((spec.pt or "") .. " " .. table.concat(spec.words, " ")):gsub("^%s+", "")
@@ -243,7 +251,7 @@ function Tokens.create(color, spec, n, sourceName)
         .. "\" token. Make it with your TOKENS tile.", color, { 1, 0.6, 0.2 })
       return
     end
-    Tokens.spawn(color, r, n)
+    Tokens.spawn(color, r, n, opts)
   end)
 end
 

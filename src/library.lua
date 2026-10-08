@@ -460,6 +460,79 @@ function Library.exileUntilNonland(color, onlyOne, onDone)
   step()
 end
 
+-- Reveal cards from the top until one has the type (a creature card...):
+-- the cards are laid next to the library face up. onDone(found, others).
+function Library.revealUntil(color, typeName, onDone)
+  if #libraryPiles(color) > 1 then
+    Library.consolidate(color, function() Library.revealUntil(color, typeName, onDone) end)
+    return
+  end
+  local s = TableSetup.seat(color)
+  local count, found, others = 0, nil, {}
+  local want = tostring(typeName or ""):lower()
+  local function finish()
+    if onDone then onDone(found, others) end
+  end
+  local function step()
+    local lib = Library.find(color)
+    if lib == nil then
+      finish()
+      return
+    end
+    count = count + 1
+    local pos = TableSetup.slot(color, "library", 3 + count * 0.3)
+    local function got(card)
+      local match = false
+      pcall(function()
+        local d = JSON.decode(card.getGMNotes())
+        for _, t in ipairs(type(d) == "table" and d.types or {}) do
+          if tostring(t):lower() == want then
+            match = true
+          end
+        end
+      end)
+      if match then
+        found = card
+        finish()
+      else
+        table.insert(others, card)
+        step()
+      end
+    end
+    if lib.type == "Deck" then
+      lib.takeObject({ index = 0, position = pos, rotation = { 0, s.yaw, 0 }, smooth = false, callback_function = got })
+    else
+      lib.setPosition(pos)
+      lib.setRotation({ 0, s.yaw, 0 })
+      got(lib)
+    end
+  end
+  step()
+end
+
+-- Put these cards on the bottom of the library in a random order.
+function Library.putBottomRandom(color, cards, onDone)
+  local list = {}
+  for _, c in ipairs(cards) do
+    if c ~= nil and not c.isDestroyed() then
+      table.insert(list, c)
+    end
+  end
+  -- Shuffle the order.
+  for i = #list, 2, -1 do
+    local j = math.random(i)
+    list[i], list[j] = list[j], list[i]
+  end
+  local function nextCard(i)
+    if i > #list then
+      if onDone then onDone() end
+      return
+    end
+    Library.putAt(color, list[i], 100000, function() nextCard(i + 1) end)
+  end
+  nextCard(1)
+end
+
 -- Put a card into the library at depth (0 = top): Approach of the Second
 -- Sun goes 7th from the top. The deck is rebuilt with the card in place.
 function Library.putAt(color, card, depth, onDone)
@@ -500,7 +573,7 @@ function Library.putAt(color, card, depth, onDone)
   local pos, rot = lib.getPosition(), lib.getRotation()
   lib.destruct()
   printToAll("MTG > " .. tostring(cd.Nickname or "A card") .. " went into " .. color .. "'s library, "
-    .. (depth + 1) .. " from the top.", { 0.75, 0.8, 0.9 })
+    .. (at >= #data.ContainedObjects and "on the bottom." or (at .. " from the top.")), { 0.75, 0.8, 0.9 })
   spawnObjectData({ data = data, position = pos, rotation = rot,
     callback_function = function(obj) if onDone then onDone(obj) end end })
 end

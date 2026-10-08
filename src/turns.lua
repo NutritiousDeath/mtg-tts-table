@@ -480,7 +480,7 @@ local function requestMove(kind)
     -- Priority protection in combat: nobody clicks past the players still
     -- being asked (!forcepass if someone is away).
     if Turns.protected() then
-      broadcastToColor("Waiting on " .. tostring(t.pending.queue[t.pending.at]) .. " to answer (combat: no skipping)."
+      broadcastToColor("Waiting on " .. tostring(t.pending.queue[t.pending.at]) .. " to answer (no skipping)."
         .. " Type !forcepass if they're away.", t.activeSeat, WARN)
       return
     end
@@ -535,7 +535,7 @@ function Turns.ask(from, text, label, onAllPass)
   if t.pending then
     if t.pending.kind == "ask" and t.pending.from == from then
       if Turns.protected() then
-        broadcastToColor("Waiting on " .. tostring(t.pending.queue[t.pending.at]) .. " to answer (combat: no skipping)."
+        broadcastToColor("Waiting on " .. tostring(t.pending.queue[t.pending.at]) .. " to answer (no skipping)."
           .. " Type !forcepass if they're away.", from, WARN)
         return
       end
@@ -568,12 +568,11 @@ function Turns.ask(from, text, label, onAllPass)
   promptNext()
 end
 
--- Combat steps: the wait for answers can't be clicked through.
-local COMBAT_STEPS = { combat = true, attackers = true, blockers = true, damage = true, endcombat = true }
+-- The wait for answers can't be clicked through, in any step: whoever is
+-- being asked decides (or someone types !forcepass if they're away).
 function Turns.protected()
   local t = turn()
-  return GameState.data.started and t.stepIndex ~= nil and Turns.STEPS[t.stepIndex] ~= nil
-    and COMBAT_STEPS[Turns.STEPS[t.stepIndex].id] == true
+  return GameState.data.started == true and t.stepIndex ~= nil and Turns.STEPS[t.stepIndex] ~= nil
 end
 
 -- !forcepass: move on now (someone isn't answering).

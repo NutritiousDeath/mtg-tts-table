@@ -85,7 +85,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.14 (safe save, reports bad state)"
+SCRIPT_VERSION = "1.15 (tutors on top, no click-past, Raph & Mikey, tapped and attacking)"
 
 function onLoad(saved)
   GameLog.setup()

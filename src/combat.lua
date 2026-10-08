@@ -1230,6 +1230,42 @@ function combat_cardClick(card, color, alt)
   end
 end
 
+-- A creature put onto the battlefield tapped and attacking (Hero of Bladehold's
+-- tokens, Raph & Mikey...): it is an attacker now, but was never declared as
+-- one, so attack triggers don't fire. It attacks `target` (default: what the
+-- creature that put it there attacks). Needs the attack step.
+function Combat.enterAttacking(card, seat, from)
+  local c = GameState.data.combat
+  if card == nil or card.isDestroyed() then
+    return false
+  end
+  if c == nil or (stepId() ~= "attackers" and stepId() ~= "blockers") then
+    broadcastToColor(card.getName() .. " enters attacking, but there is no attack going on: do it by hand.", seat, WARN)
+    return false
+  end
+  local target = from and c.attackers[from]
+  if target == nil then
+    for _, g in ipairs(c.order) do
+      if live(g) then
+        target = c.attackers[g]
+        break
+      end
+    end
+  end
+  if target == nil then
+    broadcastToColor(card.getName() .. " enters attacking: choose who it attacks by hand.", seat, WARN)
+    return false
+  end
+  local guid = card.getGUID()
+  c.attackers[guid] = target
+  table.insert(c.order, guid)
+  c.gone[guid] = nil
+  tap(card)
+  redraw(card)
+  broadcastToAll(card.getName() .. " enters tapped and attacking " .. tostring(targetLabel(target)) .. ".", { 0.9, 0.5, 0.5 })
+  return true
+end
+
 -- A blocker that can block an additional creature (Palace Guard and the like).
 function Combat.alsoBlock(card, color)
   local c = state()
