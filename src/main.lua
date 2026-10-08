@@ -89,7 +89,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.19 (Planechase: chest, planar deck, planar die)"
+SCRIPT_VERSION = "1.19 (Planechase: unpack / pack up, hand-rolled planar die)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -158,6 +158,13 @@ end
 -- Someone joined the game: make sure they get their seat-only panels.
 function onPlayerConnect(player)
   Wait.time(function() TableUI.refreshVisibility() end, 1)
+end
+
+-- Someone rolled a die: the planar die is handled by planechase.lua.
+function onObjectRandomize(obj, color)
+  if Planechase and obj and obj.hasTag and obj.hasTag("PlanarDie") then
+    Planechase.onRolled(obj, color)
+  end
 end
 
 -- Card movement tracking (zones.lua).

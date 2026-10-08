@@ -1,14 +1,18 @@
 --[[
   planechase.lua
   Planechase for the table. A stone treasure chest (the table frame's stone)
-  sits in the empty corner between White and Blue. Its lid has four buttons:
+  sits in the empty corner between White and Blue. Its lid has two buttons:
 
-    BUILD  shuffle the planar deck (all planes and Phenomena) into the
-           middle of the table and turn the first plane face up
-    ROLL   the active player rolls the planar die: the first roll each turn
-           is free, every extra roll costs one more mana than the last
-    WALK   planeswalk by hand (effects that say "planeswalk")
-    STOW   put the planar deck and the die away
+    UNPACK   shuffle the planar deck (all planes and Phenomena) into the
+             middle of the table, turn the first plane face up and put the
+             planar die out beside the chest
+    PACK UP  put the planar deck, the plane and the die away
+
+  Roll the planar die by hand (pick it up and drop it, or right-click it >
+  Roll). The table watches it: the first roll each turn is free, every extra
+  roll costs one more mana than the last; a planeswalk or chaos result is
+  carried out by itself. Right-click the plane card > Planeswalk for effects
+  that say "planeswalk".
 
   The table does the rest: the old plane goes to the bottom of the planar
   deck and the next card turns face up; "When you planeswalk to ..." and
@@ -18,8 +22,11 @@
   The planes' always-on abilities (static ones and "At the beginning of ...")
   are printed in the chat when a plane turns up: players apply those.
 
-  Chat: !planechase  (help), !planechase build | roll | walk | stow | turn
+  Chat: !planechase  (help), !planechase unpack | pack | roll | walk | turn
         ("turn" swaps which way the plane cards face, if they read upside down)
+
+  The plane pictures are Scryfall's upright landscape images, so zooming a
+  card works like any other card.
 
   Cards come from planechase_data.lua (tools/make_planechase_data.py).
 --]]
@@ -32,17 +39,18 @@ local VERSION = "?v=1"
 local DIE_IMAGE = "https://i.imgur.com/ptrUeHV.jpg"
 
 local CHEST = { x = 38, z = -38, yaw = 135 }       -- between White (south) and Blue (east)
-local DECK_AT = { x = -8.5, z = 3.4 }              -- west of the stack mat
-local PLANE_AT = { x = -8.5, z = -3.4 }
-local LAND = { x = 31, z = -31 }                    -- the die lands in front of the chest
-local CARD_SCALE = 1.6
-local YAW = 270                                     -- plane cards are landscape pictures turned sideways
+local DECK_AT = { x = -8.5, z = 3.8 }              -- west of the stack mat
+local PLANE_AT = { x = -8.5, z = -3.8 }
+local LAND = { x = 31, z = -31 }                    -- the planar die waits in front of the chest
+local CARD_SCALE = 1.4
+local YAW = 180                                     -- landscape plane cards, readable from White (like cards at that seat)
 local ID_BASE = 31000
 local INFO, GOOD, WARN = { 0.75, 0.8, 0.9 }, { 0.3, 1, 0.6 }, { 1, 0.6, 0.2 }
 local CYAN = { 0.35, 0.95, 1 }
 
 local byName = {}
 local busy = false
+local putDie   -- defined below
 
 local function data()
   local d = GameState.data
@@ -161,10 +169,18 @@ local function putBottom(deckObj, card, cb)
 end
 
 -- Take the top card and lay it face up on the plane spot.
+local function planeMenu(card)
+  pcall(function()
+    card.clearContextMenu()
+    card.addContextMenuItem("Planeswalk", function(color) Planechase.planeswalk(color) end)
+  end)
+end
+
 local function turnTop(deckObj, cb)
   local function taken(card)
     card.setScale({ CARD_SCALE, 1, CARD_SCALE })
     card.addTag("PlanarCard")
+    planeMenu(card)
     if cb then cb(card) end
   end
   if deckObj.type == "Deck" then
@@ -282,7 +298,7 @@ function Planechase.build(color)
     return
   end
   if findDeck() or findPlane() then
-    broadcastToColor("A planar deck is already out. Click STOW first to put it away.", color, WARN)
+    broadcastToColor("The planar deck is already out. Click PACK UP first to put it away.", color, WARN)
     return
   end
   buildIndex()
@@ -334,6 +350,7 @@ function Planechase.build(color)
           busy = false
           st.aether = false
           arrived(card, color, true)
+          putDie()
         end)
       end, 0.8)
     end })
@@ -345,7 +362,7 @@ function Planechase.planeswalk(color, quiet)
   end
   local deck, plane = findDeck(), findPlane()
   if deck == nil and plane == nil then
-    broadcastToColor("No planar deck yet: click BUILD on the chest.", color, WARN)
+    broadcastToColor("No planar deck yet: click UNPACK on the Planechase chest.", color, WARN)
     return
   end
   busy = true
@@ -387,29 +404,68 @@ local function dieValueText(v, aether)
   return "blank"
 end
 
-function Planechase.roll(color)
-  if busy then
+local function findDie()
+  for _, o in ipairs(getObjectsWithTag("PlanarDie")) do
+    if not o.isDestroyed() then
+      return o
+    end
+  end
+  return nil
+end
+
+putDie = function(cb)
+  local die = findDie()
+  if die then
+    if cb then cb(die) end
     return
   end
+  spawnObjectData({
+    data = {
+      Name = "Custom_Dice",
+      Transform = { posX = 0, posY = 0, posZ = 0, rotX = 0, rotY = 0, rotZ = 0, scaleX = 1.65, scaleY = 1.65, scaleZ = 1.65 },
+      Nickname = "Planar Die",
+      Description = "Roll it by hand: chaos or planeswalk happens by itself. First roll each turn is free, then 1, 2, 3 mana...",
+      ColorDiffuse = { r = 1, g = 1, b = 1 },
+      CustomImage = { ImageURL = DIE_IMAGE, ImageSecondaryURL = "", ImageScalar = 1, WidthScale = 0,
+        CustomDice = { Type = 1 } },
+      Tags = { "PlanarDie" },
+    },
+    position = { LAND.x, TableSetup.SURFACE_TOP + 3, LAND.z },
+    callback_function = function(o)
+      o.addTag("PlanarDie")
+      if cb then cb(o) end
+    end,
+  })
+end
+
+local rollBy, rolling = nil, false
+
+-- The planar die was rolled (by hand or by !planechase roll).
+function Planechase.onRolled(die, color)
+  if die == nil or die.isDestroyed() or not die.hasTag("PlanarDie") or rolling then
+    return
+  end
+  color = rollBy or color or "White"
+  rollBy = nil
   local st = data()
   local plane = findPlane()
   if plane == nil then
-    broadcastToColor("No plane in play: click BUILD on the chest first.", color, WARN)
+    broadcastToColor("No plane in play: UNPACK the Planechase chest first.", color, WARN)
     return
   end
   local t = GameState.data.turn
   if GameState.data.started and not GameState.solo() and t then
-    if color ~= t.activeSeat then
-      broadcastToColor("Only the active player (" .. tostring(t.activeSeat) .. ") rolls the planar die, on their turn.", color, WARN)
-      return
-    end
+    local problem
     local step = Turns and Turns.STEPS and Turns.STEPS[t.stepIndex or 1]
-    if step and step.id ~= "main1" and step.id ~= "main2" then
-      broadcastToColor("Roll the planar die in a main phase, when the stack is empty.", color, WARN)
-      return
+    if color ~= t.activeSeat then
+      problem = "Only the active player (" .. tostring(t.activeSeat) .. ") rolls the planar die, on their turn."
+    elseif step and step.id ~= "main1" and step.id ~= "main2" then
+      problem = "Roll the planar die in a main phase, when the stack is empty."
+    elseif not Stack.isEmpty() then
+      problem = "The stack isn't empty: roll after it resolves."
     end
-    if not Stack.isEmpty() then
-      broadcastToColor("The stack isn't empty: roll after it resolves.", color, WARN)
+    if problem then
+      say(color .. " rolled the planar die, but it doesn't count. " .. problem, WARN)
       return
     end
   end
@@ -420,64 +476,49 @@ function Planechase.roll(color)
   end
   local cost = st.rolls.n
   st.rolls.n = st.rolls.n + 1
-  busy = true
-  Wait.time(function() busy = false end, 15)
+  rolling = true
+  Wait.time(function() rolling = false end, 15)
   say(color .. " rolls the planar die" .. (cost == 0 and " (first roll this turn: free)." or (": pay " .. cost .. " mana for this roll.")), CYAN)
-  for _, o in ipairs(getObjectsWithTag("PlanarDie")) do
-    o.destruct()
+  Wait.condition(function()
+    rolling = false
+    if die.isDestroyed() then
+      return
+    end
+    local v = die.getValue()
+    say(color .. " rolled: " .. dieValueText(v, st.aether), v == 1 and GOOD or (v == 6 and CYAN or INFO))
+    local chaos = v == 6 or (st.aether and v ~= 1)
+    if v == 1 then
+      Planechase.planeswalk(color, true)
+    elseif chaos then
+      local text = chaosOf(plane)
+      if text then
+        push(activeSeat(color), plane.getName(), text)
+      else
+        say(plane.getName() .. " has no chaos ability.", INFO)
+      end
+    end
+  end, function() return die.isDestroyed() or (die.resting and not die.spawning) end, 10, function()
+    rolling = false
+  end)
+end
+
+-- !planechase roll: throw the die for the player.
+function Planechase.roll(color)
+  local die = findDie()
+  if die == nil then
+    broadcastToColor("No planar die out: UNPACK the Planechase chest first.", color, WARN)
+    return
   end
-  spawnObjectData({
-    data = {
-      Name = "Custom_Dice",
-      Transform = { posX = 0, posY = 0, posZ = 0, rotX = math.random(360), rotY = math.random(360), rotZ = math.random(360),
-        scaleX = 1.65, scaleY = 1.65, scaleZ = 1.65 },
-      Nickname = "Planar Die",
-      ColorDiffuse = { r = 1, g = 1, b = 1 },
-      CustomImage = { ImageURL = DIE_IMAGE, ImageSecondaryURL = "", ImageScalar = 1, WidthScale = 0,
-        CustomDice = { Type = 1 } },
-      Tags = { "PlanarDie" },
-    },
-    position = { LAND.x + math.random() * 2 - 1, TableSetup.SURFACE_TOP + 7, LAND.z + math.random() * 2 - 1 },
-    callback_function = function(die)
-      die.addTag("PlanarDie")
-      Wait.frames(function()
-        pcall(function() die.roll() end)
-        Wait.condition(function()
-          busy = false
-          if die.isDestroyed() then
-            return
-          end
-          local v = die.getValue()
-          say(color .. " rolled: " .. dieValueText(v, st.aether), v == 1 and GOOD or (v == 6 and CYAN or INFO))
-          local chaos = v == 6 or (st.aether and v ~= 1)
-          if v == 1 then
-            Planechase.planeswalk(color, true)
-          elseif chaos then
-            local text = chaosOf(plane)
-            if text then
-              push(activeSeat(color), plane.getName(), text)
-            else
-              say(plane.getName() .. " has no chaos ability.", INFO)
-            end
-          end
-          Wait.time(function()
-            if not die.isDestroyed() then
-              die.destruct()
-            end
-          end, 8)
-        end, function() return die.isDestroyed() or (die.resting and not die.spawning) end, 10, function()
-          busy = false
-        end)
-      end, 20)
-    end,
-  })
+  rollBy = color
+  pcall(function() die.roll() end)
 end
 
 function Planechase.stow(color)
   clearTable()
+  rolling = false
   data().aether = false
   busy = false
-  say("planar deck and die put away.")
+  say("planar deck, plane and die packed up.")
 end
 
 function Planechase.turnCards(color)
@@ -494,16 +535,12 @@ end
 -- The chest
 ---------------------------------------------------------------------------
 
-function pc_build(obj, color) Planechase.build(color) end
-function pc_roll(obj, color) Planechase.roll(color) end
-function pc_walk(obj, color) Planechase.planeswalk(color) end
-function pc_stow(obj, color) Planechase.stow(color) end
+function pc_unpack(obj, color) Planechase.build(color) end
+function pc_pack(obj, color) Planechase.stow(color) end
 
 local BUTTONS = {
-  { fn = "pc_build", label = "BUILD", tip = "Shuffle the planar deck into the middle of the table" },
-  { fn = "pc_roll", label = "ROLL", tip = "Roll the planar die (first roll each turn is free, then 1, 2, 3 mana...)" },
-  { fn = "pc_walk", label = "WALK", tip = "Planeswalk by hand (effects that say planeswalk)" },
-  { fn = "pc_stow", label = "STOW", tip = "Put the planar deck and die away" },
+  { fn = "pc_unpack", label = "UNPACK", tip = "Set up Planechase: planar deck, first plane and the planar die" },
+  { fn = "pc_pack", label = "PACK UP", tip = "Put the planar deck, plane and die away" },
 }
 
 local function addButtons(obj)
@@ -514,9 +551,9 @@ local function addButtons(obj)
       function_owner = Global,
       label = b.label,
       tooltip = b.tip,
-      position = { (i - 2.5) * 1.5, 3.53, 0 },
+      position = { (i - 1.5) * 3.0, 3.53, 0 },
       rotation = { 0, 0, 0 },
-      width = 690, height = 440, font_size = 190,
+      width = 1350, height = 520, font_size = 230,
       color = { 0.04, 0.06, 0.1, 0.95 },
       font_color = { 0.35, 0.95, 1, 1 },
       hover_color = { 0.1, 0.25, 0.3, 1 },
@@ -530,6 +567,10 @@ function Planechase.ensure()
     return
   end
   buildIndex()
+  local plane = findPlane()
+  if plane then
+    planeMenu(plane)
+  end
   local mesh = BASE .. "chest.obj" .. VERSION
   for _, o in ipairs(getObjectsWithTag("PlanechaseChest")) do
     local co = o.getCustomObject()
@@ -548,7 +589,7 @@ function Planechase.ensure()
     sound = false,
     callback_function = function(o)
       o.setName("Planechase Chest")
-      o.setDescription("BUILD the planar deck, ROLL the planar die, WALK to planeswalk, STOW to put it all away.")
+      o.setDescription("UNPACK to set up Planechase, PACK UP to put it away.")
       o.addTag("PlanechaseChest")
       o.setLock(true)
       Wait.condition(function() addButtons(o) end,
@@ -566,26 +607,26 @@ function Planechase.chat(message, color)
     return false
   end
   cmd = cmd:gsub("%s+$", "")
-  if cmd == "build" then
+  if cmd == "build" or cmd == "unpack" then
     Planechase.build(color)
   elseif cmd == "roll" then
     Planechase.roll(color)
   elseif cmd == "walk" then
     Planechase.planeswalk(color)
-  elseif cmd == "stow" then
+  elseif cmd == "stow" or cmd == "pack" or cmd == "pack up" then
     Planechase.stow(color)
   elseif cmd == "turn" then
     Planechase.turnCards(color)
   elseif cmd == "nowho" or cmd == "who" then
     local st = data()
     st.noWho = cmd == "nowho"
-    say("Doctor Who planes " .. (st.noWho and "left out" or "included") .. " the next time you BUILD.")
+    say("Doctor Who planes " .. (st.noWho and "left out" or "included") .. " the next time you UNPACK.")
   elseif cmd == "nophenomena" or cmd == "phenomena" then
     local st = data()
     st.noPhenomena = cmd == "nophenomena"
-    say("Phenomena " .. (st.noPhenomena and "left out" or "included") .. " the next time you BUILD.")
+    say("Phenomena " .. (st.noPhenomena and "left out" or "included") .. " the next time you UNPACK.")
   else
-    say("!planechase build | roll | walk | stow | turn | nowho / who | nophenomena / phenomena")
+    say("!planechase unpack | pack | roll | walk | turn | nowho / who | nophenomena / phenomena")
   end
   return true
 end
