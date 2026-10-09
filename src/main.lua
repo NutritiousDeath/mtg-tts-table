@@ -95,7 +95,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.27 (Zoo deck audit: Winota, Esper Sentinel, Carpet)"
+SCRIPT_VERSION = "1.28 (cascade, storm, Zoo + Wanderer audit)"
 
 function onLoad(saved)
   GameLog.setup()

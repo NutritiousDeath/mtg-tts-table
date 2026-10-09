@@ -1116,6 +1116,42 @@ Events.on("spellCast", function(d)
       end
     end
   end
+  -- Cascade and Storm trigger from the spell itself when it is cast.
+  do
+    local gd = GameState.data
+    local turnNo = gd.turn and gd.turn.taken
+    local cl = gd.castLog
+    if cl == nil or cl.turn ~= turnNo then
+      cl = { turn = turnNo, n = 0 }
+      gd.castLog = cl
+    end
+    local before = cl.n
+    cl.n = cl.n + 1
+    local dd = cardData(d.card)
+    local oracle = dd and type(dd.oracle) == "string" and stripReminder(dd.oracle):lower() or ""
+    local cascades, storm = 0, false
+    for _, line in ipairs(lines(oracle)) do
+      local rest = line
+      if rest:sub(1, 7) == "cascade" then
+        for _ in rest:gmatch("cascade") do
+          cascades = cascades + 1
+        end
+      elseif rest:sub(1, 5) == "storm" then
+        storm = true
+      end
+    end
+    local gid, face = d.card.getGUID(), faceOf(d.card)
+    local mv = dd and tonumber(dd.cmc) or nil
+    for _ = 1, cascades do
+      table.insert(found, { obj = d.card, controller = d.controller, name = "Cascade (" .. d.card.getName() .. ")", guid = gid, face = face,
+        text = "Cascade: exile cards from the top of your library until you exile a nonland card with mana value less than "
+          .. tostring(mv or "that spell's") .. ". You may cast it without paying its mana cost. Put the exiled cards on the bottom of your library in a random order." })
+    end
+    if storm then
+      table.insert(found, { obj = d.card, controller = d.controller, name = "Storm (" .. d.card.getName() .. ")", guid = gid, face = face,
+        text = "Storm: copy " .. d.card.getName() .. " for each spell cast before it this turn (" .. before .. "). You may choose new targets for the copies." })
+    end
+  end
   local fc = GameState.data.firstCast
   if fc then
     local ty = typesOf(d.card)
