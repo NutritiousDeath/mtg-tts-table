@@ -226,6 +226,14 @@ function Effects.parse(text, sourceName)
             or (t:find("exile it at the beginning of the next end step", 1, true) and "exile") or nil } } }
     end
   end
+  -- Wheel of Fortune: everyone discards their hand, then draws seven.
+  do
+    local w = t:match("each player discards their hand, then draws (%a+) cards")
+    local wn = w and NUMBERS[w]
+    if wn then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "windfall", who = "all", n = 1, fixed = wn } } }
+    end
+  end
   -- Windfall: everyone discards their hand, then draws as many as the most anyone discarded.
   if t:find("each player discards their hand, then draws cards equal to the greatest number of cards a player discarded this way", 1, true) then
     return { optional = false, notes = {}, conds = {}, actions = { { what = "windfall", who = "all", n = 1 } } }
@@ -249,6 +257,19 @@ function Effects.parse(text, sourceName)
       return { optional = false, notes = {}, conds = {},
         actions = { { what = "manaAsk", who = "you", n = 1, pickColor = true, per = 1, label = "devotion to that color" } } }
     end
+  end
+  -- Birthing Pod / Eldritch Evolution: tutor a creature worth N more than the sacrificed one (the sacrifice is the cost).
+  do
+    local plus = t:match("mana value equal to (%d+) plus the sacrificed creature's mana value")
+    local plus2 = t:match("where x is (%d+) plus the sacrificed creature's mana value")
+    if (plus or plus2) and t:find("search your library for a creature card", 1, true) then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "sacTutor", who = "you", n = 1,
+        plus = tonumber(plus or plus2), exact = plus ~= nil, exileSelf = t:find("exile ~", 1, true) ~= nil } } }
+    end
+  end
+  -- Arcum Dagsson: sacrifice a target artifact creature; its controller tutors an artifact worth 1 more.
+  if t:find("controller sacrifices it", 1, true) and t:find("1 plus the sacrificed creature's mana value", 1, true) then
+    return { optional = false, notes = {}, conds = {}, actions = { { what = "arcum", who = "you", n = 1 } } }
   end
   -- Mirrorworks / Mechanized Production / Helm of the Host: a token copy of "that artifact" / "enchanted artifact" / "equipped creature".
   do
@@ -868,6 +889,10 @@ function Effects.parse(text, sourceName)
     elseif t:match("discover (%d+)") then
       table.insert(actions, { what = "exileCast", who = "you", n = 1, everyone = false, untilNonland = true,
         mvMax = tonumber(t:match("discover (%d+)")), bottomRest = true, discover = true })
+    elseif t:find("shuffle your library, then exile the top card", 1, true) and t:find("you may play that card", 1, true) then
+      -- Urza, Lord High Artificer {5}: lands can be played too.
+      table.insert(actions, { what = "exileCast", who = "you", n = 1, everyone = false, untilNonland = false,
+        shuffleFirst = true, play = true })
     elseif free and t:find("exile the top card of each player's library", 1, true) then
       table.insert(actions, { what = "exileCast", who = "you", n = 1, everyone = true, untilNonland = false })
     end
@@ -1098,6 +1123,10 @@ local function describe(a, target, controller)
     return "a creature is exiled; the Shards become copies of it until the next end step"
   elseif a.what == "edict" then
     return tostring(a.scope) .. " sacrifices " .. a.n .. " " .. tostring(a.ty) .. (a.n == 1 and "" or "s")
+  elseif a.what == "sacTutor" then
+    return "search for a creature worth " .. tostring(a.plus) .. " more than the sacrificed creature"
+  elseif a.what == "arcum" then
+    return "a target artifact creature is sacrificed and its controller may search for an artifact worth 1 more"
   elseif a.what == "windfall" then
     return "everyone discards their hand and draws as many cards as the most anyone discarded"
   elseif a.what == "powerHit" then
@@ -1455,8 +1484,18 @@ local function apply(it, plan, target)
           Effects.nikoSwap(seat, a, it)
         elseif a.what == "edict" then
           Effects.edict(seat, a, it)
+        elseif a.what == "arcum" then
+          Effects.arcum(seat, it)
+        elseif a.what == "sacTutor" then
+          Effects.askNumber(seat, it.name .. ": sacrificed creature's mana value?", "Type the mana value of the creature you sacrificed, then OK. The search is for mana value "
+            .. (a.exact and "exactly " or "") .. "that + " .. a.plus .. (a.exact and "." or " or less."), function(n)
+            local mv = (tonumber(n) or 0) + a.plus
+            LibSearch.open(seat, "creature", it.name .. ": take a creature with mana value " .. (a.exact and "" or "up to ") .. mv
+              .. " onto the battlefield, then CLOSE + SHUFFLE.", "battlefield", false,
+              { typeOnly = true, mvMin = a.exact and mv or nil, mvMax = mv })
+          end)
         elseif a.what == "windfall" then
-          Effects.windfall(it)
+          Effects.windfall(it, a.fixed)
         elseif a.what == "powerHit" then
           Effects.powerHit(seat, a, it)
         elseif a.what == "manaAsk" then
@@ -2077,7 +2116,7 @@ function Effects.edict(seat, a, it)
 end
 
 -- Windfall: everyone discards their hand, then draws as many cards as the most anyone discarded.
-function Effects.windfall(it)
+function Effects.windfall(it, fixed)
   local most = 0
   for _, c in ipairs(players()) do
     local n = Actions.discardHand(c, it.name) or 0
@@ -2085,7 +2124,12 @@ function Effects.windfall(it)
       most = n
     end
   end
-  printToAll("MTG > " .. it.name .. ": the most discarded was " .. most .. ": everyone draws " .. most .. ".", GOOD)
+  if fixed then
+    most = fixed
+    printToAll("MTG > " .. it.name .. ": everyone discards their hand and draws " .. fixed .. ".", GOOD)
+  else
+    printToAll("MTG > " .. it.name .. ": the most discarded was " .. most .. ": everyone draws " .. most .. ".", GOOD)
+  end
   if most > 0 then
     Wait.time(function()
       for _, c in ipairs(players()) do
@@ -2149,6 +2193,29 @@ function Effects.manaAsk(seat, a, it)
 end
 
 -- A token copy of "that artifact" / "enchanted artifact" / "equipped creature".
+function Effects.arcum(seat, it)
+  ask(seat, it.name .. ": sacrifice which artifact creature?", "Click SACRIFICE on the target artifact creature (anyone's). Its controller then searches.",
+    { { label = "SKIP", value = false } }, function(obj)
+      if not obj or obj.isDestroyed() then
+        return
+      end
+      local owner = Effects.fieldSeat(obj) or seat
+      local mv = 0
+      pcall(function() mv = tonumber(JSON.decode(obj.getGMNotes()).cmc) or 0 end)
+      local name = obj.getName()
+      printToAll("MTG > " .. it.name .. ": " .. owner .. " sacrifices " .. name .. " (mana value " .. mv .. ").", GOOD)
+      Combat.removeCard(obj, "graveyard")
+      Wait.time(function()
+        LibSearch.open(owner, "artifact", it.name .. ": " .. owner .. " may take a NONCREATURE artifact with mana value " .. (mv + 1)
+          .. " (1 plus " .. name .. "'s) onto the battlefield, then CLOSE + SHUFFLE.", "battlefield", false,
+          { typeOnly = true, mvMin = mv + 1, mvMax = mv + 1 })
+      end, 1.0)
+    end, { filter = function(obj, owner)
+      local ty = Effects.cardTypes(obj)
+      return ty.artifact == true and ty.creature == true
+    end, label = "SACRIFICE", protect = false })
+end
+
 function Effects.copyThat(seat, a, it)
   local src = it.source and getObjectFromGUID(it.source)
   local function target()
@@ -3941,6 +4008,25 @@ function Effects.exileCast(seat, a, it)
     end
   end
   local function offer()
+    if #cards == 0 and a.play and #allExiled > 0 then
+      -- The exiled card is a land: it can be played (put onto the battlefield).
+      local land = allExiled[1]
+      if land and not land.isDestroyed() then
+        ask(seat, it.name .. ": play " .. land.getName() .. "?", "Put the exiled land onto the battlefield (it counts as your land drop).",
+          { { label = "PLAY", value = true }, { label = "NO", value = false } }, function(yes)
+            if yes and not land.isDestroyed() then
+              land.setLock(false)
+              land.setRotation({ 0, TableSetup.seat(seat).yaw, 0 })
+              land.setPosition(TableSetup.slot(seat, "lands", TableSetup.SURFACE_TOP + 2))
+              printToAll("MTG > " .. seat .. " plays " .. land.getName() .. " from exile (" .. it.name .. ").", GOOD)
+              Wait.time(function() if not land.isDestroyed() then Zones.refresh(land) end end, 0.6)
+            else
+              printToAll("MTG > " .. seat .. " doesn't play " .. land.getName() .. " (stays exiled).", INFO)
+            end
+          end)
+        return
+      end
+    end
     if #cards == 0 then
       printToAll("MTG > " .. it.name .. ": no nonland cards were exiled.", INFO)
       restToBottom(nil)
@@ -3959,7 +4045,7 @@ function Effects.exileCast(seat, a, it)
       else
         table.insert(choices, { label = "NO", value = false })
       end
-      ask(seat, it.name .. ": cast " .. name .. " free?", (#oracle > 150 and (oracle:sub(1, 148) .. "...") or oracle),
+      ask(seat, it.name .. ": " .. (a.play and "play" or "cast") .. " " .. name .. " free?", (#oracle > 150 and (oracle:sub(1, 148) .. "...") or oracle),
         choices, function(pick)
           if pick == "cast" and not card.isDestroyed() then
             printToAll("MTG > " .. seat .. " casts " .. name .. " without paying its mana cost (" .. it.name .. ").", GOOD)
@@ -3985,6 +4071,13 @@ function Effects.exileCast(seat, a, it)
         return mv < a.mvLess
       end
       return mv <= a.mvMax
+    end
+  end
+  if a.shuffleFirst then
+    local lib = Library.find(seat)
+    if lib and lib.type == "Deck" and lib.shuffle then
+      lib.shuffle()
+      printToAll("MTG > " .. seat .. " shuffles their library (" .. it.name .. ").", INFO)
     end
   end
   for _, s in ipairs(who) do

@@ -97,7 +97,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.32 (Kasla, Arcum, Urza decks: tokens, statics, blink, clones)"
+SCRIPT_VERSION = "1.34 (Zoo deck: Wheel of Fortune, Birthing Pod, Eldritch Evolution)"
 
 function onLoad(saved)
   GameLog.setup()
