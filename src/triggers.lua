@@ -137,6 +137,8 @@ local function parseTrigger(p)
     { "at the beginning of your draw step", "draw", "you" },
     { "at the beginning of each player's draw step", "draw", "each" },
     { "at the beginning of each draw step", "draw", "each" },
+    { "at the beginning of each of your main phases", "main", "you" },
+    { "at the beginning of each main phase", "main", "each" },
     { "at the beginning of your precombat main phase", "main1", "you" },
     { "at the beginning of your first main phase", "main1", "you" },
     { "at the beginning of combat on your turn", "combat", "you" },
@@ -345,6 +347,12 @@ local function parseTrigger(p)
     return { kind = "dies", self = true }
   end
   -- Casting.
+  if plainFind(p, "whenever an opponent casts their first noncreature spell each turn") then
+    return { kind = "cast", who = "opp", spellType = "noncreature", first = true }
+  end
+  if plainFind(p, "whenever an opponent casts their first spell each turn") then
+    return { kind = "cast", who = "opp", first = true }
+  end
   local oppType = between(p, "whenever an opponent casts a", " spell")
   oppType = oppType and oppType:gsub("^n? ", "") or nil
   if oppType and #oppType < 30 then
@@ -385,7 +393,9 @@ local function parseCombat(p)
   if plainFind(p, "whenever ~ becomes blocked") or plainFind(p, "~ blocks or becomes blocked") then
     add({ kind = "blocked", self = true })
   end
-  if plainFind(p, "attacks alone") then
+  if plainFind(p, "whenever a non-human creature you control attacks") then
+    add({ kind = "attacks", mine = true, nonType = "human" })
+  elseif plainFind(p, "attacks alone") then
     if plainFind(p, "whenever a creature you control attacks alone") then
       add({ kind = "attacks", mine = true, alone = true })
     end
@@ -914,7 +924,7 @@ Events.on("stepStarted", function(d)
   for _, p in ipairs(permanents()) do
     for _, a in ipairs(abilitiesOf(p.obj)) do
       local t = a.trig
-      if t.kind == "step" and t.step == d.step then
+      if t.kind == "step" and (t.step == d.step or (t.step == "main" and (d.step == "main1" or d.step == "main2"))) then
         local mine = p.controller == d.seat
         if t.who == "each" or (t.who == "you" and mine) or (t.who == "opp" and not mine) then
           table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
@@ -1087,11 +1097,30 @@ Events.on("spellCast", function(d)
       local t = a.trig
       if t.kind == "cast" then
         local mine = p.controller == d.controller
-        if ((t.who == "you" and mine) or (t.who == "opp" and not mine)) and spellMatches(d.card, t.spellType) then
+        local firstOk = true
+        if t.first then
+          local fc = GameState.data.firstCast
+          local turnNo = GameState.data.turn and GameState.data.turn.taken
+          if fc == nil or fc.turn ~= turnNo then
+            fc = { turn = turnNo, seen = {} }
+            GameState.data.firstCast = fc
+          end
+          local key = tostring(d.controller) .. "|" .. tostring(t.spellType)
+          if fc.seen[key] then
+            firstOk = false
+          end
+        end
+        if firstOk and ((t.who == "you" and mine) or (t.who == "opp" and not mine)) and spellMatches(d.card, t.spellType) then
           table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
         end
       end
     end
+  end
+  local fc = GameState.data.firstCast
+  if fc then
+    local ty = typesOf(d.card)
+    fc.seen[tostring(d.controller) .. "|noncreature"] = fc.seen[tostring(d.controller) .. "|noncreature"] or (not ty.creature) or nil
+    fc.seen[tostring(d.controller) .. "|nil"] = true
   end
   pushAll(found, d.controller)
 end)
@@ -1129,7 +1158,12 @@ function Triggers.onAttack(list)
       if t.kind == "attacks" and t.mine then
         local mineCount = 0
         for _, at in ipairs(list) do
-          if at.controller == p.controller then
+          local okType = true
+          if t.nonType then
+            local dd = cardData(at.obj)
+            okType = not tostring(dd and dd.typeLine or ""):lower():find(t.nonType, 1, true)
+          end
+          if at.controller == p.controller and okType then
             mineCount = mineCount + 1
           end
         end
