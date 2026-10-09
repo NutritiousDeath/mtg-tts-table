@@ -149,6 +149,14 @@ function Tokens.spawn(color, r, n, opts)
       callback_function = function(obj)
         obj.setName(r.name)
         Zones.refresh(obj)
+        -- "create a 1/1 Goblin token with haste": no summoning sickness this turn.
+        if opts and opts.haste and Counters and Counters.addTempKeyword then
+          Wait.time(function()
+            if not obj.isDestroyed() then
+              Counters.addTempKeyword(obj, "haste")
+            end
+          end, 0.8)
+        end
         -- Tapped and attacking: joins the attack (no attack triggers).
         if opts and opts.attacking and Combat and Combat.enterAttacking then
           Wait.time(function()

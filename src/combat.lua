@@ -146,8 +146,57 @@ local function cardData(obj)
   return (ok and type(d) == "table") and d or {}
 end
 
+-- Static "creatures you control have haste" (Fervor, Anger, Urabrask...):
+-- which permanents give it, read from their rules text once per card.
+local hasteGrants = {}   -- [guid .. name] = false or "mine" / "all" / "others"
+
+local function grantKind(src)
+  local d = cardData(src)
+  local key = src.getGUID() .. "|" .. tostring(d.name)
+  local hit = hasteGrants[key]
+  if hit ~= nil then
+    return hit
+  end
+  hit = false
+  for raw in (tostring(d.oracle or ""):lower() .. "\n"):gmatch("([^\n]*)\n") do
+    if raw:find("haste", 1, true) and not raw:find("[:{]") and not raw:find("until end of turn", 1, true)
+        and not raw:find("whenever", 1, true) and not raw:find("when ", 1, true) then
+      if raw:find("creatures you control have haste", 1, true) or raw:find("each creature you control has haste", 1, true) then
+        hit = "mine"
+      elseif raw:find("other creatures you control have haste", 1, true) then
+        hit = "others"
+      elseif raw:find("all creatures have haste", 1, true) or raw:find("each creature has haste", 1, true)
+          or raw:find("creatures have haste", 1, true) then
+        hit = "all"
+      end
+    end
+  end
+  hasteGrants[key] = hit
+  return hit
+end
+
+-- Does another permanent on the table give this creature haste?
+local function staticHaste(obj)
+  local mySeat = Zones.regionAt(obj.getPosition()).seat
+  for _, src in ipairs(getObjectsWithTag("MTGCard")) do
+    if src.type == "Card" and not src.isDestroyed() and src.held_by_color == nil then
+      local loc = Zones.regionAt(src.getPosition())
+      if (loc.region == "battlefield" or loc.region == "lands") and loc.seat then
+        local kind = grantKind(src)
+        if kind == "all" or (kind == "mine" and loc.seat == mySeat) or (kind == "others" and loc.seat == mySeat and src ~= obj) then
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
 local function hasKeyword(obj, kw)
   kw = kw:lower()
+  if kw == "haste" and staticHaste(obj) then
+    return true
+  end
   if Counters.hasTempKeyword and Counters.hasTempKeyword(obj, kw) then
     return true
   end

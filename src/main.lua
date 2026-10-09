@@ -95,7 +95,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.25 (Equip menu, protection, Ring tempts, Sauron)"
+SCRIPT_VERSION = "1.26 (static haste, tokens with haste)"
 
 function onLoad(saved)
   GameLog.setup()

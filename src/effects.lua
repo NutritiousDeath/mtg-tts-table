@@ -481,7 +481,9 @@ function Effects.parse(text, sourceName)
           local sentence = rest:sub(1, (rest:find(".", 1, true) or #rest + 1) - 1)
           local atk = sentence:find("tapped and attacking", 1, true) ~= nil
           local act = { what = "token", who = "you", n = n, spec = spec, phrase = phrase,
-            attacking = atk, tapped = atk or sentence:find("tapped", 1, true) ~= nil }
+            attacking = atk, tapped = atk or sentence:find("tapped", 1, true) ~= nil,
+            haste = sentence:find("with haste", 1, true) ~= nil or sentence:find("and haste", 1, true) ~= nil
+              or sentence:find(", haste", 1, true) ~= nil }
           -- "create a Food token or a Treasure token" (Tireless Provisioner):
           -- the controller chooses which one.
           local altPhrase = rest:match("^[^.]- token or an? ([^.]-) token")
@@ -1023,7 +1025,8 @@ local function apply(it, plan, target)
           Effects.pickBounce(seat, a, it.name, it.source)
         elseif a.what == "token" then
           local made = amountOf(a, controller, it.name)
-          local opts = (a.tapped or a.attacking) and { tapped = a.tapped, attacking = a.attacking, from = it.thatCard or it.source } or nil
+          local opts = (a.tapped or a.attacking or a.haste)
+            and { tapped = a.tapped, attacking = a.attacking, haste = a.haste, from = it.thatCard or it.source } or nil
           if made < 1 then
             printToAll("MTG > " .. it.name .. ": no tokens (the count is 0).", INFO)
           elseif a.alt then
