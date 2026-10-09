@@ -97,7 +97,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.38 (statics pattern fix, revealed-card button clears)"
+SCRIPT_VERSION = "1.40 (Sylvan Library and effect discards get their own panel wording)"
 
 function onLoad(saved)
   GameLog.setup()

@@ -594,6 +594,13 @@ function Library.decorateRevealed(card)
   end
   for color, guid in pairs(revealedTable()) do
     if guid == card.getGUID() then
+      -- Still beside the library? A card that was cast or dragged away isn't "revealed" any more.
+      local spot = Library.revealSpot(color)
+      local p = card.getPosition()
+      if spot and p and ((p.x - spot.x) ^ 2 + (p.z - spot.z) ^ 2) > 4 then
+        revealedTable()[color] = nil
+        return
+      end
       card.createButton({
         click_function = "library_putRevealedOnTop",
         function_owner = Global,
@@ -611,7 +618,7 @@ end
 
 function Library.addRevealedMenu(card)
   for color, guid in pairs(GameState.data.revealedTop or {}) do
-    if guid == card.getGUID() then
+    if guid == card.getGUID() and not (Library.revealSpot(color) and ((card.getPosition().x - Library.revealSpot(color).x) ^ 2 + (card.getPosition().z - Library.revealSpot(color).z) ^ 2) > 4) then
       card.addContextMenuItem("Put on top of library", function() Library.putRevealedOnTop(color) end)
     end
   end

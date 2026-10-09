@@ -326,28 +326,28 @@ function Actions.discardXml(c)
   <Image id="dImg_%s" preserveAspect="true" raycastTarget="false" />
   <Panel id="dMark_%s" active="false" color="#DB545440" outline="#DB5454" outlineSize="4 4" raycastTarget="false">
     <Panel height="24" rectAlignment="LowerCenter" color="#DB5454" raycastTarget="false">
-      <Text fontSize="12" fontStyle="Bold" color="#1A0606">DISCARD</Text>
+      <Text id="dMarkT_%s" fontSize="12" fontStyle="Bold" color="#1A0606">DISCARD</Text>
     </Panel>
   </Panel>
   <Button onClick="ui_discardPick(%s)" color="#00000000" />
-</Panel>]]):format(id, id, id, id, id))
+</Panel>]]):format(id, id, id, id, id, id))
   end
   return ([[
 <Panel id="discard_%s" visibility="%s" active="false" rectAlignment="LowerCenter" offsetXY="0 230" width="800" height="330"
        color="#0B0F17F5" outline="#DB5454" outlineSize="2 2" allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="16 16 12 12" spacing="8" childForceExpandHeight="false">
-    <Text fontSize="18" fontStyle="Bold" color="#DB5454" alignment="MiddleLeft" preferredHeight="24">CLEANUP · DISCARD TO 7</Text>
+    <Text id="dTitle_%s" fontSize="18" fontStyle="Bold" color="#DB5454" alignment="MiddleLeft" preferredHeight="24">CLEANUP · DISCARD TO 7</Text>
     <Text id="dText_%s" fontSize="14" color="#E6F1FF" alignment="MiddleLeft" preferredHeight="20">Pick cards to discard.</Text>
     <GridLayout cellSize="92 128" spacing="6 6" constraint="FixedColumnCount" constraintCount="8" childAlignment="UpperCenter" preferredHeight="262">]]
     .. table.concat(slots) .. [[</GridLayout>
     <HorizontalLayout spacing="10" preferredHeight="40">
-      <Button onClick="ui_discardConfirm(%s)" color="#DB5454" textColor="#1A0606" fontStyle="Bold">DISCARD</Button>
-      <Button onClick="ui_discardSkip(%s)" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold"
+      <Button id="dConfirm_%s" onClick="ui_discardConfirm(%s)" color="#DB5454" textColor="#1A0606" fontStyle="Bold">DISCARD</Button>
+      <Button id="dSkip_%s" onClick="ui_discardSkip(%s)" color="#1B2333" textColor="#E6F1FF" fontStyle="Bold"
               tooltip="You have no maximum hand size (Reliquary Tower, Thought Vessel...)">NO MAXIMUM HAND SIZE</Button>
     </HorizontalLayout>
   </VerticalLayout>
 </Panel>
-]]):format(c, c, c, c, c)
+]]):format(c, c, c, c, c, c, c, c)
 end
 
 local function handCards(color)
@@ -409,6 +409,12 @@ local function renderDiscard(color)
   UI.setAttribute("discard_" .. color, "active", "true")
   local rows = math.ceil(math.min(#st.order, MAX_DISCARD_SLOTS) / 8)
   UI.setAttribute("discard_" .. color, "height", 140 + rows * 134)
+  -- Title and buttons say what this panel is for: cleanup discard, an effect's discard, or Sylvan Library.
+  local forced, top = st.forced, st.dest == "top"
+  UI.setValue("dTitle_" .. color, top and (string.upper(tostring(st.reason or "EFFECT")) .. " · PUT ON TOP OF YOUR LIBRARY")
+    or (forced and (string.upper(tostring(st.reason or "EFFECT")) .. " · DISCARD") or "CLEANUP · DISCARD TO 7"))
+  UI.setValue("dConfirm_" .. color, top and "PUT ON TOP" or "DISCARD")
+  UI.setAttribute("dSkip_" .. color, "active", forced and "false" or "true")
   UI.setValue("dText_" .. color, "You have " .. #st.order .. " cards: pick " .. st.need .. (st.dest == "top" and " to put on top of your library.   " or " to discard.   ")
     .. picked .. " / " .. st.need)
   for i = 1, MAX_DISCARD_SLOTS do
@@ -419,6 +425,7 @@ local function renderDiscard(color)
       UI.setValue("dName_" .. id, e.name)
       UI.setAttribute("dImg_" .. id, "image", e.face or "")
       UI.setAttribute("dMark_" .. id, "active", st.picks[e.guid] and "true" or "false")
+      UI.setValue("dMarkT_" .. id, top and "ON TOP" or "DISCARD")
     else
       UI.setAttribute("dSlot_" .. id, "active", "false")
     end
