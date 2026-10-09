@@ -97,7 +97,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.36 (Zoo fixes: tutors on top, Sylvan, Jeska, Emiel, Spirit Guides, painlands)"
+SCRIPT_VERSION = "1.37 (painlands and Talismans take life when tapped for colored mana)"
 
 function onLoad(saved)
   GameLog.setup()

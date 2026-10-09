@@ -258,6 +258,15 @@ function Effects.parse(text, sourceName)
         actions = { { what = "manaAsk", who = "you", n = 1, pickColor = true, per = 1, label = "devotion to that color" } } }
     end
   end
+  -- Sylvan Library: draw two extra, then pay 4 life or put each of two cards back on top.
+  if t:find("you may draw two additional cards. if you do, choose two cards in your hand drawn this turn", 1, true) then
+    return { optional = false, notes = {}, conds = {}, actions = { { what = "sylvan", who = "you", n = 1 } } }
+  end
+  -- Jeska's Will: red mana per card in an opponent's hand, and/or exile the top three and play them this turn.
+  if t:find("add {r} for each card in target opponent's hand", 1, true) and t:find("exile the top three cards of your library", 1, true) then
+    return { optional = false, notes = {}, conds = {}, actions = { { what = "jeska", who = "you", n = 1,
+      both = t:find("control a commander", 1, true) ~= nil } } }
+  end
   -- Birthing Pod / Eldritch Evolution: tutor a creature worth N more than the sacrificed one (the sacrifice is the cost).
   do
     local plus = t:match("mana value equal to (%d+) plus the sacrificed creature's mana value")
@@ -589,7 +598,7 @@ function Effects.parse(text, sourceName)
     local hand = rest:find("into your hand", 1, true) ~= nil
     local where = (bf and hand) and "both" or (bf and "battlefield" or "hand")
     -- Tutors: "...then shuffle and put that card on top".
-    local top = (t:find("put that card on top", a, true) or t:find("put it on top", a, true)
+    local top = (t:find("put that card on top", a, true) or t:find("put it on top", a, true) or t:find("put the card on top", a, true)
       or t:find("on top of your library", a, true)) ~= nil and not bf and not hand
     if top then
       where = "top"
@@ -1020,10 +1029,16 @@ function Effects.parse(text, sourceName)
   end
   -- "put a quest counter on ~": counters on the card itself.
   local cn, ckind = t:match("put (%w+) ([%w%+/%-]+) counters? on ~")
+  local onIt = false
+  if not cn then
+    -- Emiel / Ajani's Pridemate style: "...put a +1/+1 counter on it" = the creature that entered.
+    cn, ckind = t:match("put (%w+) ([%w%+/%-]+) counters? on it[%.%s]")
+    onIt = cn ~= nil
+  end
   if cn and num(cn) then
     local kind = (ckind == "+1/+1" and "plus") or (ckind == "-1/-1" and "minus") or (ckind == "loyalty" and "loyalty")
       or "other"
-    table.insert(actions, { what = "counter", who = "you", n = num(cn), kind = kind, label = ckind })
+    table.insert(actions, { what = "counter", who = "you", n = num(cn), kind = kind, label = ckind, onThat = onIt })
   end
   -- "put three +1/+1 counters on target creature (you control)": pick it on the table.
   do
@@ -1124,6 +1139,10 @@ local function describe(a, target, controller)
     return "a creature is exiled; the Shards become copies of it until the next end step"
   elseif a.what == "edict" then
     return tostring(a.scope) .. " sacrifices " .. a.n .. " " .. tostring(a.ty) .. (a.n == 1 and "" or "s")
+  elseif a.what == "sylvan" then
+    return "you may draw two extra cards, then pay 4 life or put a card back on top for each of two cards"
+  elseif a.what == "jeska" then
+    return "choose: {R} for each card in an opponent's hand, and/or exile the top three cards to play this turn"
   elseif a.what == "sacTutor" then
     return "search for a creature worth " .. tostring(a.plus) .. " more than the sacrificed creature"
   elseif a.what == "arcum" then
@@ -1322,6 +1341,9 @@ local function apply(it, plan, target)
               end or nil })
         elseif a.what == "counter" then
           local src = it.source and getObjectFromGUID(it.source)
+          if a.onThat and it.thatCard then
+            src = getObjectFromGUID(it.thatCard) or src
+          end
           if src and not src.isDestroyed() then
             Counters.change(src, a.kind, a.n, seat)
           else
@@ -1490,6 +1512,10 @@ local function apply(it, plan, target)
           Effects.edict(seat, a, it)
         elseif a.what == "arcum" then
           Effects.arcum(seat, it)
+        elseif a.what == "jeska" then
+          Effects.jeska(seat, a, it)
+        elseif a.what == "sylvan" then
+          Effects.sylvan(seat, it)
         elseif a.what == "sacTutor" then
           Effects.askNumber(seat, it.name .. ": sacrificed creature's mana value?", "Type the mana value of the creature you sacrificed, then OK. The search is for mana value "
             .. (a.exact and "exactly " or "") .. "that + " .. a.plus .. (a.exact and "." or " or less."), function(n)
@@ -2197,6 +2223,97 @@ function Effects.manaAsk(seat, a, it)
 end
 
 -- A token copy of "that artifact" / "enchanted artifact" / "equipped creature".
+-- Sylvan Library.
+function Effects.sylvan(seat, it)
+  Effects.askChoice(seat, it.name .. ": draw two additional cards?", "You may draw two extra cards now. Then, for each of two cards you drew this turn, pay 4 life or put it on top of your library.",
+    { { label = "DRAW 2", value = true }, { label = "NO", value = false } }, function(yes)
+      if not yes then
+        printToAll("MTG > " .. seat .. " doesn't draw extra cards (" .. it.name .. ").", INFO)
+        return
+      end
+      Actions.draw(seat, 2, it.name)
+      Wait.time(function()
+        Effects.askChoice(seat, it.name .. ": pay 4 life for how many of two cards?",
+          "Choose two cards you drew this turn. Each one: pay 4 life to keep it, or put it back on top of your library. How many do you pay for?",
+          { { label = "PAY FOR 2", value = 2 }, { label = "PAY FOR 1", value = 1 }, { label = "PAY FOR 0", value = 0 } }, function(k)
+            if k > 0 then
+              Trackers.changeLife(seat, -4 * k, it.name)
+            end
+            local back = 2 - k
+            if back > 0 then
+              Actions.forceDiscard(seat, back, it.name, nil, "top")
+            end
+          end)
+      end, 2.5)
+    end)
+end
+
+-- Jeska's Will.
+function Effects.jeska(seat, a, it)
+  local function mana()
+    local opps = {}
+    for _, c in ipairs(players()) do
+      if c ~= seat then
+        table.insert(opps, c)
+      end
+    end
+    local function give(opp)
+      local n = 0
+      pcall(function() n = #Player[opp].getHandObjects() end)
+      Effects.askNumber(seat, it.name .. ": cards in " .. opp .. "'s hand?", "Type how many cards " .. opp .. " has in hand (counted: " .. n .. "), then OK. You add that much {R}.", function(k)
+        local amount = tonumber(k) or 0
+        if amount > 0 then
+          ManaChips.add(seat, "R", amount)
+        end
+        printToAll("MTG > " .. it.name .. ": " .. seat .. " adds " .. amount .. " {R}.", GOOD)
+      end)
+    end
+    if #opps == 1 then
+      give(opps[1])
+      return
+    end
+    local choices = {}
+    for _, c in ipairs(opps) do
+      table.insert(choices, { label = string.upper(c), value = c })
+    end
+    Effects.askChoice(seat, it.name .. ": which opponent?", "Add {R} for each card in that opponent's hand.", choices, give)
+  end
+  local function exile3()
+    local left = 3
+    local names = {}
+    local function nxt()
+      if left == 0 then
+        printToAll("MTG > " .. it.name .. ": " .. seat .. " exiled " .. table.concat(names, ", ") .. " and may play them this turn (they wait in exile).", GOOD)
+        broadcastToColor("You may play " .. table.concat(names, ", ") .. " from exile this turn.", seat, GOOD)
+        return
+      end
+      left = left - 1
+      Library.exileUntilNonland(seat, true, function(card)
+        table.insert(names, card and card.getName() or "a card")
+        nxt()
+      end)
+    end
+    nxt()
+  end
+  local commander = false
+  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+    if o.type == "Card" and Combat and Combat.isCommander and Combat.isCommander(o) and Effects.fieldSeat(o) == seat then
+      commander = true
+    end
+  end
+  local choices = { { label = "RED MANA", value = "mana" }, { label = "EXILE 3", value = "exile" } }
+  if commander then
+    table.insert(choices, { label = "BOTH", value = "both" })
+  end
+  Effects.askChoice(seat, it.name .. ": choose one" .. (commander and " (or both: you control a commander)" or ""),
+    "{R} for each card in target opponent's hand, or exile the top three cards of your library and play them this turn.", choices, function(m)
+      if m == "mana" or m == "both" then mana() end
+      if m == "exile" or m == "both" then
+        if m == "both" then Wait.time(exile3, 1.5) else exile3() end
+      end
+    end)
+end
+
 function Effects.arcum(seat, it)
   ask(seat, it.name .. ": sacrifice which artifact creature?", "Click SACRIFICE on the target artifact creature (anyone's). Its controller then searches.",
     { { label = "SKIP", value = false } }, function(obj)
@@ -2660,6 +2777,14 @@ function Effects.resolve(it)
   Effects.currentSource = it.source or it.card
   -- "Choose one —" with "• mode" lines: the controller picks a mode first.
   local raw = tostring(it.text or "")
+  do
+    local lowj = raw:lower()
+    if lowj:find("add {r} for each card in target opponent's hand", 1, true) and lowj:find("exile the top three cards of your library", 1, true) then
+      Effects.jeska(it.controller, {}, it)
+      printToAll("MTG > " .. it.name .. " resolved: " .. it.controller .. " chooses.", INFO)
+      return
+    end
+  end
   local bullet = raw:find("•", 1, true)
   if bullet and not it.modePicked then
     local modes = {}
@@ -2877,9 +3002,42 @@ function Effects.resolve(it)
     end
   end
   -- "Create five 1/1 tokens. If <condition>, create ten of those tokens instead.": pick the right sentence.
-  if not it.insteadDone then
+  if not it.insteadDone and tostring(it.text or ""):lower():find(" instead", 1, true) then
     local raw2 = tostring(it.text or "")
-    local a1, _, cond, repl = raw2:find("%.%s*[Ii]f ([^,]+), (.-) instead%.?%s*$")
+    -- (plain searches only: MoonSharp gives up on lazy patterns over long text)
+    local a1, cond, repl
+    local ip
+    do
+      local from = 1
+      while true do
+        local k = raw2:lower():find(" instead", from, true)
+        if not k then break end
+        ip = k
+        from = k + 1
+      end
+    end
+    if ip and not raw2:sub(ip + #" instead"):find("[^%.%s]") then
+      local before = raw2:sub(1, ip - 1)
+      local at
+      for _, marker in ipairs({ ". If ", ". if " }) do
+        local from = 1
+        while true do
+          local k = before:find(marker, from, true)
+          if not k then break end
+          if at == nil or k > at then at = k end
+          from = k + 1
+        end
+      end
+      if at then
+        local seg = before:sub(at + 5)
+        local comma = seg:find(",", 1, true)
+        if comma and comma > 1 then
+          a1 = at
+          cond = seg:sub(1, comma - 1)
+          repl = seg:sub(comma + 1):gsub("^%s+", "")
+        end
+      end
+    end
     if a1 then
       local base = raw2:sub(1, a1)
       local function go(yes)

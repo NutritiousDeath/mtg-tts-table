@@ -150,7 +150,22 @@ function Counters.animate()
         local g = obj.getGUID()
         local sick = Combat and Combat.isSick and Combat.isSick(obj)
         local has = sickIndex[g] ~= nil
-        if sick ~= has then
+        -- Safety net: a planeswalker on the battlefield without its loyalty buttons gets them now
+        -- (planeswalkers are never summoning sick: usable the turn they arrive).
+        local walkerMissing = false
+        if Walkers and Walkers.handles and Walkers.handles(obj) then
+          local okb, btns = pcall(function() return obj.getButtons() end)
+          local found = false
+          if okb and btns then
+            for _, b in pairs(btns) do
+              if b.click_function == "walker_loyalty" then found = true end
+            end
+          end
+          walkerMissing = not found
+        end
+        if walkerMissing then
+          Counters.render(obj)
+        elseif sick ~= has then
           Counters.render(obj)
         elseif has then
           pcall(function()
@@ -655,6 +670,32 @@ function Counters.setup(obj)
     obj.addContextMenuItem("Send to command zone", function(playerColor)
       Combat.toCommandZone(obj, playerColor)
     end)
+  end
+  -- Spirit Guides: "Exile this card from your hand: Add {G}." Right-click in the hand.
+  if region == "hand" then
+    local oracle = tostring(cardData(obj).oracle or ""):lower()
+    local key
+    for line in (oracle .. "\n"):gmatch("([^\n]*)\n") do
+      local a = line:sub(1, 6) == "exile " and line:find(" from your hand: add {", 1, true)
+      if a then
+        key = line:sub(a + #" from your hand: add {", a + #" from your hand: add {")
+      end
+    end
+    if key and (key == "w" or key == "u" or key == "b" or key == "r" or key == "g" or key == "c") then
+      obj.addContextMenuItem("Exile for {" .. key:upper() .. "} mana", function(playerColor)
+        local loc = Zones.locationOf(obj)
+        local seat = loc and loc.seat or playerColor
+        local nm = obj.getName()
+        obj.setLock(false)
+        obj.setRotation({ 0, TableSetup.seat(seat).yaw, 0 })
+        obj.setPosition(TableSetup.slot(seat, "exile", TableSetup.SURFACE_TOP + 2))
+        Wait.time(function() if not obj.isDestroyed() then Zones.refresh(obj) end end, 0.6)
+        if ManaChips and ManaChips.add then
+          ManaChips.add(seat, key:upper(), 1)
+        end
+        printToAll("MTG > " .. seat .. " exiles " .. nm .. " from their hand for {" .. key:upper() .. "}.", { 0.75, 0.8, 0.9 })
+      end)
+    end
   end
   -- Anyone can delete a card this way (TTS normally needs a promoted player).
   obj.addContextMenuItem("Delete card", function(playerColor) Counters.deleteCard(obj, playerColor) end)

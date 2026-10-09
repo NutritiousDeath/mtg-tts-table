@@ -169,25 +169,47 @@ function Actions.onRotate(obj, spin, oldSpin, color)
       end
     end
   end)
-  if not isLand then
-    return
-  end
-  -- City of Brass / Mana Confluence / Ancient Tomb: the land hurts its controller when a player taps it.
+  -- Lands (and Talismans) that hurt their controller when tapped for mana.
   do
     local text, nm = "", obj.getName():lower()
+    local isArtifact, isCreature = false, false
     pcall(function()
       local d = JSON.decode(obj.getGMNotes())
       text = type(d) == "table" and tostring(d.oracle or ""):lower() or ""
+      for _, t in ipairs(type(d) == "table" and d.types or {}) do
+        if tostring(t):lower() == "artifact" then isArtifact = true end
+        if tostring(t):lower() == "creature" then isCreature = true end
+      end
     end)
-    text = text:gsub(nm:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "~")
-    local n = tonumber(text:match("becomes tapped, it deals (%d+) damage to you") or "")
-      or tonumber(text:match("{t}, pay (%d+) life: add") or "")
-      or ((text:find("{t}: add {c}{c}", 1, true) or text:find("add {c}{c}. ~ deals", 1, true))
-        and tonumber(text:match("~ deals (%d+) damage to you") or ""))
-    if n and n > 0 and Trackers and Trackers.changeLife then
-      Trackers.changeLife(loc.seat, -n, obj.getName())
-      printToAll("MTG > " .. obj.getName() .. ": " .. loc.seat .. " loses " .. n .. " life (tapped). (If it was tapped by mistake, give the life back.)", { 0.75, 0.8, 0.9 })
+    if not isLand and (not isArtifact or isCreature) then
+      return
     end
+    text = text:gsub(nm:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "~")
+    local function hurt(n)
+      if n and n > 0 and Trackers and Trackers.changeLife then
+        Trackers.changeLife(loc.seat, -n, obj.getName())
+        printToAll("MTG > " .. obj.getName() .. ": " .. loc.seat .. " loses " .. n .. " life (tapped for mana).", { 0.75, 0.8, 0.9 })
+      end
+    end
+    -- Always hurts: City of Brass, Mana Confluence, Ancient Tomb.
+    local always = tonumber(text:match("becomes tapped, it deals (%d+) damage to you") or "")
+      or tonumber(text:match("{t}, pay (%d+) life: add") or "")
+      or ((text:find("add {c}{c}. ~ deals", 1, true)) and tonumber(text:match("~ deals (%d+) damage to you") or ""))
+    if always then
+      hurt(always)
+    else
+      -- Painlands and Talismans: the colorless mana is free, the colored mana costs life.
+      local dmg = tonumber(text:match("~ deals (%d+) damage to you") or "")
+      if dmg and text:find("{t}: add {c}", 1, true) and text:find("{t}: add {", 1, true) then
+        Effects.askChoice(loc.seat, obj.getName() .. ": which mana?", "Colorless mana is free. Colored mana: " .. obj.getName() .. " deals " .. dmg .. " damage to you.",
+          { { label = "COLORLESS", value = false }, { label = "COLORED (" .. dmg .. " dmg)", value = true } }, function(colored)
+            if colored then hurt(dmg) end
+          end)
+      end
+    end
+  end
+  if not isLand then
+    return
   end
   for _, other in ipairs(getObjectsWithTag("MTGCard")) do
     if other.type == "Card" and not other.is_face_down and other ~= obj then

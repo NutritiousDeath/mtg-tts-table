@@ -601,7 +601,8 @@ function Triggers.unrecognized(obj)
     local low = para:lower()
     if (low:sub(1, 9) == "whenever " or low:sub(1, 5) == "when " or low:sub(1, 21) == "at the beginning of t"
         or low:sub(1, 21) == "at the beginning of y" or low:sub(1, 21) == "at the beginning of e")
-        and not known[para] then
+        and not known[para]
+        and not low:find("becomes tapped, it deals %d+ damage to you") then   -- City of Brass: handled when a player taps it (actions.lua)
       table.insert(out, para)
     end
   end
