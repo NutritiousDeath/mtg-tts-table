@@ -1,5 +1,5 @@
 MTG TABLE - SOLO TEST CHECKLIST (v1.33)
-Chat should say: MTG > Scripts loaded: version 1.35 (mulligan style in the mulligan panel, Gamble random discard)
+Chat should say: MTG > Scripts loaded: version 1.36 (Zoo fixes: tutors on top, Sylvan, Jeska, Emiel, Spirit Guides, painlands)
 
 HOW: load a deck, solo, drag cards from hand to the battlefield (or cast from hand), then watch chat + the ask popups.
 Mark each: OK / WRONG (write what happened).
@@ -47,6 +47,15 @@ Illusionist's Bracers, Lithoform Engine, Isochron Scepter, Mystic Forge, Chrome 
 [ ] Start Game panel no longer has mulligan options (just first player + Start).
 [ ] After Start, each mulligan panel has a line at the top: FRIENDLY / UNFRIENDLY - click it to switch (changes it for everyone). Locks once anyone has mulliganed. Resets to FRIENDLY each new game.
 [ ] Gamble: search opens, take a card, CLOSE: library shuffles AND you discard a random card from hand (chat says which).
+
+== v1.36 FIXES
+[ ] Worldly / Enlightened Tutor: card shows revealed beside the library, goes on top (not hand).
+[ ] Sylvan Library: at draw step -> DRAW 2? -> pay-for-how-many -> pick cards to put on top (panel in your hand). (This used to throw a red 'pattern too complex' error.)
+[ ] Jeska's Will: choose mode (BOTH only if you control a commander). Mana: pick opponent + confirm card count -> {R} chips. Exile: top 3 exiled, play them this turn.
+[ ] Emiel: pay yes -> the entering creature gets a +1/+1 counter.
+[ ] Spirit Guides: right-click the card IN HAND -> "Exile for {G}/{R} mana" -> card exiled, chip added.
+[ ] City of Brass / Mana Confluence / Ancient Tomb: TAP the land yourself -> you lose 1/1/2 life automatically (a land that enters tapped doesn't count). No more 'can't watch' warning for City of Brass.
+[ ] Planeswalkers (Lukka etc.): loyalty buttons show right after the spell resolves and you can use one the same turn.
 
 == ZOO DECK (Marath)
 [ ] Wheel of Fortune: everyone discards and draws 7, no questions.

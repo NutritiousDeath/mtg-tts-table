@@ -97,7 +97,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.35 (mulligan style in the mulligan panel, Gamble random discard)"
+SCRIPT_VERSION = "1.36 (Zoo fixes: tutors on top, Sylvan, Jeska, Emiel, Spirit Guides, painlands)"
 
 function onLoad(saved)
   GameLog.setup()

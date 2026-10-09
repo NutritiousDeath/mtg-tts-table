@@ -172,6 +172,23 @@ function Actions.onRotate(obj, spin, oldSpin, color)
   if not isLand then
     return
   end
+  -- City of Brass / Mana Confluence / Ancient Tomb: the land hurts its controller when a player taps it.
+  do
+    local text, nm = "", obj.getName():lower()
+    pcall(function()
+      local d = JSON.decode(obj.getGMNotes())
+      text = type(d) == "table" and tostring(d.oracle or ""):lower() or ""
+    end)
+    text = text:gsub(nm:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "~")
+    local n = tonumber(text:match("becomes tapped, it deals (%d+) damage to you") or "")
+      or tonumber(text:match("{t}, pay (%d+) life: add") or "")
+      or ((text:find("{t}: add {c}{c}", 1, true) or text:find("add {c}{c}. ~ deals", 1, true))
+        and tonumber(text:match("~ deals (%d+) damage to you") or ""))
+    if n and n > 0 and Trackers and Trackers.changeLife then
+      Trackers.changeLife(loc.seat, -n, obj.getName())
+      printToAll("MTG > " .. obj.getName() .. ": " .. loc.seat .. " loses " .. n .. " life (tapped). (If it was tapped by mistake, give the life back.)", { 0.75, 0.8, 0.9 })
+    end
+  end
   for _, other in ipairs(getObjectsWithTag("MTGCard")) do
     if other.type == "Card" and not other.is_face_down and other ~= obj then
       local ol = Zones.regionAt(other.getPosition())
@@ -370,7 +387,7 @@ local function renderDiscard(color)
   UI.setAttribute("discard_" .. color, "active", "true")
   local rows = math.ceil(math.min(#st.order, MAX_DISCARD_SLOTS) / 8)
   UI.setAttribute("discard_" .. color, "height", 140 + rows * 134)
-  UI.setValue("dText_" .. color, "You have " .. #st.order .. " cards: pick " .. st.need .. " to discard.   "
+  UI.setValue("dText_" .. color, "You have " .. #st.order .. " cards: pick " .. st.need .. (st.dest == "top" and " to put on top of your library.   " or " to discard.   ")
     .. picked .. " / " .. st.need)
   for i = 1, MAX_DISCARD_SLOTS do
     local id = color .. "_" .. i
@@ -407,7 +424,22 @@ end
 -- Forced discard from an effect ("that player discards a card"): the player
 -- picks which cards in a panel only they see. A hand no bigger than the
 -- number goes entirely.
-function Actions.forceDiscard(color, n, reason, onDone)
+-- Hand cards to the top of the library, one after another (each is a rebuild).
+local function cardsToTop(color, cards, onDone)
+  local i = 0
+  local function nxt()
+    i = i + 1
+    local c = cards[i]
+    if c == nil then
+      if onDone then onDone() end
+      return
+    end
+    Library.putAt(color, c, 0, function() nxt() end)
+  end
+  nxt()
+end
+
+function Actions.forceDiscard(color, n, reason, onDone, dest)
   local hand = handCards(color)
   local need = math.min(n, #hand)
   if need <= 0 then
@@ -416,6 +448,13 @@ function Actions.forceDiscard(color, n, reason, onDone)
     return
   end
   local solo = GameState.solo() and not Player[color].seated
+  if dest == "top" and (need == #hand) then
+    local cs = {}
+    for i = 1, need do cs[i] = hand[i] end
+    log(color .. " puts " .. need .. " card" .. (need == 1 and "" or "s") .. " from their hand on top of their library" .. (reason and (" (" .. reason .. ")") or ""))
+    cardsToTop(color, cs, onDone)
+    return
+  end
   if need == #hand or solo then
     local s = TableSetup.seat(color)
     local names = {}
@@ -435,8 +474,8 @@ function Actions.forceDiscard(color, n, reason, onDone)
     local custom = card.getCustomObject()
     table.insert(order, { guid = card.getGUID(), name = card.getName(), face = custom and custom.face or nil })
   end
-  discard[color] = { need = need, order = order, picks = {}, onDone = onDone, forced = true, reason = reason }
-  broadcastToAll(color .. " must discard " .. need .. " card" .. (need == 1 and "" or "s")
+  discard[color] = { need = need, order = order, picks = {}, onDone = onDone, forced = true, reason = reason, dest = dest }
+  broadcastToAll(color .. (dest == "top" and " must put " or " must discard ") .. need .. " card" .. (need == 1 and "" or "s") .. (dest == "top" and " on top of their library" or "")
     .. (reason and (" (" .. reason .. ")") or "") .. ".", WARN)
   renderDiscard(color)
 end
@@ -494,6 +533,15 @@ function ui_discardConfirm(player, color)
     return
   end
   local s = TableSetup.seat(color)
+  if st.dest == "top" then
+    for _, card in ipairs(chosen) do card.highlightOff() end
+    log(color .. " puts " .. #chosen .. " card" .. (#chosen == 1 and "" or "s") .. " from their hand on top of their library (" .. tostring(st.reason) .. ")")
+    local cb = st.onDone
+    discard[color] = nil
+    renderDiscard(color)
+    cardsToTop(color, chosen, cb)
+    return
+  end
   local names = {}
   for i, card in ipairs(chosen) do
     table.insert(names, card.getName())
