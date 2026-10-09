@@ -174,6 +174,24 @@ local function parseTrigger(p)
   if plainFind(p, "cumulative upkeep") then
     return { kind = "step", step = "upkeep", who = "you" }
   end
+  -- Baeloth: "whenever a goaded attacking or blocking creature dies".
+  if plainFind(p, "whenever a goaded attacking or blocking creature dies") then
+    return { kind = "dies", subject = "creature", subjects = { "creature" }, goaded = true }
+  end
+  -- Life: "whenever an opponent loses life" (Bloodthirsty Conqueror),
+  -- "whenever you gain life".
+  if plainFind(p, "whenever an opponent loses life") then
+    return { kind = "life", dir = "loss", who = "opp" }
+  end
+  if plainFind(p, "whenever you gain life") then
+    return { kind = "life", dir = "gain", who = "you" }
+  end
+  if plainFind(p, "whenever an opponent gains life") then
+    return { kind = "life", dir = "gain", who = "opp" }
+  end
+  if plainFind(p, "whenever you lose life") then
+    return { kind = "life", dir = "loss", who = "you" }
+  end
   -- Drawing.
   if plainFind(p, "whenever an opponent draws a card") then
     return { kind = "draw", who = "opp" }
@@ -195,12 +213,18 @@ local function parseTrigger(p)
   -- text breaks TTS's pattern matching).
   local at = 1
   while true do
-    local w = p:find("whenever ", at, true)
+    -- "Whenever ..." or the shorter "When a Dragon you control enters".
+    local w1 = p:find("whenever ", at, true)
+    local w2 = p:find("when ", at, true)
+    local w, headLen = w1, 9
+    if w2 and (w1 == nil or w2 < w1) then
+      w, headLen = w2, 5
+    end
     if not w then
       break
     end
-    at = w + 9
-    local window = p:sub(w + 9, w + 9 + 80)
+    at = w + headLen
+    local window = p:sub(w + headLen, w + headLen + 80)
     local verbAt, kind
     local e = window:find(" enter", 1, true)
     local d = window:find(" die", 1, true)
@@ -402,6 +426,7 @@ local function abilitiesOf(obj)
     afflict = { kind = "blocked", self = true },
     flanking = { kind = "blocked", self = true },
     exalted = { kind = "attacks", mine = true, alone = true },
+    fabricate = { kind = "enters", self = true },
   }
   for _, kw in ipairs(type(d.keywords) == "table" and d.keywords or {}) do
     local k = tostring(kw):lower()
@@ -819,6 +844,7 @@ Events.on("cardMoved", function(d)
         local t = a.trig
         if t.kind == kind and not t.self and matchesSubject(card, t)
             and not (t.tapped and not entersTappedNow(card))
+            and not (t.goaded and not (Counters.goadedBy(card) and Combat and Combat.inCombat and Combat.inCombat(card)))
             and not (t.nontoken and isToken(card))
             and not (t.mine and cardController ~= p.controller)
             and not (t.theirs and cardController == p.controller) then
@@ -831,6 +857,29 @@ Events.on("cardMoved", function(d)
   -- checked (it's already in the graveyard): add those by hand.
   pushAll(found, cardController, card.getGUID())
 end)
+
+-- A player's life changed (called by trackers.lua): "whenever an opponent
+-- loses life", "whenever you gain life". `amount` is how much, for
+-- "that much life".
+function Triggers.onLife(seat, delta)
+  if not enabled() or not GameState.data.started or delta == 0 then
+    return
+  end
+  local dir = delta > 0 and "gain" or "loss"
+  local found = {}
+  for _, p in ipairs(permanents()) do
+    for _, a in ipairs(abilitiesOf(p.obj)) do
+      local t = a.trig
+      if t.kind == "life" and t.dir == dir then
+        local mine = p.controller == seat
+        if (t.who == "you" and mine) or (t.who == "opp" and not mine) then
+          table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, amount = math.abs(delta) })
+        end
+      end
+    end
+  end
+  pushAll(found, seat)
+end
 
 -- A spell was cast (put on the stack).
 local function spellMatches(card, spellType)

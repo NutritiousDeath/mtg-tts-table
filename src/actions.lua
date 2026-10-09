@@ -321,6 +321,21 @@ local function handCards(color)
   return out
 end
 
+-- Discard the whole hand (Miss Highwater): every card to the graveyard.
+function Actions.discardHand(color, reason)
+  local hand = handCards(color)
+  local s = TableSetup.seat(color)
+  local names = {}
+  for i, card in ipairs(hand) do
+    table.insert(names, card.getName())
+    card.setPosition(TableSetup.slot(color, "graveyard", 2 + i * 0.3))
+    card.setRotation({ 0, s.yaw, 0 })
+    Library.toGraveyard(color, card)
+  end
+  log(color .. " discards their hand (" .. #hand .. " card" .. (#hand == 1 and "" or "s") .. (reason and (", " .. reason) or "") .. ")")
+  return #hand
+end
+
 local function renderDiscard(color)
   local st = discard[color]
   if st == nil then

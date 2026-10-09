@@ -69,7 +69,7 @@ end
 -- Build the on-screen UI. (Life tracking is on the table: trackers.lua.)
 function TableUI.build()
   local panels = { importPanel() }
-  local xml = HEADER .. table.concat(panels) .. GameFlow.xml() .. Turns.xml() .. Actions.xml()
+  local xml = HEADER .. table.concat(panels) .. GameFlow.xml() .. Turns.xml() .. Actions.xml() .. Flip.xml()
     .. Dice.xml() .. Tokens.xml() .. LibSearch.xml() .. Stack.xml() .. Combat.xml() .. Triggers.orderXml() .. Effects.xml()
   -- Remember every element that's shown to one seat only (see
   -- TableUI.refreshVisibility).

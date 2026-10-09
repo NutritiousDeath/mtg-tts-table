@@ -31,6 +31,7 @@
     !solo on / off       solo test mode: one person plays every seat
     !import <link>       import an Archidekt / Moxfield link to your seat
     !import Red <link>   import an Archidekt / Moxfield link (or list) to a seat
+    !flip / !unflip   flip the table (just for fun) / put it back
     !forcepass   stop waiting on a player who isn't answering
     !afk 45 / off   priority pop-ups pass by themselves after this many seconds (default 60)
     !walker      show the loyalty abilities read on the planeswalker under your mouse
@@ -64,6 +65,7 @@ require("src/combat")
 require("src/walkers")
 require("src/effects")
 require("src/faces")
+require("src/flip")
 require("src/tokens")
 require("src/ui")
 require("src/importcards")
@@ -90,7 +92,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.22 (shock lands, Aether Channeler, Treasure Hunt fix, AFK timer)"
+SCRIPT_VERSION = "1.23 (table flip, summon-sick Zzz, goad, command zone, Fabricate, blocks/menace, token fixes)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -117,6 +119,7 @@ function onLoad(saved)
   Counters.registerHotkeys()
   Turns.registerHotkeys()
   Counters.setupAll()
+  Counters.animate()
   -- Give the surface a moment to appear, then face everyone toward their seat.
   Wait.time(function()
     TableSetup.enforceAllSeats()
@@ -463,6 +466,10 @@ function onChat(message, sender)
   local afkArg = message:match("^!afk%s*(.*)$")
   if afkArg then
     Turns.setAfk(sender.color, afkArg)
+    return false
+  end
+
+  if Flip and Flip.chat(message, sender.color) then
     return false
   end
 

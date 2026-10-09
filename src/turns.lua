@@ -81,7 +81,7 @@ function Turns.xml()
   return [[
 <Button id="turnOptsToggle" onClick="ui_turnOpts" rectAlignment="UpperLeft" offsetXY="20 -120"
         width="150" height="40" fontStyle="Bold" color="#2A3346" textColor="#E6F1FF">Turn Options</Button>
-<Panel id="turnOpts" active="false" rectAlignment="UpperLeft" offsetXY="180 -120" width="260" height="250"
+<Panel id="turnOpts" active="false" rectAlignment="UpperLeft" offsetXY="180 -120" width="260" height="296"
        color="#0B0F17F2" outline="#5AF0FF" outlineSize="2 2">
   <VerticalLayout padding="12 12 12 12" spacing="8">
     <Text fontSize="15" fontStyle="Bold" color="#5AF0FF" preferredHeight="22">TURN OPTIONS</Text>]]
@@ -89,6 +89,7 @@ function Turns.xml()
     .. opt("extraCombat", "Extra combat", "Active player: one more combat phase this turn")
     .. opt("skip", "Skip this step", "Active player: move on now, no hold window")
     .. opt("reverse", "Reverse turn order", "Flip between clockwise and counter-clockwise")
+    .. '<Button onClick="ui_flipTable" color="#5A1F2B" textColor="#FFD0D8" fontStyle="Bold" tooltip="Just for fun">Flip the table!</Button>'
     .. [[
   </VerticalLayout>
 </Panel>

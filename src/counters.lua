@@ -118,6 +118,41 @@ end
 
 function counters_noop() end
 
+-- GUID -> index of the card's Zzz button (set by render, used by the animation).
+local sickIndex = {}
+local SLEEP_FRAMES = { "z", "zZ", "zZz", "ZzZ", "Zz", "z" }
+local frame = 0
+local animating = false
+
+-- Every 0.5 s: the Zzz on summoning-sick creatures cycles z / zZ / zZz...
+-- and creatures whose sickness has ended lose it (or gain it).
+function Counters.animate()
+  if animating then
+    return
+  end
+  animating = true
+  Wait.time(function()
+    frame = frame % #SLEEP_FRAMES + 1
+    if not (GameState.data and GameState.data.started) then
+      return
+    end
+    for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+      if obj.type == "Card" and not obj.isDestroyed() then
+        local g = obj.getGUID()
+        local sick = Combat and Combat.isSick and Combat.isSick(obj)
+        local has = sickIndex[g] ~= nil
+        if sick ~= has then
+          Counters.render(obj)
+        elseif has then
+          pcall(function()
+            obj.editButton({ index = sickIndex[g], label = SLEEP_FRAMES[frame] })
+          end)
+        end
+      end
+    end
+  end, 0.5, -1)
+end
+
 -- Other modules' buttons on the card, drawn after the counters label
 -- (render clears every button first): combat (combat.lua) and loyalty
 -- abilities (walkers.lua).
@@ -183,6 +218,36 @@ function Counters.render(obj)
   if Actions and Actions.skipsUntap and Actions.skipsUntap(obj) then
     table.insert(lines, "NO UNTAP")
   end
+  if Counters.goadedBy(obj) then
+    -- GOADED badge across the top of the card.
+    obj.createButton({
+      click_function = "counters_noop",
+      function_owner = Global,
+      label = "GOADED (" .. string.upper(Counters.goadedBy(obj)) .. ")",
+      tooltip = "Goaded: attacks each combat if able, and attacks a player other than " .. Counters.goadedBy(obj) .. " if able.",
+      position = { 0, 0.3, -1.3 },
+      rotation = { 0, 0, 0 },
+      width = 880, height = 230, font_size = 170,
+      font_color = { 1, 1, 1 },
+      color = { 0.85, 0.3, 0.1, 0.92 },
+    })
+  end
+  -- Summoning sickness: an animated "Zzz" badge (see Counters.animate).
+  sickIndex[obj.getGUID()] = nil
+  if Combat and Combat.isSick and Combat.isSick(obj) then
+    obj.createButton({
+      click_function = "counters_noop",
+      function_owner = Global,
+      label = "Zzz",
+      tooltip = "Summoning sick: came in this turn, can't attack or use {T} abilities until its controller's next turn (unless it has haste).",
+      position = { 0.55, 0.3, 1.25 },
+      rotation = { 0, 0, 0 },
+      width = 520, height = 260, font_size = 190,
+      font_color = { 0.75, 0.9, 1 },
+      color = { 0.1, 0.18, 0.4, 0.88 },
+    })
+    sickIndex[obj.getGUID()] = #obj.getButtons() - 1
+  end
   if #lines == 0 then
     Counters.decorate(obj)
     return
@@ -209,6 +274,48 @@ end
 ---------------------------------------------------------------------------
 -- Changing counters
 ---------------------------------------------------------------------------
+
+---------------------------------------------------------------------------
+-- Goad: a GOADED badge on the creature until the goader's next turn. Kept
+-- in GameState (not the card's memo) so "whenever a goaded creature dies"
+-- can still see it after the card has left the battlefield.
+---------------------------------------------------------------------------
+
+local function goads()
+  GameState.data.goaded = GameState.data.goaded or {}
+  return GameState.data.goaded
+end
+
+function Counters.goadedBy(obj)
+  local ok, g = pcall(function() return obj.getGUID() end)
+  return ok and goads()[g] or nil
+end
+
+function Counters.setGoad(obj, seat)
+  if not isCard(obj) then
+    return
+  end
+  local g = obj.getGUID()
+  if seat == nil then
+    goads()[g] = nil
+  else
+    goads()[g] = seat
+  end
+  Counters.render(obj)
+end
+
+-- The goader's turn begins: their goads end.
+function Counters.endGoadsBy(seat)
+  for guid, by in pairs(goads()) do
+    if by == seat then
+      goads()[guid] = nil
+      local o = getObjectFromGUID(guid)
+      if o and not o.isDestroyed() then
+        Counters.render(o)
+      end
+    end
+  end
+end
 
 function Counters.change(obj, kind, delta, byColor)
   if not isCard(obj) then
@@ -310,6 +417,9 @@ end
 
 Events.on("stepStarted", function(d)
   Wait.frames(Counters.refreshMenus, 2)
+  if d.step == "untap" and d.seat then
+    Counters.endGoadsBy(d.seat)
+  end
   if d.step == "cleanup" then
     local had = GameState.data.tempKeywords and next(GameState.data.tempKeywords) ~= nil
     Counters.endOfTurn()
@@ -456,6 +566,18 @@ function Counters.setup(obj)
       end, true)
     end
     obj.addContextMenuItem("Clear counters", function() Counters.clear(obj) end)
+    if cardData(obj).typeLine and cardData(obj).typeLine:find("Creature", 1, true) then
+      obj.addContextMenuItem("Goad / remove goad", function(playerColor)
+        if Counters.goadedBy(obj) then
+          Counters.setGoad(obj, nil)
+          printToAll("MTG > " .. obj.getName() .. " isn't goaded any more.", { 0.75, 0.8, 0.9 })
+        else
+          Counters.setGoad(obj, playerColor)
+          printToAll("MTG > " .. obj.getName() .. " is goaded by " .. tostring(playerColor)
+            .. " (attacks each combat if able, and a player other than them if able).", { 1, 0.6, 0.2 })
+        end
+      end)
+    end
     obj.addContextMenuItem("Skip next untap / untap normally", function(playerColor)
       local on = not Actions.skipsUntap(obj)
       Actions.setSkipUntap(obj, on, playerColor)
@@ -471,6 +593,11 @@ function Counters.setup(obj)
   end
   if Faces then
     Faces.addMenu(obj)
+  end
+  if Combat and Combat.isCommander and region ~= "command" and Combat.isCommander(obj) then
+    obj.addContextMenuItem("Send to command zone", function(playerColor)
+      Combat.toCommandZone(obj, playerColor)
+    end)
   end
   -- Anyone can delete a card this way (TTS normally needs a promoted player).
   obj.addContextMenuItem("Delete card", function(playerColor) Counters.deleteCard(obj, playerColor) end)

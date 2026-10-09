@@ -409,12 +409,28 @@ async function handleTokens(q, host) {
     if (pt) return "pow=" + pt[1] + " tou=" + pt[2];
     return "(name:" + JSON.stringify(w) + " or t:" + JSON.stringify(w) + ")";
   });
-  const query = "(t:token or t:emblem) " + words.join(" ");
-  const api = "https://api.scryfall.com/cards/search?unique=art&order=released&dir=desc&q=" + encodeURIComponent(query);
-  const res = await fetch(api, { headers: { "User-Agent": USER_AGENT, Accept: "application/json" } });
-  if (res.status === 404) return new Response("NONE", { headers: { "Content-Type": "text/plain" } });
-  if (!res.ok) throw new Error("Scryfall search returned " + res.status);
-  const data = await res.json();
+  const base = words.join(" ");
+  // Try the strict token search first, then looser ones (Monarch, Initiative, etc. are
+  // "Card" type objects with layout token/emblem, so t:token misses them).
+  const queries = [
+    "(t:token or t:emblem) " + base,
+    "(layout:token or layout:emblem or t:token or t:emblem or t:card) (set_type:token or set_type:memorabilia or set_type:minigame) " + base,
+    "(layout:token or layout:emblem) " + base,
+  ];
+  let data = { data: [] };
+  for (const query of queries) {
+    const api = "https://api.scryfall.com/cards/search?include_extras=true&unique=art&order=released&dir=desc&q=" + encodeURIComponent(query);
+    let res = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      res = await fetch(api, { headers: { "User-Agent": USER_AGENT, Accept: "application/json" } });
+      if (res.status !== 429) break;
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    }
+    if (res.status === 404) continue;
+    if (!res.ok) throw new Error("Scryfall search returned " + res.status);
+    data = await res.json();
+    if ((data.data || []).length) break;
+  }
   const seen = new Set();
   const lines = [];
   for (const card of data.data || []) {

@@ -78,7 +78,7 @@ function Effects.parse(text, sourceName)
   while i <= #raw do
     local j = raw:find("\n", i, true) or (#raw + 1)
     local line = raw:sub(i, j - 1)
-    if line:find(".", 1, true) or line:find(":", 1, true) then
+    if line:find(".", 1, true) or line:find(":", 1, true) or line:lower():find("^fabricate %d") then
       table.insert(kept, line)
     end
     i = j + 1
@@ -149,6 +149,37 @@ function Effects.parse(text, sourceName)
       counted = { kind = "token", word = w2, scope = who:find("opponent", 1, true) and "opponents" or "mine" }
       t = t:sub(1, c - 1) .. t:sub(d + 1)
       t = t:gsub("create x ", "create 1 ", 1)
+    end
+  end
+  -- Chaos Warp: the owner shuffles the permanent into their library, reveals
+  -- the top card; a permanent card goes onto the battlefield.
+  if t:find("shuffles it into their library, then reveals the top card of their library", 1, true) then
+    return { optional = false, actions = { { what = "chaosWarp", who = "you", n = 1 } }, notes = {}, conds = {} }
+  end
+  -- Triskaidekaphobia: "Each player with exactly 13 life loses the game, then
+  -- each player gains / loses 1 life."
+  do
+    local lifeN, dir, amt = t:match("each player with exactly (%d+) life loses the game, then each player (%a+) (%w+) life")
+    if lifeN and num(amt) then
+      return { optional = false, notes = {}, conds = {},
+        actions = { { what = "exactLife", who = "all", n = num(amt), life = tonumber(lifeN), dir = dir == "gains" and "gain" or "lose" } } }
+    end
+  end
+  -- Miss Highwater: combat damage to a player who has no contract counter.
+  if t:find("contract counter", 1, true) and t:find("discard their hand", 1, true) and t:find("draw seven cards", 1, true) then
+    return { optional = false, notes = {}, conds = {},
+      actions = { { what = "contract", who = "that", n = 7 } } }
+  end
+  -- Kuroki: "target opponent may draw four cards. If they do, look at that
+  -- player's hand and you may cast a spell from it... If they don't, put two
+  -- +1/+1 counters on ~."
+  do
+    local dn = t:match("target opponent may draw (%w+) cards")
+    local cn = t:match("if they don't, put (%w+) %+1/%+1 counters? on ~")
+    if dn and num(dn) and cn and num(cn) then
+      return { optional = false, notes = {}, conds = {},
+        actions = { { what = "oppMayDraw", who = "targetOpponent", n = num(dn), counters = num(cn),
+          cast = t:find("you may cast a spell from their hand", 1, true) ~= nil } } }
     end
   end
   -- Sentence by sentence: one with a condition ("Then if you control four
@@ -265,6 +296,10 @@ function Effects.parse(text, sourceName)
   -- Nekusar: "that player draws an additional card".
   w = t:match("that player draws (%w+) additional cards?")
   add("draw", "that", num(w))
+  if t:find("you gain that much life", 1, true) or t:find("you may gain that much life", 1, true) then
+    -- Bloodthirsty Conqueror: the amount comes from the trigger.
+    table.insert(actions, { what = "gain", who = "you", n = 1, thatMuch = true })
+  end
   w = t:match("you gain (%w+) life") or t:match("you may gain (%w+) life")
   add("gain", "you", num(w))
   if perSpell and actions[#actions] and actions[#actions].what == "gain" then
@@ -433,8 +468,27 @@ function Effects.parse(text, sourceName)
           -- "...tokens that are tapped and attacking" (Hero of Bladehold).
           local sentence = rest:sub(1, (rest:find(".", 1, true) or #rest + 1) - 1)
           local atk = sentence:find("tapped and attacking", 1, true) ~= nil
-          table.insert(actions, { what = "token", who = "you", n = n, spec = spec, phrase = phrase,
-            attacking = atk, tapped = atk or sentence:find("tapped", 1, true) ~= nil })
+          local act = { what = "token", who = "you", n = n, spec = spec, phrase = phrase,
+            attacking = atk, tapped = atk or sentence:find("tapped", 1, true) ~= nil }
+          -- "create a Food token or a Treasure token" (Tireless Provisioner):
+          -- the controller chooses which one.
+          local altPhrase = rest:match("^[^.]- token or an? ([^.]-) token")
+          if altPhrase then
+            local spec2 = { words = {}, colors = {} }
+            for w in altPhrase:gmatch("%S+") do
+              if w:find("^%d+/%d+$") then
+                spec2.pt = w
+              elseif COLOR[w] then
+                spec2.colors[COLOR[w]] = true
+              elseif not SKIP[w] and w:find("^%a+$") then
+                table.insert(spec2.words, w)
+              end
+            end
+            if #spec2.words > 0 then
+              act.alt = { spec = spec2, phrase = altPhrase }
+            end
+          end
+          table.insert(actions, act)
         end
       end
     end
@@ -445,6 +499,22 @@ function Effects.parse(text, sourceName)
           or (counted.kind == "token" and ac.what == "token") then
         ac.countWord, ac.countScope = counted.word, counted.scope
       end
+    end
+  end
+  -- Goad: "goad target creature [an opponent controls]" (Baeloth, Disrupt Decorum).
+  if t:find("goad target creature", 1, true) or t:find("goad up to one target creature", 1, true) then
+    table.insert(actions, { what = "goad", who = "you", n = 1 })
+  end
+  -- Corroding Dragonstorm: "return this enchantment to its owner's hand".
+  if t:find("return ~ to its owner's hand", 1, true) then
+    table.insert(actions, { what = "bounceSelf", who = "you", n = 1 })
+  end
+  -- Fabricate N (Marionette Apprentice): N +1/+1 counters on it, or N 1/1
+  -- Servo artifact creature tokens.
+  do
+    local fab = t:match("^%s*fabricate (%d+)")
+    if fab then
+      table.insert(actions, { what = "fabricate", who = "you", n = tonumber(fab) })
     end
   end
   -- "Amass Zombies 1": put N +1/+1 counters on your Army (make a 0/0 Army
@@ -716,6 +786,20 @@ local function describe(a, target, controller)
     return who .. (you and " search " or " searches ") .. "the library for " .. tostring(a.phrase)
   elseif a.what == "counter" then
     return a.n .. " " .. tostring(a.label) .. " counter" .. (a.n == 1 and "" or "s") .. " added"
+  elseif a.what == "exactLife" then
+    return "players with exactly " .. a.life .. " life lose the game, then everyone " .. (a.dir == "gain" and "gains " or "loses ") .. a.n .. " life"
+  elseif a.what == "oppMayDraw" then
+    return "target opponent may draw " .. a.n .. " cards (or " .. a.counters .. " +1/+1 counters on it)"
+  elseif a.what == "contract" then
+    return "the damaged player may discard their hand, draw seven cards and get a contract counter"
+  elseif a.what == "goad" then
+    return "goads a target creature"
+  elseif a.what == "bounceSelf" then
+    return "it returns to its owner's hand"
+  elseif a.what == "chaosWarp" then
+    return "a target permanent is shuffled into its owner's library, then the top card may enter"
+  elseif a.what == "fabricate" then
+    return "Fabricate " .. a.n .. ": a +1/+1 counter or a Servo token"
   elseif a.what == "bounce" then
     return who .. " returns a " .. tostring(a.type) .. " to hand"
   elseif a.what == "untap" or a.what == "tap" then
@@ -769,6 +853,9 @@ local function describe(a, target, controller)
     return "it goes " .. a.n .. "th from the top of the library"
   end
   if a.what == "gain" then
+    if a.thatMuch then
+      return who .. (you and " gain " or " gains ") .. "that much life"
+    end
     if a.perSpell then
       return who .. (you and " gain " or " gains ") .. a.n .. " life for each spell cast this turn"
     end
@@ -822,6 +909,9 @@ local function apply(it, plan, target)
       if seat and GameState.player(seat) then
         if a.what == "gain" then
           local gain = a.n
+          if a.thatMuch then
+            gain = it.amount or 0
+          end
           if a.perSpell then
             gain = a.n * math.max(1, Effects.spellsThisTurn(controller))
             printToAll("MTG > " .. it.name .. ": " .. controller .. " has cast " .. math.max(1, Effects.spellsThisTurn(controller))
@@ -861,12 +951,96 @@ local function apply(it, plan, target)
           Effects.pickBounce(seat, a, it.name, it.source)
         elseif a.what == "token" then
           local made = amountOf(a, controller, it.name)
+          local opts = (a.tapped or a.attacking) and { tapped = a.tapped, attacking = a.attacking, from = it.thatCard or it.source } or nil
           if made < 1 then
             printToAll("MTG > " .. it.name .. ": no tokens (the count is 0).", INFO)
+          elseif a.alt then
+            local first = tostring(a.phrase):gsub("^an? ", "")
+            local second = tostring(a.alt.phrase):gsub("^an? ", "")
+            Effects.askChoice(seat, it.name .. ": which token?", "Create " .. first .. " or " .. second .. ".",
+              { { label = string.upper(first), value = 1 }, { label = string.upper(second), value = 2 } }, function(i)
+                local pickSpec = i == 1 and a.spec or a.alt.spec
+                printToAll("MTG > " .. seat .. " chose " .. (i == 1 and first or second) .. " (" .. it.name .. ").", GOOD)
+                Tokens.create(seat, pickSpec, made, it.name, opts)
+              end)
           else
-            Tokens.create(seat, a.spec, made, it.name,
-              (a.tapped or a.attacking) and { tapped = a.tapped, attacking = a.attacking, from = it.thatCard or it.source } or nil)
+            Tokens.create(seat, a.spec, made, it.name, opts)
           end
+        elseif a.what == "exactLife" then
+          -- Once, not once per seat: handled below the seat loop.
+          if seat == seats[1] then
+            for _, c in ipairs(players()) do
+              local p = GameState.player(c)
+              if p and not p.eliminated and p.life == a.life then
+                Trackers.flagLoss(c, "exactly " .. a.life .. " life (" .. it.name .. ")")
+              end
+            end
+            for _, c in ipairs(players()) do
+              local p = GameState.player(c)
+              if p and not p.eliminated then
+                Trackers.changeLife(c, a.dir == "gain" and a.n or -a.n, it.name)
+              end
+            end
+            broadcastToAll(it.name .. ": every player " .. (a.dir == "gain" and "gained " or "lost ") .. a.n .. " life.", { 1, 0.85, 0.3 })
+          end
+        elseif a.what == "oppMayDraw" then
+          local src = it.source and getObjectFromGUID(it.source)
+          Effects.askChoice(seat, it.name .. ": draw " .. a.n .. " cards?",
+            controller .. "'s " .. it.name .. ": draw " .. a.n .. " cards, or " .. controller .. " gets "
+            .. a.counters .. " +1/+1 counters on it.",
+            { { label = "DRAW " .. a.n, value = true }, { label = "DON'T", value = false } }, function(draw)
+              if draw then
+                printToAll("MTG > " .. seat .. " draws " .. a.n .. " cards (" .. it.name .. ").", INFO)
+                Actions.draw(seat, a.n, it.name)
+                if a.cast then
+                  printToAll("MTG > " .. it.name .. ": " .. controller .. " looks at " .. seat
+                    .. "'s hand and may cast a spell from it without paying its mana cost (by hand).", GOOD)
+                  broadcastToColor("Look at " .. seat .. "'s hand: you may cast a spell from it for free (do it by hand).", controller, GOOD)
+                end
+              elseif src and not src.isDestroyed() then
+                Counters.change(src, "plus", a.counters, controller)
+                printToAll("MTG > " .. seat .. " declines: " .. it.name .. " gets " .. a.counters .. " +1/+1 counters.", GOOD)
+              else
+                printToAll("MTG > " .. seat .. " declines: " .. controller .. " puts " .. a.counters .. " +1/+1 counters on " .. it.name .. " by hand.", INFO)
+              end
+            end)
+        elseif a.what == "contract" then
+          Effects.contractOffer(seat, controller, it)
+        elseif a.what == "goad" then
+          Effects.askChoice(seat, it.name .. ": goad a creature", "Click GOAD on the creature (it attacks each combat if able, and a player other than " .. seat .. " if able).",
+            { { label = "SKIP", value = false } }, function(obj)
+              if obj then
+                Counters.setGoad(obj, seat)
+                printToAll("MTG > " .. obj.getName() .. " is goaded by " .. seat .. " (" .. it.name .. ").", { 1, 0.6, 0.2 })
+                broadcastToAll(obj.getName() .. " is GOADED by " .. seat .. ".", { 1, 0.6, 0.2 })
+              end
+            end, { filter = function(obj, owner)
+              return Effects.cardTypes(obj).creature == true
+            end, label = "GOAD" })
+        elseif a.what == "bounceSelf" then
+          local src = it.source and getObjectFromGUID(it.source)
+          if src and not src.isDestroyed() then
+            Effects.returnSelf(src)
+          else
+            printToAll("MTG > " .. it.name .. " isn't on the table any more.", INFO)
+          end
+        elseif a.what == "chaosWarp" then
+          Effects.chaosWarp(seat, it)
+        elseif a.what == "fabricate" then
+          local src = it.source and getObjectFromGUID(it.source)
+          Effects.askChoice(seat, it.name .. ": Fabricate " .. a.n, "Put " .. a.n .. " +1/+1 counter" .. (a.n == 1 and "" or "s") .. " on it, or create "
+            .. a.n .. " 1/1 Servo token" .. (a.n == 1 and "" or "s") .. ".",
+            { { label = "+1/+1 COUNTER", value = 1 }, { label = "SERVO TOKEN", value = 2 } }, function(i)
+              if i == 1 and src and not src.isDestroyed() then
+                Counters.change(src, "plus", a.n, seat)
+                printToAll("MTG > " .. seat .. " put " .. a.n .. " +1/+1 counter(s) on " .. it.name .. " (fabricate).", GOOD)
+              else
+                if i == 1 then
+                  printToAll("MTG > " .. it.name .. " isn't on the table: making Servo tokens instead.", INFO)
+                end
+                Tokens.create(seat, { pt = "1/1", words = { "servo" }, colors = {} }, a.n, it.name)
+              end
+            end)
         elseif a.what == "amass" then
           Effects.amass(seat, a.kind, a.n, it.name)
         elseif a.what == "pump" then
@@ -1059,6 +1233,11 @@ local function ask(seat, title, text, choices, onPick, pick, number)
   end
 end
 
+-- For code above `ask` in this file (apply).
+function Effects.askChoice(seat, title, text, choices, onPick, pick)
+  ask(seat, title, text, choices, onPick, pick)
+end
+
 function ui_effPick(player, arg)
   local seat, i = tostring(arg):match("^(%a+)_(%d+)$")
   local q = current
@@ -1187,10 +1366,36 @@ function Effects.resolve(it)
     end
     if #modes > 0 then
       local lines, choices = {}, {}
+      -- Modes that start alike (Triskaidekaphobia): the buttons show where
+      -- they differ, from the last shared word on.
+      local common = 0
+      if #modes > 1 then
+        local first = modes[1]
+        local limit = #first
+        for _, m in ipairs(modes) do
+          limit = math.min(limit, #m)
+        end
+        for k = 1, limit do
+          local same = true
+          for _, m in ipairs(modes) do
+            if m:sub(k, k) ~= first:sub(k, k) then
+              same = false
+            end
+          end
+          if not same then
+            break
+          end
+          common = k
+        end
+        while common > 0 and first:sub(common, common) ~= " " do
+          common = common - 1
+        end
+      end
       for i, m in ipairs(modes) do
         if i <= MAX_CHOICES then
-          table.insert(lines, i .. ") " .. (#m > 70 and (m:sub(1, 68) .. "...") or m))
-          table.insert(choices, { label = tostring(i), value = i })
+          table.insert(lines, i .. ") " .. (#m > 150 and (m:sub(1, 148) .. "...") or m))
+          local tail = common > 0 and m:sub(common + 1):gsub("^%s+", ""):gsub("[%.]+$", "") or ""
+          table.insert(choices, { label = (tail ~= "" and #tail <= 30) and (i .. ": " .. tail) or tostring(i), value = i })
         end
       end
       ask(it.controller, it.name .. ": choose a mode", table.concat(lines, "\n"), choices, function(i)
@@ -1201,6 +1406,8 @@ function Effects.resolve(it)
         copy.text = modes[i]
         copy.modePicked = true
         printToAll("MTG > " .. it.controller .. " chose: " .. modes[i], INFO)
+        -- On-screen banner for everyone: which mode was chosen.
+        broadcastToAll(it.name .. " (" .. it.controller .. ") chose: " .. (#modes[i] > 140 and (modes[i]:sub(1, 138) .. "...") or modes[i]), { 1, 0.85, 0.3 })
         Effects.resolve(copy)
       end)
       return
@@ -1486,6 +1693,7 @@ local function cardTypes(obj)
   end)
   return t
 end
+Effects.cardTypes = cardTypes
 
 local function fieldSeat(obj)
   local loc = Zones.regionAt(obj.getPosition())
@@ -1618,6 +1826,123 @@ function Effects.pickBounce(seat, a, sourceName, sourceGuid)
         printToAll("MTG > " .. sourceName .. ": nothing returned.", INFO)
       end
     end, { filter = filter, label = "RETURN" })
+end
+
+-- Miss Highwater: the damaged player may discard their hand, draw seven and
+-- get a contract counter (a marker beside their battlefield). When they lose
+-- the game with it, the table reminds Miss Highwater's controller.
+function Effects.contractOffer(victim, controller, it)
+  local p = GameState.player(victim)
+  if p == nil then
+    return
+  end
+  if p.contract then
+    printToAll("MTG > " .. victim .. " already has a contract counter (" .. it.name .. "): nothing happens.", INFO)
+    return
+  end
+  Effects.askChoice(victim, it.name .. ": discard your hand?",
+    "Discard your hand, draw seven cards and get a contract counter? (When you lose the game, " .. controller
+    .. " makes token copies of each artifact and creature you controlled.)",
+    { { label = "DISCARD + DRAW 7", value = true }, { label = "NO", value = false } }, function(yes)
+      if not yes then
+        printToAll("MTG > " .. victim .. " keeps their hand (" .. it.name .. ").", INFO)
+        return
+      end
+      Actions.discardHand(victim, it.name)
+      Wait.time(function() Actions.draw(victim, 7, it.name) end, 1.2)
+      p.contract = controller
+      printToAll("MTG > " .. victim .. " got a contract counter (" .. it.name .. ").", GOOD)
+      broadcastToAll(victim .. " now has a CONTRACT COUNTER.", { 1, 0.75, 0.3 })
+      local pos = TableSetup.slot(victim, "battlefield", TableSetup.SURFACE_TOP + 1)
+      local s = TableSetup.seat(victim)
+      local obj = spawnObject({
+        type = "Custom_Token",
+        position = { pos.x + s.right.x * 11, TableSetup.SURFACE_TOP + 0.6, pos.z + s.right.z * 11 },
+        rotation = { 0, s.yaw, 0 },
+        sound = false,
+        callback_function = function(o)
+          o.setName("Contract counter (" .. victim .. ")")
+          o.setDescription(victim .. " has a contract counter from " .. it.name .. ". When they lose the game, "
+            .. controller .. " creates a token copy of each artifact and creature they controlled.")
+          o.addTag("ContractCounter")
+          Wait.condition(function()
+            local b = o.getBoundsNormalized()
+            local w = b and b.size and b.size.x or 0
+            if w > 0.05 then
+              local k = 1.6 / (w / o.getScale().x)
+              o.setScale({ k, 1, k })
+            end
+          end, function() return o.isDestroyed() or not o.loading_custom end, 10)
+        end,
+      })
+      obj.setCustomObject({ image = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/ui/contract.png?v=1",
+        thickness = 0.1, merge_distance = 5, stackable = false })
+    end)
+end
+
+function Effects.returnSelf(obj)
+  returnToHand(obj)
+end
+
+-- Chaos Warp: pick the permanent, shuffle it into its owner's library, reveal
+-- the top card, and put it onto the battlefield if it's a permanent card.
+function Effects.chaosWarp(seat, it)
+  local function reveal(owner)
+    Library.revealTop(owner, function(card)
+      if card == nil then
+        printToAll("MTG > " .. it.name .. ": " .. owner .. "'s library is empty.", INFO)
+        return
+      end
+      local isPermanent = true
+      pcall(function()
+        local d = JSON.decode(card.getGMNotes())
+        for _, t in ipairs(type(d) == "table" and d.types or {}) do
+          local tl = tostring(t):lower()
+          if tl == "instant" or tl == "sorcery" then
+            isPermanent = false
+          end
+        end
+      end)
+      printToAll("MTG > " .. it.name .. ": " .. owner .. " reveals " .. card.getName() .. (isPermanent and ": it enters the battlefield." or ": not a permanent card, it goes back on top."), GOOD)
+      if isPermanent then
+        card.setLock(false)
+        local s = TableSetup.seat(owner)
+        card.setRotation({ 0, s.yaw, 0 })
+        card.setPosition(TableSetup.slot(owner, "battlefield", 2))
+        Wait.time(function()
+          if not card.isDestroyed() then Zones.refresh(card) end
+        end, 1.2)
+      else
+        Library.putAt(owner, card, 0)
+      end
+    end)
+  end
+  local filter = function(obj, owner)
+    return true
+  end
+  Effects.askChoice(seat, it.name .. ": choose the permanent", "Click CHAOS WARP on a permanent: its owner shuffles it into their library.",
+    { { label = "SKIP", value = false } }, function(obj)
+      if not obj then
+        printToAll("MTG > " .. it.name .. ": no target chosen.", INFO)
+        return
+      end
+      local loc = Zones.regionAt(obj.getPosition())
+      local owner = loc.seat or seat
+      local isToken = obj.hasTag("Token")
+      printToAll("MTG > " .. it.name .. ": " .. obj.getName() .. " is shuffled into " .. owner .. "'s library.", INFO)
+      if isToken then
+        obj.destruct()
+        reveal(owner)
+      else
+        obj.setLock(false)
+        Library.putAt(owner, obj, 0, function(lib)
+          if lib and lib.type == "Deck" and lib.shuffle then
+            lib.shuffle()
+          end
+          Wait.time(function() reveal(owner) end, 1.0)
+        end)
+      end
+    end, { filter = filter, label = "CHAOS WARP" })
 end
 
 -- "You may sacrifice a land. If you do, ...": a SACRIFICE button on each of

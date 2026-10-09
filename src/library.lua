@@ -520,6 +520,30 @@ function Library.revealUntil(color, typeName, onDone)
   step()
 end
 
+-- Take the top card of the library face up beside it (Chaos Warp). onDone(card)
+-- gets nil when the library is empty.
+function Library.revealTop(color, onDone)
+  if #libraryPiles(color) > 1 then
+    Library.consolidate(color, function() Library.revealTop(color, onDone) end)
+    return
+  end
+  local lib = Library.find(color)
+  if lib == nil then
+    onDone(nil)
+    return
+  end
+  local s = TableSetup.seat(color)
+  local pos = TableSetup.slot(color, "library", 3.5)
+  if lib.type == "Deck" then
+    lib.takeObject({ index = 0, position = pos, rotation = { 0, s.yaw, 0 }, smooth = false,
+      callback_function = function(card) onDone(card) end })
+  else
+    lib.setPosition(pos)
+    lib.setRotation({ 0, s.yaw, 0 })
+    onDone(lib)
+  end
+end
+
 -- Put these cards on the bottom of the library in a random order.
 function Library.putBottomRandom(color, cards, onDone)
   local list = {}

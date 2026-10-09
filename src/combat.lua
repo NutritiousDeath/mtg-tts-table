@@ -558,6 +558,21 @@ local function unblock(blockerGuid)
   return a
 end
 
+-- Can this creature legally block that attacker? (flying / reach; "can't be
+-- blocked" is left to the players.) Returns ok, reason.
+local function canBlock(blocker, attacker)
+  if attacker == nil then
+    return true
+  end
+  if hasKeyword(attacker, "Flying") and not hasKeyword(blocker, "Flying") and not hasKeyword(blocker, "Reach") then
+    local oracle = tostring(cardData(blocker).oracle or ""):lower()
+    if not oracle:find("can block creatures with flying", 1, true) then
+      return false, "has flying and " .. blocker.getName() .. " has neither flying nor reach"
+    end
+  end
+  return true
+end
+
 function Combat.blockClick(card, color, alt)
   local c = state()
   if GameState.solo() then
@@ -596,6 +611,27 @@ function Combat.blockClick(card, color, alt)
     broadcastToColor(card.getName() .. " is tapped and can't block.", color, WARN)
     return
   end
+  -- Only attackers this creature may legally block (flying needs flying or
+  -- reach). The click cycles through those.
+  local legal, why = {}, nil
+  for _, g in ipairs(list) do
+    local ok, reason = canBlock(card, obj(g))
+    if ok then
+      table.insert(legal, g)
+    else
+      why = why or (obj(g) and (obj(g).getName() .. " " .. reason) or reason)
+    end
+  end
+  if #legal == 0 then
+    if current then
+      unblock(guid)
+      redraw(card)
+      redraw(obj(current))
+    end
+    broadcastToColor(card.getName() .. " can't block anything here: " .. tostring(why) .. ".", color, WARN)
+    return
+  end
+  list = legal
   local nextG
   if current == nil then
     nextG = list[1]
@@ -612,9 +648,11 @@ function Combat.blockClick(card, color, alt)
     c.blockOrder[nextG] = c.blockOrder[nextG] or {}
     table.insert(c.blockOrder[nextG], guid)
     local a = obj(nextG)
-    if a and hasKeyword(a, "Flying") and not hasKeyword(card, "Flying") and not hasKeyword(card, "Reach") then
-      broadcastToColor(a.getName() .. " has flying: " .. card.getName()
-        .. " can only block it with flying or reach (or if something allows it).", color, WARN)
+    if a and hasKeyword(a, "Menace") then
+      local n = #(c.blockOrder[nextG] or {})
+      if n < 2 then
+        broadcastToColor(a.getName() .. " has menace: it can't be blocked except by two or more creatures. Block it with another creature too, or this block is removed when blocks lock.", color, WARN)
+      end
     end
     redraw(a)
   end
@@ -655,7 +693,19 @@ local function lockBlocks()
         table.insert(parts, "damage order for " .. (a and a.getName() or "?") .. ": " .. table.concat(names, " then "))
       end
       if a and hasKeyword(a, "Menace") and #bl == 1 then
-        broadcastToAll(a.getName() .. " has menace: it needs two or more blockers. Fix the blocks if this is wrong.", WARN)
+        -- Menace: one blocker isn't a legal block. Taken back out.
+        broadcastToAll(a.getName() .. " has menace: one blocker (" .. bl[1].getName() .. ") isn't a legal block, so it's removed.", WARN)
+        local bg = bl[1].getGUID()
+        unblock(bg)
+        redraw(bl[1])
+        c.blocked[ag] = nil
+        for i = #blockList, 1, -1 do
+          if blockList[i].obj == bl[1] then
+            table.remove(blockList, i)
+          end
+        end
+        parts[#parts] = nil
+        bl = {}
       end
     end
   end
@@ -1036,6 +1086,76 @@ end
 -- A dead permanent leaves: tokens to the graveyard then gone, commanders to
 -- the command zone, everything else to its controller's graveyard.
 -- zone = "exile" sends it to exile instead (effects.lua: "exile all ...").
+-- Summoning sick right now: it came in during its controller's current turn
+-- and has no haste.
+function Combat.isSick(card)
+  if not GameState.data.started or card == nil or card.isDestroyed() then
+    return false
+  end
+  local t = turn()
+  local g = card.getGUID()
+  if t.taken == nil or entered()[g] ~= t.taken then
+    return false
+  end
+  if controller(card) ~= t.activeSeat or not isCreature(card) then
+    return false
+  end
+  return not hasKeyword(card, "Haste")
+end
+
+-- Is this creature attacking or blocking right now?
+function Combat.inCombat(card)
+  local c = GameState.data.combat
+  if c == nil or card == nil then
+    return false
+  end
+  local g = card.getGUID()
+  return (c.attackers and c.attackers[g] ~= nil) or (c.blocks and c.blocks[g] ~= nil) or false
+end
+
+-- Commanders: is this card one, and put it back in its owner's command zone.
+function Combat.isCommander(card)
+  return card ~= nil and not card.isDestroyed() and commanderKey(card) ~= nil
+end
+
+function Combat.toCommandZone(card, byColor)
+  local key, owner, slot = commanderKey(card)
+  if key == nil then
+    return false
+  end
+  card.setLock(false)
+  card.setRotation({ 0, TableSetup.seat(owner).yaw, 0 })
+  card.setPosition(TableSetup.slot(owner, "command" .. math.min(slot, 2), TableSetup.SURFACE_TOP + 1))
+  Wait.time(function()
+    if not card.isDestroyed() then
+      Zones.refresh(card)
+    end
+  end, 0.5)
+  broadcastToAll(card.getName() .. " went to " .. owner .. "'s command zone" .. (byColor and (" (" .. byColor .. ")") or "") .. ".", INFO)
+  return true
+end
+
+-- A token that leaves the battlefield ceases to exist: it slides back to the
+-- TOKENS tile (not the graveyard) and is gone.
+function Combat.tokenGone(card, seat)
+  if card == nil or card.isDestroyed() then
+    return
+  end
+  local spot = TableSetup.slot(seat, "act_tokens", TableSetup.SURFACE_TOP + 1.2)
+  card.setLock(false)
+  if spot then
+    card.setPositionSmooth(spot, false, true)
+  end
+  Wait.time(function()
+    if not card.isDestroyed() then
+      if Zones.forget then
+        Zones.forget(card.getGUID())
+      end
+      card.destruct()
+    end
+  end, 0.9)
+end
+
 local function sendToGraveyard(card, zone)
   zone = zone or "graveyard"
   local seat = controller(card)
@@ -1063,16 +1183,7 @@ local function sendToGraveyard(card, zone)
   end
   card.setRotation({ 0, s.yaw, 0 })
   if isToken(card) then
-    card.setPosition(TableSetup.slot(seat, zone, TableSetup.SURFACE_TOP + 1.5))
-    Zones.refresh(card)
-    Wait.time(function()
-      if not card.isDestroyed() then
-        if Zones.forget then
-          Zones.forget(card.getGUID())
-        end
-        card.destruct()
-      end
-    end, 1.5)
+    Combat.tokenGone(card, seat)
     return
   end
   card.setPosition(TableSetup.slot(seat, zone, TableSetup.SURFACE_TOP + 2))
@@ -1473,6 +1584,28 @@ Events.on("cardMoved", function(d)
     entered()[guid] = turn().taken
   elseif wasOn and not isOn then
     entered()[guid] = nil
+    -- A commander leaving the battlefield: offer the command zone.
+    if d.to and (d.to.region == "graveyard" or d.to.region == "exile" or d.to.region == "hand" or d.to.region == "library")
+        and GameState.data.started and commanderKey(d.card) and Effects and Effects.askChoice then
+      local _, owner = commanderKey(d.card)
+      local card = d.card
+      Wait.time(function()
+        if not card.isDestroyed() and Combat.isCommander(card) then
+          Effects.askChoice(owner, card.getName() .. " left the battlefield",
+            "Put " .. card.getName() .. " into the command zone instead?",
+            { { label = "COMMAND ZONE", value = true }, { label = "LEAVE IT", value = false } }, function(yes)
+              if yes and not card.isDestroyed() then
+                Combat.toCommandZone(card, owner)
+              end
+            end)
+        end
+      end, 0.8)
+    end
+    -- A token dragged (or sent) anywhere off the battlefield is gone.
+    local r = d.to and d.to.region
+    if (r == "graveyard" or r == "exile" or r == "hand" or r == "library") and d.card.hasTag("Token") then
+      Combat.tokenGone(d.card, d.to.seat or (d.from and d.from.seat) or "White")
+    end
     local c = GameState.data.combat
     if c and (c.attackers and c.attackers[guid] or c.blocks and c.blocks[guid]) then
       if c.attackers[guid] then

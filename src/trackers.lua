@@ -138,7 +138,7 @@ local function checkLoss(color)
   if p == nil or p.eliminated then
     return
   end
-  local reason = lossReason(p)
+  local reason = lossReason(p) or p.lossForced
   if reason == nil then
     p.lossFlag, p.lossDismissed = nil, nil
   elseif reason ~= p.lossFlag and reason ~= p.lossDismissed then
@@ -165,6 +165,9 @@ function Trackers.changeLife(color, delta, byColor)
   log(byColor, color .. " life " .. before .. " -> " .. p.life)
   checkLoss(color)
   Trackers.render(color)
+  if Triggers and Triggers.onLife then
+    Triggers.onLife(color, delta)
+  end
 end
 
 function Trackers.changePoison(color, delta, byColor)
@@ -202,6 +205,20 @@ function Trackers.changeCommanderDamage(color, key, delta, byColor)
   Trackers.render(color)
 end
 
+-- A card says this player loses the game ("each player with exactly 13
+-- life"): flagged for the players to confirm or dismiss on the tracker.
+function Trackers.flagLoss(color, reason)
+  local p = player(color)
+  if p == nil or p.eliminated then
+    return
+  end
+  p.lossForced = reason
+  p.lossFlag = reason
+  p.lossDismissed = nil
+  broadcastToAll(color .. " has " .. reason .. "! Confirm or dismiss on their tracker.", WARN)
+  Trackers.render(color)
+end
+
 function Trackers.confirmLoss(color, byColor)
   local p = player(color)
   if p == nil or p.lossFlag == nil then
@@ -209,7 +226,11 @@ function Trackers.confirmLoss(color, byColor)
   end
   p.eliminated = true
   broadcastToAll(color .. " is out of the game (" .. p.lossFlag .. ").", WARN)
+  if p.contract then
+    broadcastToAll(color .. " had a contract counter: " .. tostring(p.contract) .. " creates a token that's a copy of each artifact and creature " .. color .. " controlled (by hand).", { 1, 0.75, 0.3 })
+  end
   p.lossFlag = nil
+  p.lossForced = nil
   Trackers.render(color)
   -- Last player standing: the game is over; save the log.
   local left = {}
@@ -234,6 +255,7 @@ function Trackers.dismissLoss(color, byColor)
   log(byColor, color .. "'s loss check dismissed (" .. p.lossFlag .. ")")
   p.lossDismissed = p.lossFlag
   p.lossFlag = nil
+  p.lossForced = nil
   Trackers.render(color)
 end
 
