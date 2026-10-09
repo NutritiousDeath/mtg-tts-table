@@ -105,13 +105,17 @@ function Counters.stats(obj)
   if Equip and Equip.bonus then
     eqP, eqT = Equip.bonus(obj)
   end
+  local sP, sT = 0, 0
+  if Statics and Statics.bonus then
+    sP, sT = Statics.bonus(obj)
+  end
   local function apply(v, extra)
     local n = tonumber(v)
     return n and (n + bonus + extra) or v
   end
   return {
-    power = data.power and apply(data.power, c.tp + eqP) or nil,
-    toughness = data.toughness and apply(data.toughness, c.tt + eqT) or nil,
+    power = data.power and apply(data.power, c.tp + eqP + sP) or nil,
+    toughness = data.toughness and apply(data.toughness, c.tt + eqT + sT) or nil,
     loyalty = c.loyalty,
     counters = c,
   }
@@ -477,6 +481,15 @@ function Counters.renderAll()
   end
 end
 
+function Counters.remember(obj)
+  if not isCard(obj) then return end
+  local c = Counters.get(obj)
+  if c.plus ~= 0 or c.minus ~= 0 or c.loyalty ~= 0 or c.other ~= 0 then
+    Counters.lastKnown = Counters.lastKnown or {}
+    Counters.lastKnown[obj.getGUID()] = c
+  end
+end
+
 function Counters.clear(obj)
   if not isCard(obj) then
     return
@@ -715,11 +728,20 @@ Events.on("cardMoved", function(d)
   Wait.frames(function() Counters.refreshMenu(d.card) end, 2)
   if wasOn and not isOn then
     -- Left the battlefield: counters go away.
+      -- Last known counters, for "when this dies, create a token for each +1/+1 counter on it".
+      local okc, snap = pcall(Counters.get, d.card)
+      if okc and snap and (snap.plus ~= 0 or snap.minus ~= 0 or snap.loyalty ~= 0 or snap.other ~= 0) then
+        Counters.lastKnown = Counters.lastKnown or {}
+        local cp = {}
+        for k, v in pairs(snap) do cp[k] = v end
+        Counters.lastKnown[d.card.getGUID()] = cp
+      end
     if d.card.memo and d.card.memo ~= "" then
       Counters.clear(d.card)
     end
   elseif isOn and not wasOn then
     -- Entered the battlefield: planeswalkers get their printed loyalty.
+    if Counters.lastKnown then Counters.lastKnown[d.card.getGUID()] = nil end
     startingLoyalty(d.card)
     Counters.render(d.card)
   end

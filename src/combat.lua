@@ -1205,9 +1205,12 @@ end
 
 -- A token that leaves the battlefield ceases to exist: it slides back to the
 -- TOKENS tile (not the graveyard) and is gone.
-function Combat.tokenGone(card, seat)
+function Combat.tokenGone(card, seat, zone)
   if card == nil or card.isDestroyed() then
     return
+  end
+  if Effects and Effects.cloneLeft then
+    Effects.cloneLeft(card, seat, zone)
   end
   local spot = TableSetup.slot(seat, "act_tokens", TableSetup.SURFACE_TOP + 1.2)
   card.setLock(false)
@@ -1249,9 +1252,10 @@ local function sendToGraveyard(card, zone)
       .. " prefers).", INFO)
     return
   end
+  if Counters and Counters.remember then Counters.remember(card) end
   card.setRotation({ 0, s.yaw, 0 })
   if isToken(card) then
-    Combat.tokenGone(card, seat)
+    Combat.tokenGone(card, seat, zone)
     return
   end
   card.setPosition(TableSetup.slot(seat, zone, TableSetup.SURFACE_TOP + 2))

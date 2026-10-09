@@ -248,6 +248,14 @@ function Tokens.spawn(color, r, n, opts)
   if r.tpl == nil and r.entry then
     r.tpl = buildTpl(r)
   end
+  -- Anointed Procession / Doubling Season: twice as many.
+  if not (opts and opts.noMods) and Statics and Statics.tokenMultiplier then
+    local m = Statics.tokenMultiplier(color)
+    if m > 1 then
+      printToAll("MTG > " .. color .. "'s token doubler: " .. n .. " " .. tostring(r.name) .. " becomes " .. (n * m) .. ".", { 0.55, 0.9, 0.6 })
+      n = n * m
+    end
+  end
   local s = TableSetup.seat(color)
   local base = TableSetup.slot(color, "battlefield", 2)
   for k = 1, n do
@@ -352,6 +360,22 @@ local function best(list, spec)
 end
 
 function Tokens.create(color, spec, n, sourceName, opts)
+  -- Academy Manufactor: a Clue, Food or Treasure becomes one of each.
+  if not (opts and opts.manufactor) and Statics and Statics.hasManufactor and Statics.hasManufactor(color) then
+    local w = table.concat(spec.words or {}, " ")
+    if w == "treasure" or w == "clue" or w == "food" then
+      printToAll("MTG > Academy Manufactor: " .. n .. " " .. w .. " becomes " .. n .. " Clue, " .. n .. " Food and " .. n .. " Treasure.", { 0.55, 0.9, 0.6 })
+      for _, word in ipairs({ "clue", "food", "treasure" }) do
+        local o2 = {}
+        for k, v in pairs(opts or {}) do
+          o2[k] = v
+        end
+        o2.manufactor = true
+        Tokens.create(color, { words = { word }, colors = {}, pt = spec.pt }, n, sourceName, o2)
+      end
+      return
+    end
+  end
   local p = GameState.player(color)
   local fromDeck = best(p and p.deckTokens or {}, spec)
   if fromDeck then

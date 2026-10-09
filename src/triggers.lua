@@ -239,6 +239,21 @@ local function parseTrigger(p)
   if plainFind(p, "whenever a player draws a card") then
     return { kind = "draw", who = "each" }
   end
+  -- Faerie Mastermind: "whenever an opponent draws their second card each turn".
+  do
+    local who, ord = p:match("whenever (%a+) draws? their (%a+) card each turn")
+    local ORDN = { second = 2, third = 3 }
+    if ord and ORDN[ord] then
+      return { kind = "draw", who = (who == "an" or who == "opponent") and "opp" or "each", nth = ORDN[ord] }
+    end
+    if plainFind(p, "whenever an opponent draws their second card each turn") then
+      return { kind = "draw", who = "opp", nth = 2 }
+    end
+  end
+  -- The Endstone / Rampaging Baloths style: "whenever you play a land" (from hand, not fetched).
+  if plainFind(p, "whenever you play a land") then
+    return { kind = "enters", subject = "land", subjects = { "land" }, mine = true, playedOnly = true }
+  end
   -- Enters.
   if plainFind(p, "when ~ enters") or plainFind(p, "whenever ~ enters") or plainFind(p, "when ~ and ") and plainFind(p, " enter") then
     return { kind = "enters", self = true }
@@ -372,6 +387,21 @@ local function parseTrigger(p)
   if plainFind(p, "whenever an opponent casts a spell") then
     return { kind = "cast", who = "opp" }
   end
+  if plainFind(p, "whenever you cast a spell during an opponent's turn") then
+    return { kind = "cast", who = "you", oppTurn = true }
+  end
+  -- Clarion Spirit: "whenever you cast your second spell each turn" (also third...).
+  do
+    local ord = p:match("whenever you cast your (%a+) spell each turn")
+    local ORDN = { second = 2, third = 3, fourth = 4, fifth = 5 }
+    if ord and ORDN[ord] then
+      return { kind = "cast", who = "you", nth = ORDN[ord] }
+    end
+  end
+  -- Ugin, Eye of the Storms: "When you cast this spell".
+  if plainFind(p, "when you cast this spell") or plainFind(p, "when you cast ~") then
+    return { kind = "castSelf" }
+  end
   local castType = between(p, "whenever you cast a", " spell")
   castType = castType and castType:gsub("^n? ", "") or nil
   if castType and #castType < 30 and castType ~= "" then
@@ -499,6 +529,10 @@ local function abilitiesOf(obj)
     if para ~= "" then
       local norm = normalize(para, d.name)
       local trig = parseTrigger(norm)
+      if norm:find("whenever you play a land or cast a spell", 1, true) then
+        table.insert(list, { trig = { kind = "enters", subject = "land", subjects = { "land" }, mine = true, playedOnly = true }, text = para })
+        trig = { kind = "cast", who = "you" }
+      end
       if trig then
         table.insert(list, { trig = trig, text = para })
       end
@@ -959,13 +993,27 @@ Events.on("cardMoved", function(d)
   end
   -- A card drawn: library -> hand.
   if d.from.region == "library" and d.to.region == "hand" and d.to.seat then
+    do
+      local gd = GameState.data
+      local turnNo = gd.turn and gd.turn.taken
+      local dl = gd.drawLog
+      if dl == nil or dl.turn ~= turnNo then
+        dl = { turn = turnNo, by = {} }
+        gd.drawLog = dl
+      end
+      dl.by[d.to.seat] = (dl.by[d.to.seat] or 0) + 1
+    end
     local found = {}
     for _, p in ipairs(permanents()) do
       for _, a in ipairs(abilitiesOf(p.obj)) do
         local t = a.trig
         if t.kind == "draw" then
           local mine = p.controller == d.to.seat
-          if t.who == "each" or (t.who == "you" and mine) or (t.who == "opp" and not mine) then
+          local nthOk = true
+          if t.nth then
+            nthOk = (GameState.data.drawLog and GameState.data.drawLog.by[d.to.seat] or 0) == t.nth
+          end
+          if nthOk and (t.who == "each" or (t.who == "you" and mine) or (t.who == "opp" and not mine)) then
             table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
           end
         end
@@ -1007,6 +1055,7 @@ Events.on("cardMoved", function(d)
             and not (t.tapped and not entersTappedNow(card))
             and not (t.goaded and not (Counters.goadedBy(card) and Combat and Combat.inCombat and Combat.inCombat(card)))
             and not (t.nontoken and isToken(card))
+            and not (t.playedOnly and d.from.region ~= "hand")
             and not (t.mine and cardController ~= p.controller)
             and not (t.theirs and cardController == p.controller) then
           table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
@@ -1149,6 +1198,17 @@ local function spellMatches(card, spellType)
   if spellType == "instant or sorcery" then
     return t.instant or t.sorcery
   end
+  if spellType == "colorless" then
+    local dd = cardData(card)
+    local cols = dd and dd.colors
+    local n = 0
+    if type(cols) == "table" then
+      for _ in pairs(cols) do
+        n = n + 1
+      end
+    end
+    return n == 0 and not t.land
+  end
   local first = spellType:match("^(%a+)")
   return first ~= nil and t[first] == true
 end
@@ -1158,12 +1218,40 @@ Events.on("spellCast", function(d)
     return
   end
   local found = {}
+  local seatNo
+  do
+    local gd = GameState.data
+    local turnNo = gd.turn and gd.turn.taken
+    local sc = gd.spellCount
+    if sc == nil or sc.turn ~= turnNo then
+      sc = { turn = turnNo, by = {} }
+      gd.spellCount = sc
+    end
+    sc.by[d.controller] = (sc.by[d.controller] or 0) + 1
+    seatNo = sc.by[d.controller]
+  end
+  -- "When you cast this spell" on the spell itself.
+  for _, a in ipairs(abilitiesOf(d.card)) do
+    if a.trig.kind == "castSelf" then
+      table.insert(found, { obj = d.card, controller = d.controller, text = a.text, guid = d.card.getGUID(),
+        name = d.card.getName(), face = faceOf(d.card) })
+    end
+  end
   for _, p in ipairs(permanents()) do
     for _, a in ipairs(abilitiesOf(p.obj)) do
       local t = a.trig
       if t.kind == "cast" then
         local mine = p.controller == d.controller
         local firstOk = true
+        if t.nth and seatNo ~= t.nth then
+          firstOk = false
+        end
+        if t.oppTurn then
+          local active = GameState.data.turn and GameState.data.turn.activeSeat
+          if active == p.controller then
+            firstOk = false
+          end
+        end
         if t.first then
           local fc = GameState.data.firstCast
           local turnNo = GameState.data.turn and GameState.data.turn.taken
@@ -1422,5 +1510,6 @@ function Triggers.describe(obj)
 end
 
 Triggers.parse = parseTrigger
+Triggers.abilitiesOf = abilitiesOf
 Triggers.parseCombat = parseCombat
 Triggers.normalize = normalize

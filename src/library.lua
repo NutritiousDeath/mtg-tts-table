@@ -417,9 +417,9 @@ end
 -- Exile cards from the top of a library: until a nonland card is exiled
 -- (Etali, Primal Conqueror), or just the top card (onlyOne). Calls
 -- onDone(nonland card or nil, all exiled cards).
-function Library.exileUntilNonland(color, onlyOne, onDone)
+function Library.exileUntilNonland(color, onlyOne, onDone, accept)
   if #libraryPiles(color) > 1 then
-    Library.consolidate(color, function() Library.exileUntilNonland(color, onlyOne, onDone) end)
+    Library.consolidate(color, function() Library.exileUntilNonland(color, onlyOne, onDone, accept) end)
     return
   end
   local s = TableSetup.seat(color)
@@ -451,7 +451,7 @@ function Library.exileUntilNonland(color, onlyOne, onDone)
           Zones.refresh(card)
         end
       end, 0.6)
-      if not isLand then
+      if not isLand and (accept == nil or accept(card)) then
         found = card
       end
       if onlyOne or found then

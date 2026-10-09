@@ -155,6 +155,23 @@ local function log(byColor, msg)
   printToAll("MTG > " .. msg .. (byColor and (" (by " .. byColor .. ")") or ""), { 0.75, 0.8, 0.9 })
 end
 
+-- Life gained / lost this turn per seat ("if you gained 5 or more life this turn").
+function Trackers.lifeThisTurn(color)
+  local gd = GameState.data
+  local turnNo = gd.turn and gd.turn.taken
+  local ll = gd.lifeLog
+  if ll == nil or ll.turn ~= turnNo then
+    ll = { turn = turnNo, by = {} }
+    gd.lifeLog = ll
+  end
+  local rec = ll.by[color]
+  if rec == nil then
+    rec = { gained = 0, lost = 0 }
+    ll.by[color] = rec
+  end
+  return rec
+end
+
 function Trackers.changeLife(color, delta, byColor)
   local p = player(color)
   if p == nil or delta == 0 then
@@ -162,6 +179,14 @@ function Trackers.changeLife(color, delta, byColor)
   end
   local before = p.life
   p.life = p.life + delta
+  do
+    local rec = Trackers.lifeThisTurn(color)
+    if delta > 0 then
+      rec.gained = rec.gained + delta
+    else
+      rec.lost = rec.lost - delta
+    end
+  end
   log(byColor, color .. " life " .. before .. " -> " .. p.life)
   checkLoss(color)
   Trackers.render(color)

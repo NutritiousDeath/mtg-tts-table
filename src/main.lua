@@ -67,6 +67,7 @@ require("src/equip")
 require("src/ring")
 require("src/walkers")
 require("src/effects")
+require("src/statics")
 require("src/faces")
 require("src/flip")
 require("src/token_data")
@@ -96,7 +97,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.30 (built-in token list)"
+SCRIPT_VERSION = "1.32 (Kasla, Arcum, Urza decks: tokens, statics, blink, clones)"
 
 function onLoad(saved)
   GameLog.setup()

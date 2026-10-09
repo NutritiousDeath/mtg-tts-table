@@ -105,6 +105,19 @@ function Effects.parse(text, sourceName)
   -- Several paragraphs (a spell: "This spell can't be countered." then
   -- "Destroy all creatures."): read them as sentences.
   t = t:gsub("\n", " ")
+  -- "Until end of turn, ~ gets +2/+2 and gains lifelink." reads the same as the trailing form.
+  if t:sub(1, 20) == " until end of turn, " then
+    local rest = t:sub(21)
+    local dot = rest:find(".", 1, true)
+    if dot then
+      t = " " .. rest:sub(1, dot - 1) .. " until end of turn" .. rest:sub(dot)
+    else
+      t = " " .. rest:gsub("%s+$", "") .. " until end of turn "
+    end
+  end
+  -- A token "with '<its own ability>'" (Urza's Construct: "+1/+1 for each artifact"): the token's
+  -- own text isn't part of this effect.
+  t = t:gsub('(tokens?) with "[^"]*"', "%1"):gsub("(tokens?) with '[^']*'", "%1")
   -- A named token ("create Marit Lage, a legendary 20/20 black Avatar creature
   -- token"): the name is just a label for the token that follows.
   do
@@ -155,6 +168,14 @@ function Effects.parse(text, sourceName)
       counted = { kind = "lose", word = word, scope = "mine" }
       t = t:sub(1, a - 1) .. "deals 1 damage to any target" .. t:sub(b + 1)
     end
+    do
+      local e1, e2, w3 = t:find(", where x is the number of (%a+) on the battlefield", 1)
+      if e1 and t:find("create x ", 1, true) then
+        counted = { kind = "token", word = w3, scope = "all" }
+        t = t:sub(1, e1 - 1) .. t:sub(e2 + 1)
+        t = t:gsub("create x ", "create 1 ", 1)
+      end
+    end
     local c, d, w2, who = t:find(", where x is the number of (%a+) (%a+ ?%a*) control", 1)
     if c and t:find("create x ", 1, true) then
       counted = { kind = "token", word = w2, scope = who:find("opponent", 1, true) and "opponents" or "mine" }
@@ -187,6 +208,10 @@ function Effects.parse(text, sourceName)
     return { optional = false, notes = {}, conds = {},
       actions = { { what = "playerPro", who = "you", n = 1 } } }
   end
+  -- Niko, Light of Hope: exile a nonlegendary creature; the Shards become copies of it until the next end step, then it returns.
+  if t:find("shards you control become copies of it until the next end step", 1, true) then
+    return { optional = false, notes = {}, conds = {}, actions = { { what = "nikoSwap", who = "you", n = 1 } } }
+  end
   -- Kiki-Jiki / Twinflame: a token copy of a creature you control (haste, then sacrificed / exiled at end step).
   do
     local one = t:find("create a token that's a copy of target ", 1, true)
@@ -201,15 +226,124 @@ function Effects.parse(text, sourceName)
             or (t:find("exile it at the beginning of the next end step", 1, true) and "exile") or nil } } }
     end
   end
+  -- Windfall: everyone discards their hand, then draws as many as the most anyone discarded.
+  if t:find("each player discards their hand, then draws cards equal to the greatest number of cards a player discarded this way", 1, true) then
+    return { optional = false, notes = {}, conds = {}, actions = { { what = "windfall", who = "all", n = 1 } } }
+  end
+  -- Warstorm Surge: the creature that entered deals damage equal to its power to any target.
+  if t:find("it deals damage equal to its power to any target", 1, true) then
+    return { optional = false, notes = {}, conds = {}, actions = { { what = "powerHit", who = "you", n = 1 } } }
+  end
+  -- Metalworker / Nykthos: the player says how many ("for each card revealed", devotion), the table adds the mana.
+  do
+    local per = t:match("add (.-) for each card revealed")
+    if per then
+      local color, k = per:match("^{(%a)}"), 0
+      for _ in per:gmatch("{%a}") do
+        k = k + 1
+      end
+      return { optional = false, notes = {}, conds = {},
+        actions = { { what = "manaAsk", who = "you", n = 1, color = color:upper(), per = k, label = "cards revealed" } } }
+    end
+    if t:find("add an amount of mana of that color equal to your devotion to that color", 1, true) then
+      return { optional = false, notes = {}, conds = {},
+        actions = { { what = "manaAsk", who = "you", n = 1, pickColor = true, per = 1, label = "devotion to that color" } } }
+    end
+  end
+  -- Mirrorworks / Mechanized Production / Helm of the Host: a token copy of "that artifact" / "enchanted artifact" / "equipped creature".
+  do
+    local which = t:match("create a token that's a copy of (that %a+)") or t:match("create a token that's a copy of (enchanted %a+)")
+      or t:match("create a token that's a copy of (equipped %a+)")
+    if which then
+      return { optional = false, notes = {}, conds = {},
+        actions = { { what = "copyThat", who = "you", n = 1, which = which,
+          pay = t:match("you may pay ({[{}%w/]+})"),
+          haste = t:find("has haste", 1, true) ~= nil,
+          unlegend = t:find("isn't legendary", 1, true) ~= nil } } }
+    end
+  end
+  -- Tap / untap: "Untap target artifact." / "Untap all nonland permanents you control." / "Tap all creatures your opponents control." / "untap ~".
+  do
+    local tt = t:gsub("^%s+", ""):gsub("%s+$", ""):gsub("^\226\128\162%s*", "")
+    local seg = tt:match("^(untap .-)%.?$") or tt:match("^(tap .-)%.?$")
+    if seg and not seg:find("%.") and not seg:find(" then ", 1, true) and not seg:find(" and ", 1, true) then
+      local verb, rest = seg:match("^(%a+) (.+)$")
+      local a = { what = "tapX", who = "you", n = 1, mode = verb, kinds = {}, scope = "any", count = 1 }
+      local ok = true
+      if rest == "~" then
+        a.self = true
+      elseif rest:find("^all ") then
+        a.all = true
+        rest = rest:sub(5)
+      elseif rest:find("target ", 1, true) then
+        if rest:find("^up to two ") then
+          a.count, a.upTo = 2, true
+        elseif rest:find("^up to one ") then
+          a.count, a.upTo = 1, true
+        elseif rest:find("^two ") then
+          a.count = 2
+        end
+        a.other = rest:find("another ", 1, true) ~= nil
+        rest = rest:gsub("^up to %a+ ", ""):gsub("^%a+ target ", "target "):gsub("^another ", ""):gsub("^target ", ""):gsub("^another ", "")
+      else
+        ok = false
+      end
+      if ok then
+        if not a.self then
+          if rest:find("you control", 1, true) and not rest:find("opponent", 1, true) then
+            a.scope = "mine"
+          elseif rest:find("opponent", 1, true) or rest:find("you don't control", 1, true) then
+            a.scope = "opponents"
+          end
+          if rest:find("nonland", 1, true) then
+            a.kinds.nonland = true
+          end
+          local r2 = rest:gsub("nonland", "")
+          for _, w in ipairs({ "artifact", "creature", "land", "enchantment", "permanent", "planeswalker" }) do
+            if r2:find(w, 1, true) then
+              a.kinds[w] = true
+            end
+          end
+          if next(a.kinds) == nil then
+            ok = false
+          end
+        end
+        if ok then
+          return { optional = false, notes = {}, conds = {}, actions = { a } }
+        end
+      end
+    end
+  end
+  -- Edicts: "Each opponent sacrifices three creatures." / "Target player sacrifices a creature."
+  do
+    for _, w in ipairs({ "each opponent", "each player", "target opponent", "target player", "that player", "defending player" }) do
+      local c, ty = t:match(w .. " sacrifices (%a+) (%a+)")
+      if c and (num(c) or c == "a" or c == "an") then
+        ty = ty:gsub("s$", "")
+        local TY = { creature = true, artifact = true, enchantment = true, land = true, permanent = true, planeswalker = true }
+        if TY[ty] then
+          return { optional = false, notes = {}, conds = {},
+            actions = { { what = "edict", who = "you", n = num(c) or 1, scope = w, ty = ty } } }
+        end
+      end
+    end
+  end
   -- Counterspells: "Counter target spell." / "...noncreature spell" / "...blue spell" /
   -- "counter target activated or triggered ability". Mana Drain adds the mana later.
-  if t:find("^%s*counter target ") then
-    local filt = t:match("^%s*counter target ([%a ]-)spell")
-    local ability = t:find("^%s*counter target [%a ]-ability") ~= nil
-    if filt or ability then
-      return { optional = false, notes = {}, conds = {},
-        actions = { { what = "counterSpell", who = "you", n = 1, filter = (filt or ""):gsub("%s+$", ""), ability = ability,
-          drain = t:find("add an amount of {c} equal to that spell's mana value", 1, true) ~= nil } } }
+  do
+    local tc = t:gsub("this spell can't be countered%.", "")
+    if tc:find("^%s*counter target ") then
+      local filt = tc:match("^%s*counter target ([%a, ]-)spell")
+      local ability = tc:find("^%s*counter target [%a ]-ability") ~= nil
+      if filt or ability then
+        local unless = tc:match("unless its controller pays ({[{}%w/]+})") or tc:match("unless its controller pays (%w+ mana)")
+        return { optional = false, notes = {}, conds = {},
+          actions = { { what = "counterSpell", who = "you", n = 1, filter = (filt or ""):gsub("%s+$", ""), ability = ability,
+            mv = tonumber(tc:match("with mana value (%d+)") or ""), unless = unless,
+            wizardNote = tc:find("if you control a wizard", 1, true) ~= nil,
+            drain = tc:find("add an amount of {c} equal to that spell's mana value", 1, true) ~= nil,
+            give = tc:match("its controller creates (.-)%.") } } }
+      end
     end
   end
   if t:find("contract counter", 1, true) and t:find("discard their hand", 1, true) and t:find("draw seven cards", 1, true) then
@@ -253,6 +387,13 @@ function Effects.parse(text, sourceName)
         cond, rest = clean:match("^if ([^,]+), (.+)$")
         if cond == nil then
           cond, rest = clean:match("^then if ([^,]+), (.+)$")
+        end
+        -- "Create a 5/5 Horse token if you control a Horse." = "If you control a Horse, create ...".
+        if cond == nil and not clean:find("^if ") then
+          local eff, cc = clean:match("^(.-) if ([^,]+)$")
+          if eff and eff ~= "" and not eff:find(" instead", 1, true) and not eff:find("^you may ") then
+            cond, rest = cc:gsub("%.$", ""), eff:gsub("%.$", "") .. "."
+          end
         end
       end
       if cond and not rest:find("instead", 1, true) then
@@ -444,10 +585,15 @@ function Effects.parse(text, sourceName)
   elseif t:find(" tap it", 1, true) or t:find(" tap that ", 1, true) then
     table.insert(actions, { what = "tap", who = "you", n = 1 })
   end
+  local otherT = false
+  if t:find("one other target ", 1, true) or t:find("exile another target ", 1, true) or t:find("destroy another target ", 1, true) then
+    otherT = true
+    t = t:gsub("up to one other target ", "up to one target "):gsub("exile another target ", "exile target "):gsub("destroy another target ", "destroy target ")
+  end
   -- "Destroy all creatures", "exile all nonland permanents your opponents
   -- control", "destroy target artifact"...
   for _, verb in ipairs({ "destroy", "exile" }) do
-    for _, how in ipairs({ "all", "each", "target", "up to one target" }) do
+    for _, how in ipairs({ "all", "each", "target", "up to one target", "two target" }) do
       local a0 = t:find(verb .. " " .. how .. " ", 1, true)
       if a0 then
         local rest = t:sub(a0 + #verb + #how + 2)
@@ -470,10 +616,26 @@ function Effects.parse(text, sourceName)
             or t:find("return it to the battlefield", 1, true)) then
           types = {}
           -- Blink: the table exiles it and brings it back (enters triggers, summon sickness...).
-          if (t:find("return it to the battlefield", 1, true) or t:find("return that card to the battlefield", 1, true))
-              and phrase:find("creature", 1, true) then
+          if (t:find("return it to the battlefield", 1, true) or t:find("return that card to the battlefield", 1, true)
+              or t:find("return those cards to the battlefield", 1, true))
+              and (phrase:find("creature", 1, true) or phrase:find("artifact", 1, true) or phrase:find("permanent", 1, true)
+                or phrase:find("land", 1, true)) then
+            local sub = phrase:match("^(.-), then") or phrase
+            local kinds = {}
+            if sub:find("nonland", 1, true) then
+              kinds.nonland = true
+            end
+            local sub2 = sub:gsub("nonland", "")
+            for _, w in ipairs({ "creature", "artifact", "land" }) do
+              if sub2:find(w, 1, true) then
+                kinds[w] = true
+              end
+            end
             table.insert(actions, { what = "blink", who = "you", n = 1, thatCreature = phrase:find("that creature", 1, true) ~= nil,
-              own = phrase:find("you own", 1, true) ~= nil, other = phrase:find("another", 1, true) ~= nil })
+              own = phrase:find("you own", 1, true) ~= nil,
+              other = otherT or phrase:find("another", 1, true) ~= nil or phrase:find("other target", 1, true) ~= nil,
+              artifact = kinds.artifact == true, kinds = kinds, count = (how == "two target") and 2 or 1,
+              upTo = how == "up to one target" })
           end
         end
         if #types > 0 then
@@ -485,7 +647,9 @@ function Effects.parse(text, sourceName)
             scope = "mine"
           end
           table.insert(actions, { what = (how == "all" or how == "each") and "removeAll" or "removeTarget",
-            who = "you", n = 1, verb = verb, types = types, scope = scope, other = phrase:find("other", 1, true) ~= nil,
+            who = "you", n = 1, verb = verb, types = types, scope = scope, other = otherT or phrase:find("other", 1, true) ~= nil,
+            tapped = phrase:find("tapped", 1, true) ~= nil and not phrase:find("untapped", 1, true),
+            untilLeaves = verb == "exile" and (t:find("until ~ leaves the battlefield", 1, true) ~= nil),
             lifeEqualPower = lifeEqualPower, loseEqualMV = loseEqualMV,
             phrase = phrase:gsub("%.$", "") })
           break
@@ -585,13 +749,14 @@ function Effects.parse(text, sourceName)
   end
   -- "Return target creature card from your graveyard to your hand / to the
   -- battlefield" (Eternal Witness...): search the graveyard.
-  for _, dest in ipairs({ { "from your graveyard to your hand", "hand" }, { "from your graveyard to the battlefield", "battlefield" } }) do
+  for _, dest in ipairs({ { "from your graveyard to your hand", "hand" }, { "from your graveyard to the battlefield", "battlefield" },
+      { "from your graveyard on top of your library", "top" } }) do
     local g = t:find(dest[1], 1, true)
     if g then
       local before = t:sub(math.max(1, g - 60), g - 1)
-      local r = before:find("return ", 1, true)
+      local r = before:find("return ", 1, true) or before:find("put ", 1, true)
       if r then
-        local what = before:sub(r + 7):gsub("^up to %w+ ", ""):gsub("^target ", ""):gsub("^an? ", "")
+        local what = before:sub(r + (before:find("return ", 1, true) and 7 or 4)):gsub("^up to %w+ ", ""):gsub("^target ", ""):gsub("^an? ", "")
         local word = what:match("^(%a+) cards?") or ""
         if word == "card" or word == "target" then
           word = ""
@@ -697,7 +862,12 @@ function Effects.parse(text, sourceName)
       -- (the "you may cast" sentence can be on its own line: the offer is always made)
       table.insert(actions, { what = "exileCast", who = "you", n = 1, everyone = true, untilNonland = true })
     elseif free and (t:find("until you exile a nonland card", 1, true) or t:find("until they exile a nonland card", 1, true)) then
-      table.insert(actions, { what = "exileCast", who = "you", n = 1, everyone = false, untilNonland = true })
+      local lt = tonumber(t:match("nonland card with mana value less than (%d+)") or "")
+      table.insert(actions, { what = "exileCast", who = "you", n = 1, everyone = false, untilNonland = true,
+        mvLess = lt, bottomRest = t:find("on the bottom of your library in a random order", 1, true) ~= nil })
+    elseif t:match("discover (%d+)") then
+      table.insert(actions, { what = "exileCast", who = "you", n = 1, everyone = false, untilNonland = true,
+        mvMax = tonumber(t:match("discover (%d+)")), bottomRest = true, discover = true })
     elseif free and t:find("exile the top card of each player's library", 1, true) then
       table.insert(actions, { what = "exileCast", who = "you", n = 1, everyone = true, untilNonland = false })
     end
@@ -869,8 +1039,17 @@ function Effects.parse(text, sourceName)
       local ph = t:match("return target (nonland) permanent to its owner's hand")
       btype = ph
     end
+    local theirs = false
+    if not btype then
+      local ph = t:match("return target ([%a ]-) you don't control to its owner's hand")
+        or t:match("return target ([%a ]-) an opponent controls to its owner's hand")
+      if ph then
+        btype = ph:match("^(nonland) permanent$") or ph:match("^(%a+)$")
+        theirs = btype ~= nil
+      end
+    end
     if btype then
-      table.insert(actions, { what = "bounce", who = "you", n = 1, type = btype, mine = false, other = other })
+      table.insert(actions, { what = "bounce", who = "you", n = 1, type = btype, mine = false, other = other, theirs = theirs })
     end
   end
   if #actions == 0 and #conds == 0 then
@@ -915,6 +1094,20 @@ local function describe(a, target, controller)
   local you = who == "you"
   if a.what == "search" then
     return who .. (you and " search " or " searches ") .. "the library for " .. tostring(a.phrase)
+  elseif a.what == "nikoSwap" then
+    return "a creature is exiled; the Shards become copies of it until the next end step"
+  elseif a.what == "edict" then
+    return tostring(a.scope) .. " sacrifices " .. a.n .. " " .. tostring(a.ty) .. (a.n == 1 and "" or "s")
+  elseif a.what == "windfall" then
+    return "everyone discards their hand and draws as many cards as the most anyone discarded"
+  elseif a.what == "powerHit" then
+    return "damage equal to the creature's power to any target"
+  elseif a.what == "manaAsk" then
+    return "mana for each " .. tostring(a.label)
+  elseif a.what == "copyThat" then
+    return "a token copy of " .. tostring(a.which)
+  elseif a.what == "tapX" then
+    return tostring(a.mode) .. (a.self and " itself" or (a.all and " all matching permanents" or " target permanent"))
   elseif a.what == "counterOn" then
     return a.n .. " " .. tostring(a.label) .. " counter" .. (a.n == 1 and "" or "s") .. " on a target " .. tostring(a.ty)
   elseif a.what == "playerPro" then
@@ -951,7 +1144,7 @@ local function describe(a, target, controller)
   elseif a.what == "token" then
     local ph = tostring(a.phrase)
     if a.countWord then
-      ph = ph:gsub("^1 ", "one per " .. a.countWord:gsub("s$", "") .. (a.countScope == "opponents" and " your opponents control: " or " you control: "), 1)
+      ph = ph:gsub("^1 ", "one per " .. a.countWord:gsub("s$", "") .. (a.countScope == "opponents" and " your opponents control: " or (a.countScope == "all" and " on the battlefield: " or " you control: ")), 1)
     end
     return who .. (you and " create " or " creates ") .. ph .. " token"
   elseif a.what == "amass" then
@@ -1202,7 +1395,7 @@ local function apply(it, plan, target)
           a.count = Effects.pump(seat, a, it)
         elseif a.what == "graveReturn" then
           LibSearch.open(seat, a.type, it.name .. ": click the " .. (a.type ~= "" and a.type or "card") .. " to return it"
-            .. (a.where == "battlefield" and " to the battlefield" or " to your hand") .. ", then CLOSE.",
+            .. (a.where == "battlefield" and " to the battlefield" or (a.where == "top" and " to the top of your library" or " to your hand")) .. ", then CLOSE.",
             a.where, a.tapped, { typeOnly = true, zone = "graveyard" })
         elseif a.what == "scry" then
           for _ = 1, a.n do
@@ -1258,6 +1451,20 @@ local function apply(it, plan, target)
           GameState.data.playerPro[seat] = true
           printToAll("MTG > " .. seat .. " has protection from everything until their next turn (" .. it.name .. "): they can't be targeted.", GOOD)
           broadcastToAll(seat .. " has PROTECTION FROM EVERYTHING until their next turn.", { 1, 0.85, 0.3 })
+        elseif a.what == "nikoSwap" then
+          Effects.nikoSwap(seat, a, it)
+        elseif a.what == "edict" then
+          Effects.edict(seat, a, it)
+        elseif a.what == "windfall" then
+          Effects.windfall(it)
+        elseif a.what == "powerHit" then
+          Effects.powerHit(seat, a, it)
+        elseif a.what == "manaAsk" then
+          Effects.manaAsk(seat, a, it)
+        elseif a.what == "copyThat" then
+          Effects.copyThat(seat, a, it)
+        elseif a.what == "tapX" then
+          Effects.tapX(seat, a, it)
         elseif a.what == "blink" then
           Effects.blink(seat, a, it)
         elseif a.what == "copyCreature" then
@@ -1453,7 +1660,14 @@ end
 
 local COLOR_WORDS = { white = "W", blue = "U", black = "B", red = "R", green = "G" }
 
-local function spellFits(obj, filt)
+local function spellFits(obj, filt, mvWant)
+  if mvWant then
+    local mv = -1
+    pcall(function() mv = tonumber(JSON.decode(obj.getGMNotes()).cmc) or 0 end)
+    if mv ~= mvWant then
+      return false
+    end
+  end
   if filt == nil or filt == "" then
     return true
   end
@@ -1495,12 +1709,26 @@ function Effects.counterSpell(seat, a, it)
         if e.kind == "ability" then
           table.insert(cands, e)
         end
-      elseif e.kind == "card" and spellFits(obj, a.filter) then
+      elseif e.kind == "card" and spellFits(obj, a.filter, a.mv) then
         table.insert(cands, e)
       end
     end
   end
   local function counter(e)
+    if a.unless then
+      local payer = e.controller
+      local extra = a.wizardNote and " (If " .. seat .. " controls a Wizard it is {4} instead.)" or ""
+      ask(payer, it.name .. ": pay " .. a.unless .. "?", e.name .. " is countered unless you pay " .. a.unless .. "." .. extra,
+        { { label = "PAY", value = true }, { label = "DON'T PAY", value = false } }, function(pays)
+          if pays then
+            printToAll("MTG > " .. payer .. " pays " .. a.unless .. ": " .. e.name .. " is not countered.", GOOD)
+          else
+            a.unless = nil
+            counter(e)
+          end
+        end)
+      return
+    end
     local mv = 0
     local obj = getObjectFromGUID(e.guid)
     if obj then
@@ -1508,6 +1736,9 @@ function Effects.counterSpell(seat, a, it)
     end
     Stack.counterGuid(e.guid, it.name)
     printToAll("MTG > " .. it.name .. " counters " .. e.name .. ".", GOOD)
+    if a.give and e.controller then
+      Effects.resolve({ name = it.name, controller = e.controller, auto = true, text = "Create " .. a.give .. "." })
+    end
     if a.drain then
       Effects.addDelayed({ seat = seat, step = "main", kind = "mana", color = "C", amount = mv, name = it.name })
       broadcastToColor(it.name .. ": you will get " .. mv .. " colorless mana at the beginning of your next main phase.", seat, GOOD)
@@ -1581,16 +1812,37 @@ function Effects.blink(seat, a, it)
     end
     return
   end
-  ask(seat, it.name .. ": blink a creature", "Click BLINK on the creature to exile and return, or SKIP.",
-    { { label = "SKIP", value = false } }, function(obj)
-      if obj then
-        Effects.blinkCard(obj, seat, it.name)
-      else
-        printToAll("MTG > " .. it.name .. ": nothing blinked.", INFO)
-      end
-    end, { filter = function(obj, owner)
-      return owner == seat and Effects.cardTypes(obj).creature == true and not (a.other and it.source and obj.getGUID() == it.source)
-    end, label = "BLINK" })
+  local kinds = a.kinds
+  if kinds == nil or next(kinds) == nil then
+    kinds = { creature = true, artifact = a.artifact or nil }
+  end
+  local count, done = a.count or 1, {}
+  local function step(k)
+    if k > count then
+      return
+    end
+    local label = (kinds.nonland or kinds.land) and "permanent" or (kinds.artifact and (kinds.creature and "artifact or creature" or "artifact") or "creature")
+    ask(seat, it.name .. ": blink " .. (count > 1 and ("a " .. label .. " (" .. k .. " of " .. count .. ")") or ("a " .. label)),
+      "Click BLINK on the " .. label .. " to exile and return, or SKIP.",
+      { { label = "SKIP", value = false } }, function(obj)
+        if obj then
+          done[obj.getGUID()] = true
+          Effects.blinkCard(obj, seat, it.name)
+          step(k + 1)
+        else
+          printToAll("MTG > " .. it.name .. ": " .. (k == 1 and "nothing blinked." or "no more blinked."), INFO)
+        end
+      end, { filter = function(obj, owner)
+        if owner ~= seat or done[obj.getGUID()] then
+          return false
+        end
+        local ty = Effects.cardTypes(obj)
+        local ok = (kinds.creature and ty.creature) or (kinds.artifact and ty.artifact) or (kinds.land and ty.land)
+          or (kinds.nonland and not ty.land)
+        return ok == true and not (a.other and it.source and obj.getGUID() == it.source)
+      end, label = "BLINK" })
+  end
+  step(1)
 end
 
 -- "Put N counters on target creature": click it on the table.
@@ -1611,6 +1863,52 @@ function Effects.counterOn(seat, a, it)
       local types = Effects.cardTypes(obj)
       return a.ty == "permanent" or types[a.ty] == true
     end, label = "COUNTER", protect = false })
+end
+
+-- Niko: the Shards become copies of the exiled creature until the next end step.
+function Effects.nikoSwap(seat, a, it)
+  ask(seat, it.name .. ": exile which creature?", "Click EXILE on a nonlegendary creature you control, or SKIP.",
+    { { label = "SKIP", value = false } }, function(obj)
+      if not obj then
+        printToAll("MTG > " .. it.name .. ": nothing exiled.", INFO)
+        return
+      end
+      local clones, shards = {}, {}
+      for _, sh in ipairs(getObjectsWithTag("MTGCard")) do
+        if sh.type == "Card" and not sh.isDestroyed() and sh.getName() == "Shard" and Effects.fieldSeat(sh) == seat then
+          local pos, rot = sh.getPosition(), sh.getRotation()
+          local c = obj.clone({ position = { x = pos.x, y = pos.y + 0.3, z = pos.z } })
+          if c then
+            c.addTag("Token")
+            c.memo = ""
+            Zones.presetFrom(c, seat)
+            Wait.time(function()
+              if not c.isDestroyed() then
+                Zones.refresh(c)
+                Counters.setup(c)
+              end
+            end, 0.7)
+            table.insert(clones, c.getGUID())
+            table.insert(shards, { guid = sh.getGUID(), pos = pos, rot = rot })
+            sh.setPosition(TableSetup.slot(seat, "act_tokens", TableSetup.SURFACE_TOP + 1.5))
+          end
+        end
+      end
+      local owner = Effects.fieldSeat(obj) or seat
+      local guid, isToken = obj.getGUID(), obj.hasTag("Token")
+      Combat.removeCard(obj, "exile")
+      printToAll("MTG > " .. it.name .. ": " .. obj.getName() .. " is exiled; " .. #clones .. " Shard" .. (#clones == 1 and "" or "s")
+        .. " become copies of it until the next end step.", GOOD)
+      Effects.addDelayed({ seat = seat, anySeat = true, step = "end", kind = "nikoEnd", clones = clones, shards = shards,
+        ret = isToken and "" or guid, owner = owner, name = it.name })
+    end, { filter = function(obj, owner)
+      if owner ~= seat or not Effects.cardTypes(obj).creature then
+        return false
+      end
+      local d = {}
+      pcall(function() d = JSON.decode(obj.getGMNotes()) or {} end)
+      return not tostring(d.typeLine or ""):find("Legendary", 1, true)
+    end, label = "EXILE" })
 end
 
 -- A token copy of a creature (Kiki-Jiki, Twinflame).
@@ -1677,12 +1975,445 @@ function Effects.copyCreature(seat, a, it)
   askNext()
 end
 
+-- Does `seat` control a permanent whose type line has this word (Horse, Soldier, Goblin...)?
+function Effects.controlsWord(seat, word, name)
+  word = tostring(word):lower()
+  local singular = word:gsub("s$", "")
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) and Effects.fieldSeat(obj) == seat then
+      local d = {}
+      pcall(function() d = JSON.decode(obj.getGMNotes()) or {} end)
+      local tl = tostring(d.typeLine or ""):lower()
+      if tl:find(word, 1, true) or tl:find(singular, 1, true) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+-- "Each opponent sacrifices N creatures": each victim picks their own.
+function Effects.edict(seat, a, it)
+  local victims = {}
+  local function others()
+    for _, c in ipairs(players()) do
+      if c ~= seat then
+        table.insert(victims, c)
+      end
+    end
+  end
+  local function run()
+    local function nextVictim(i)
+      local v = victims[i]
+      if v == nil then
+        return
+      end
+      local function eligible()
+        local n = 0
+        for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+          if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) and Effects.fieldSeat(obj) == v then
+            local ty = Effects.cardTypes(obj)
+            if a.ty == "permanent" or ty[a.ty] == true then
+              n = n + 1
+            end
+          end
+        end
+        return n
+      end
+      local function pickOne(k)
+        if k > a.n then
+          nextVictim(i + 1)
+          return
+        end
+        if eligible() == 0 then
+          printToAll("MTG > " .. v .. " has no " .. a.ty .. (k == 1 and "" or " left") .. " to sacrifice (" .. it.name .. ").", INFO)
+          nextVictim(i + 1)
+          return
+        end
+        ask(v, it.name .. ": sacrifice a " .. a.ty .. (a.n > 1 and (" (" .. k .. " of " .. a.n .. ")") or ""),
+          it.name .. " makes you sacrifice " .. a.n .. " " .. a.ty .. (a.n == 1 and "" or "s") .. ". Click SACRIFICE on one"
+          .. " of yours (or NONE if you have no more).",
+          { { label = "NONE", value = false } }, function(obj)
+            if obj then
+              printToAll("MTG > " .. v .. " sacrifices " .. obj.getName() .. " (" .. it.name .. ").", GOOD)
+              Combat.removeCard(obj, "graveyard")
+              pickOne(k + 1)
+            else
+              nextVictim(i + 1)
+            end
+          end, { filter = function(obj, owner)
+            if owner ~= v then
+              return false
+            end
+            local ty = Effects.cardTypes(obj)
+            return a.ty == "permanent" or ty[a.ty] == true
+          end, label = "SACRIFICE", protect = false })
+      end
+      pickOne(1)
+    end
+    nextVictim(1)
+  end
+  if a.scope == "each opponent" then
+    others()
+    run()
+  elseif a.scope == "each player" then
+    victims = orderFrom(seat)
+    run()
+  elseif a.scope == "that player" or a.scope == "defending player" then
+    victims = { it.that or seat }
+    run()
+  else
+    local choices = {}
+    for _, c in ipairs(players()) do
+      if not (a.scope == "target opponent" and c == seat) then
+        table.insert(choices, { label = string.upper(c), value = c })
+      end
+    end
+    ask(seat, it.name .. ": which player?", "Choose the player who sacrifices.", choices, function(c)
+      victims = { c }
+      run()
+    end)
+  end
+end
+
+-- Windfall: everyone discards their hand, then draws as many cards as the most anyone discarded.
+function Effects.windfall(it)
+  local most = 0
+  for _, c in ipairs(players()) do
+    local n = Actions.discardHand(c, it.name) or 0
+    if n > most then
+      most = n
+    end
+  end
+  printToAll("MTG > " .. it.name .. ": the most discarded was " .. most .. ": everyone draws " .. most .. ".", GOOD)
+  if most > 0 then
+    Wait.time(function()
+      for _, c in ipairs(players()) do
+        Actions.draw(c, most, it.name)
+      end
+    end, 1.2)
+  end
+end
+
+-- Warstorm Surge: damage equal to the entering creature's power, to any target.
+function Effects.powerHit(seat, a, it)
+  local function go(n)
+    local choices = {}
+    for _, c in ipairs(players()) do
+      table.insert(choices, { label = string.upper(c), value = c })
+    end
+    table.insert(choices, { label = "CREATURE", value = "other" })
+    table.insert(choices, { label = "SKIP", value = false })
+    while #choices > MAX_CHOICES do
+      table.remove(choices, #choices - 2)
+    end
+    ask(seat, it.name .. ": " .. n .. " damage to any target", "The creature's power is " .. n .. ". Pick who takes it.", choices, function(target)
+      if target == "other" then
+        printToAll("MTG > " .. it.name .. ": " .. n .. " damage to a creature or planeswalker: change its damage / loyalty by hand.", INFO)
+      elseif target then
+        Trackers.changeLife(target, -n, it.name)
+        printToAll("MTG > " .. it.name .. " deals " .. n .. " damage to " .. target .. ".", GOOD)
+      else
+        printToAll("MTG > " .. it.name .. ": skipped.", INFO)
+      end
+    end)
+  end
+  local obj = it.thatCard and getObjectFromGUID(it.thatCard)
+  if obj and not obj.isDestroyed() then
+    go(tonumber(Counters.stats(obj).power or "") or 0)
+  else
+    Effects.askNumber(seat, it.name .. ": power?", "Type the creature's power, then OK.", go)
+  end
+end
+
+-- Metalworker, Nykthos: the player says how many; the table adds that much mana.
+function Effects.manaAsk(seat, a, it)
+  local function howMany(color)
+    Effects.askNumber(seat, it.name .. ": how many (" .. a.label .. ")?", "Type the number, then OK.", function(n)
+      local total = n * (a.per or 1)
+      if total > 0 then
+        ManaChips.add(seat, color, total)
+        printToAll("MTG > " .. it.name .. ": " .. seat .. " adds " .. total .. " {" .. color .. "}.", GOOD)
+      end
+    end)
+  end
+  if a.pickColor then
+    local choices = {}
+    for _, c in ipairs({ "W", "U", "B", "R", "G" }) do
+      table.insert(choices, { label = c, value = c })
+    end
+    ask(seat, it.name .. ": which color?", "Choose a color; then say your devotion to it.", choices, howMany)
+  else
+    howMany(a.color)
+  end
+end
+
+-- A token copy of "that artifact" / "enchanted artifact" / "equipped creature".
+function Effects.copyThat(seat, a, it)
+  local src = it.source and getObjectFromGUID(it.source)
+  local function target()
+    if a.which:find("^that") then
+      return it.thatCard and getObjectFromGUID(it.thatCard)
+    end
+    if src and not src.isDestroyed() and Equip and Equip.hostOf then
+      return Equip.hostOf(src)
+    end
+  end
+  local function go()
+    local obj = target()
+    if obj and not obj.isDestroyed() then
+      Effects.copyCard(obj, seat, { haste = a.haste }, it.name)
+    else
+      broadcastToColor(it.name .. ": make the token copy yourself (" .. a.which .. " wasn't found).", seat, INFO)
+    end
+  end
+  if a.pay then
+    ask(seat, it.name .. ": pay " .. a.pay .. "?", "Pay " .. a.pay .. " to create a token copy of " .. a.which .. "?",
+      { { label = "PAY", value = true }, { label = "NO", value = false } }, function(yes)
+        if yes then
+          go()
+        else
+          printToAll("MTG > " .. seat .. " doesn't pay: no copy (" .. it.name .. ").", INFO)
+        end
+      end)
+  else
+    go()
+  end
+end
+
+-- Tap or untap permanents.
+local function turnTapped(obj, owner, tapped)
+  local s = TableSetup.seat(owner)
+  if s == nil then
+    return
+  end
+  local r = obj.getRotation()
+  obj.setRotationSmooth({ r.x, tapped and (s.yaw + 90) % 360 or s.yaw, r.z }, false, true)
+end
+
+function Effects.tapX(seat, a, it)
+  local want = a.mode == "tap"
+  local function kindOk(obj)
+    local ty = Effects.cardTypes(obj)
+    if a.kinds.permanent then
+      return true
+    end
+    return (a.kinds.creature and ty.creature) or (a.kinds.artifact and ty.artifact) or (a.kinds.land and ty.land)
+      or (a.kinds.enchantment and ty.enchantment) or (a.kinds.planeswalker and ty.planeswalker)
+      or (a.kinds.nonland and not ty.land) or false
+  end
+  local function scopeOk(owner)
+    if a.scope == "mine" and owner ~= seat then
+      return false
+    elseif a.scope == "opponents" and owner == seat then
+      return false
+    end
+    return true
+  end
+  if a.self then
+    local src = it.source and getObjectFromGUID(it.source)
+    if src and not src.isDestroyed() then
+      turnTapped(src, Effects.fieldSeat(src) or seat, want)
+      printToAll("MTG > " .. it.name .. ": " .. src.getName() .. (want and " is tapped." or " is untapped."), GOOD)
+    else
+      broadcastToColor(it.name .. ": " .. a.mode .. " it yourself.", seat, INFO)
+    end
+    return
+  end
+  if a.all then
+    local n = 0
+    for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+      if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) then
+        local owner = Effects.fieldSeat(obj)
+        if owner and scopeOk(owner) and kindOk(obj) then
+          turnTapped(obj, owner, want)
+          n = n + 1
+        end
+      end
+    end
+    printToAll("MTG > " .. it.name .. ": " .. n .. " permanent" .. (n == 1 and "" or "s") .. (want and " tapped." or " untapped."), GOOD)
+    return
+  end
+  local done = {}
+  local function step(k)
+    if k > (a.count or 1) then
+      return
+    end
+    ask(seat, it.name .. ": " .. a.mode .. " which?" .. (a.count > 1 and (" (" .. k .. " of " .. a.count .. ")") or ""),
+      "Click " .. string.upper(a.mode) .. " on the permanent" .. (a.upTo and ", or SKIP." or "."),
+      { { label = a.upTo and "DONE" or "SKIP", value = false } }, function(obj)
+        if obj then
+          done[obj.getGUID()] = true
+          turnTapped(obj, Effects.fieldSeat(obj) or seat, want)
+          printToAll("MTG > " .. it.name .. ": " .. obj.getName() .. (want and " is tapped." or " is untapped."), GOOD)
+          step(k + 1)
+        end
+      end, { filter = function(obj, owner)
+        return scopeOk(owner) and kindOk(obj) and not done[obj.getGUID()]
+          and not (a.other and it.source and obj.getGUID() == it.source)
+      end, label = string.upper(a.mode), protect = want })
+  end
+  step(1)
+end
+
+-- "...enters the battlefield as a copy of any artifact": the card becomes a token copy of the permanent you pick
+-- (the real card waits beside the table); when the copy leaves, the real card goes where it went.
+function Effects.cloneEnter(card, seat, kinds)
+  local label = (kinds.artifact and kinds.creature) and "artifact or creature" or (kinds.artifact and "artifact")
+    or (kinds.creature and "creature") or "permanent"
+  ask(seat, card.getName() .. ": copy which " .. label .. "?",
+    "Click COPY on the " .. label .. " it enters as a copy of, or SKIP to keep it as it is.",
+    { { label = "SKIP", value = false } }, function(obj)
+      if not obj or card.isDestroyed() then
+        return
+      end
+      local pos = card.getPosition()
+      local c = obj.clone({ position = { x = pos.x, y = pos.y + 0.6, z = pos.z } })
+      if c == nil then
+        broadcastToColor(card.getName() .. ": couldn't copy " .. obj.getName() .. " - make the copy yourself.", seat, INFO)
+        return
+      end
+      c.addTag("Token")
+      c.memo = ""
+      c.setRotation({ 0, TableSetup.seat(seat).yaw, 0 })
+      Zones.presetFrom(c, seat)
+      GameState.data.clones = GameState.data.clones or {}
+      GameState.data.clones[c.getGUID()] = { real = card.getGUID(), seat = seat, name = card.getName() }
+      card.setPosition(TableSetup.slot(seat, "act_tokens", TableSetup.SURFACE_TOP + 1.5))
+      Wait.time(function()
+        if not c.isDestroyed() then
+          Zones.refresh(c)
+          Counters.setup(c)
+        end
+      end, 0.7)
+      printToAll("MTG > " .. card.getName() .. " enters as a copy of " .. obj.getName() .. ".", GOOD)
+    end, { filter = function(obj, owner)
+      if obj.getGUID() == card.getGUID() then
+        return false
+      end
+      local ty = Effects.cardTypes(obj)
+      if kinds.artifact and ty.artifact then
+        return true
+      end
+      if kinds.creature and ty.creature then
+        return true
+      end
+      return kinds.permanent == true
+    end, label = "COPY", protect = false })
+end
+
+-- The copy left the battlefield: the real card goes to the same place.
+function Effects.cloneLeft(card, seat, dest)
+  local cl = GameState.data and GameState.data.clones
+  local rec = cl and card and cl[card.getGUID()]
+  if not rec then
+    return false
+  end
+  cl[card.getGUID()] = nil
+  local real = getObjectFromGUID(rec.real)
+  if real == nil or real.isDestroyed() then
+    return true
+  end
+  dest = dest or "graveyard"
+  local owner = rec.seat
+  real.setLock(false)
+  real.setRotation({ 0, TableSetup.seat(owner).yaw, 0 })
+  if dest == "hand" then
+    real.setPositionSmooth(Player[owner].getHandTransform().position, false, true)
+  else
+    real.setPosition(TableSetup.slot(owner, dest, TableSetup.SURFACE_TOP + 2))
+    Zones.refresh(real)
+    if dest == "graveyard" then
+      Library.toGraveyard(owner, real, function()
+        if not real.isDestroyed() then
+          Zones.refresh(real)
+        end
+      end)
+    end
+  end
+  printToAll("MTG > " .. rec.name .. " (the copy) left: the card goes to " .. owner .. "'s " .. dest .. ".", INFO)
+  return true
+end
+
+-- A card that says "enter(s) the battlefield as a copy of..." asks what to copy as it arrives.
+Events.on("cardMoved", function(d)
+  if d.card == nil or d.to == nil or d.from == nil or not GameState.data or not GameState.data.started then
+    return
+  end
+  local IN = { battlefield = true, lands = true }
+  if IN[d.to.region] and not IN[d.from.region] and d.to.seat and not d.card.hasTag("Token") then
+    local dd = {}
+    pcall(function() dd = JSON.decode(d.card.getGMNotes()) or {} end)
+    local o = tostring(dd.oracle or ""):lower()
+    local at = o:find("as a copy of any ", 1, true)
+    if at and not o:find("until end of turn", 1, true) and (o:find("enter", 1, true) or 0) < at then
+      local seg = o:sub(at, at + 60)
+      local kinds = {}
+      if seg:find("artifact", 1, true) then kinds.artifact = true end
+      if seg:find("creature", 1, true) then kinds.creature = true end
+      if seg:find("permanent", 1, true) then kinds.permanent = true end
+      if next(kinds) then
+        Effects.cloneEnter(d.card, d.to.seat, kinds)
+      end
+    end
+  end
+  -- A copy dragged off the battlefield by hand.
+  if IN[d.from.region] and not IN[d.to.region] and GameState.data.clones and GameState.data.clones[d.card.getGUID()] then
+    local z = d.to.region
+    if z == "graveyard" or z == "exile" or z == "hand" or z == "library" then
+      Effects.cloneLeft(d.card, d.from.seat, z)
+    end
+  end
+end)
+
 -- "Until your next turn" protection ends when their turn begins.
 Events.on("stepStarted", function(d)
   local pro = GameState.data and GameState.data.playerPro
   if pro and pro[d.seat] and (d.step == "untap" or d.step == "upkeep") then
     pro[d.seat] = nil
     printToAll("MTG > " .. d.seat .. "'s protection from everything ends.", INFO)
+  end
+end)
+
+-- Put an exiled card back onto the battlefield (a real move, so enters triggers fire).
+function Effects.returnFromExile(guid, owner, why)
+  local obj = getObjectFromGUID(guid)
+  if obj == nil or obj.isDestroyed() then
+    return
+  end
+  local seat = owner or Effects.fieldSeat(obj) or Zones.regionAt(obj.getPosition()).seat
+  if seat == nil or not TableSetup.isActive(seat) then
+    return
+  end
+  local land = Effects.cardTypes(obj).land
+  obj.setLock(false)
+  obj.setRotation({ 0, TableSetup.seat(seat).yaw, 0 })
+  obj.setPosition(TableSetup.slot(seat, land and "lands" or "battlefield", TableSetup.SURFACE_TOP + 2))
+  printToAll("MTG > " .. obj.getName() .. " returns to the battlefield" .. (why and (" (" .. why .. ")") or "") .. ".", GOOD)
+  Wait.time(function()
+    if not obj.isDestroyed() then
+      Zones.refresh(obj)
+      Counters.setup(obj)
+    end
+  end, 0.8)
+end
+
+-- "...until ~ leaves the battlefield": when it leaves, what it exiled comes back.
+Events.on("cardMoved", function(d)
+  if d.card == nil or d.from == nil or not (d.from.region == "battlefield" or d.from.region == "lands") then
+    return
+  end
+  if d.to and (d.to.region == "battlefield" or d.to.region == "lands") then
+    return
+  end
+  local held = GameState.data and GameState.data.heldExile
+  local g = d.card.getGUID()
+  if held and held[g] then
+    local list = held[g]
+    held[g] = nil
+    for _, h in ipairs(list) do
+      Effects.returnFromExile(h.guid, h.owner, d.name or "its exiler left")
+    end
   end
 end)
 
@@ -1696,7 +2427,25 @@ Events.on("stepStarted", function(d)
     local r = list[i]
     if (r.seat == d.seat or r.anySeat) and (r.step == d.step or (r.step == "main" and (d.step == "main1" or d.step == "main2"))) then
       table.remove(list, i)
-      if r.kind == "removeCard" then
+      if r.kind == "returnCard" then
+        Effects.returnFromExile(r.guid, r.owner, r.name)
+      elseif r.kind == "nikoEnd" then
+        for _, g in ipairs(r.clones or {}) do
+          local o = getObjectFromGUID(g)
+          if o and not o.isDestroyed() then
+            o.destruct()
+          end
+        end
+        for _, s in ipairs(r.shards or {}) do
+          local o = getObjectFromGUID(s.guid)
+          if o and not o.isDestroyed() then
+            o.setPosition(s.pos)
+            o.setRotation(s.rot)
+          end
+        end
+        printToAll("MTG > " .. r.name .. ": the Shards turn back.", GOOD)
+        Effects.returnFromExile(r.ret, r.owner, r.name)
+      elseif r.kind == "removeCard" then
         local obj = getObjectFromGUID(r.guid)
         if obj and not obj.isDestroyed() then
           printToAll("MTG > " .. r.name .. ": " .. obj.getName() .. " token copy is " .. r.how .. "d.", GOOD)
@@ -1911,7 +2660,7 @@ function Effects.resolve(it)
   local low = raw:lower()
   local un = low:find("unless that player pays", 1, true) or low:find("unless they pay", 1, true)
     or low:find("unless its controller pays", 1, true)
-  if un and not it.unlessDone then
+  if un and not it.unlessDone and not low:find("counter target", 1, true) then
     local stop = raw:find(".", un, true) or (#raw + 1)
     local clause = raw:sub(un, stop - 1)
     local copy = {}
@@ -1961,10 +2710,11 @@ function Effects.resolve(it)
     local a1 = low:find(" for each ", 1, true)
     local a2 = a1 and low:find(" counter on ", a1, true)
     local src = it.source and getObjectFromGUID(it.source)
-    if a1 and a2 and a2 - a1 < 30 and src and not src.isDestroyed() and not it.countDone then
+    local lk = it.source and Counters.lastKnown and Counters.lastKnown[it.source]
+    if a1 and a2 and a2 - a1 < 30 and ((src and not src.isDestroyed()) or lk) and not it.countDone then
       local kindWord = low:sub(a1 + #" for each ", a2 - 1)
       local stopAt = raw:find("[%.,]", a2 + #" counter on ") or (#raw + 1)
-      local c = Counters.get(src)
+      local c = (lk and it.trigger) and lk or Counters.get(src)
       local n = (kindWord == "+1/+1" and c.plus) or (kindWord == "-1/-1" and c.minus) or (kindWord == "loyalty" and c.loyalty) or c.other
       -- Counters this very ability puts on first ("put a burden counter on it, then draw a card for each").
       local added = low:sub(1, a1):match("put (%w+) " .. kindWord:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1") .. " counters? on ")
@@ -1979,6 +2729,10 @@ function Effects.resolve(it)
       end
       if b2 == before then
         b2 = before:gsub("(%d+) damage$", function(k) return (tonumber(k) * n) .. " damage" end)
+      end
+      if b2 == before and before:lower():find("create ", 1, true) then
+        -- "create a 1/1 colorless Thopter ... token with flying for each ..."
+        b2 = before:gsub("[Cc]reate an? ", "create " .. n .. " ", 1)
       end
       if b2 ~= before then
         local copy = {}
@@ -2024,7 +2778,8 @@ function Effects.resolve(it)
   if not it.xDone then
     local lowX = " " .. tostring(it.text or ""):lower() .. " "
     local hasX = lowX:find("[^%a]x[^%a]") ~= nil
-    local defined = lowX:find("where x", 1, true) or lowX:find(" x is ", 1, true)
+    local defined = lowX:find("where x", 1, true) or lowX:find(" x is the ", 1, true) or lowX:find(" x is equal", 1, true)
+      or lowX:find(" x equals", 1, true)
     local chosen = tostring(it.manaCost or ""):find("{X}", 1, true) or lowX:find("pay x life", 1, true)
       or lowX:find("{x}", 1, true)
     if hasX and chosen and not defined then
@@ -2047,6 +2802,42 @@ function Effects.resolve(it)
           printToAll("MTG > " .. it.name .. ": X = " .. n .. ".", INFO)
           Effects.resolve(copy)
         end, nil, true)
+      return
+    end
+  end
+  -- "Create five 1/1 tokens. If <condition>, create ten of those tokens instead.": pick the right sentence.
+  if not it.insteadDone then
+    local raw2 = tostring(it.text or "")
+    local a1, _, cond, repl = raw2:find("%.%s*[Ii]f ([^,]+), (.-) instead%.?%s*$")
+    if a1 then
+      local base = raw2:sub(1, a1)
+      local function go(yes)
+        local copy = {}
+        for k, v in pairs(it) do
+          copy[k] = v
+        end
+        copy.insteadDone = true
+        if yes then
+          local r2 = repl
+          if r2:find("of those tokens", 1, true) then
+            local desc = base:match("[Cc]reate %w+ (.-tokens?)")
+            if desc then
+              r2 = r2:gsub("of those tokens", (desc:gsub("%%", "%%%%")))
+            end
+          end
+          copy.text = r2:sub(1, 1):upper() .. r2:sub(2) .. "."
+        else
+          copy.text = base
+        end
+        Effects.resolve(copy)
+      end
+      local auto = Effects.condValue(cond:lower(), it.controller, it.name)
+      if auto ~= nil then
+        go(auto)
+      else
+        ask(it.controller, it.name .. ": is this true?", "If " .. cond .. "?\nThen instead: " .. repl,
+          { { label = "YES", value = true }, { label = "NO", value = false } }, go)
+      end
       return
     end
   end
@@ -2289,6 +3080,7 @@ local function fieldSeat(obj)
   end
   return nil
 end
+Effects.fieldSeat = fieldSeat
 
 -- How many permanents of a kind a seat (or its opponents) control: "Treasures
 -- you control", "artifacts your opponents control". Tokens count by name.
@@ -2301,7 +3093,7 @@ function Effects.countPermanents(seat, word, scope)
   for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
     if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) and obj.held_by_color == nil then
       local owner = fieldSeat(obj)
-      if owner and ((scope == "mine" and owner == seat) or (scope == "opponents" and owner ~= seat)) then
+      if owner and ((scope == "mine" and owner == seat) or (scope == "opponents" and owner ~= seat) or scope == "all") then
         local name = tostring(obj.getName()):lower()
         local hit = cardTypes(obj)[word] or name:find(word, 1, true) ~= nil
         if not hit and word == "artifact" then
@@ -2403,6 +3195,10 @@ local function returnToHand(obj)
     obj = Faces.front(obj)
   end
   if obj.hasTag("Token") then
+    if Effects.cloneLeft(obj, seat, "hand") then
+      obj.destruct()
+      return
+    end
     printToAll("MTG > " .. obj.getName() .. " (a token) left the battlefield and is gone.", INFO)
     obj.destruct()
     return
@@ -2428,6 +3224,9 @@ function Effects.pickBounce(seat, a, sourceName, sourceGuid)
     if a.other and sourceGuid and obj.getGUID() == sourceGuid then
       return false
     end
+    if a.theirs and owner == seat then
+      return false
+    end
     local t = cardTypes(obj)
     if want == "permanent" then
       return true
@@ -2436,7 +3235,8 @@ function Effects.pickBounce(seat, a, sourceName, sourceGuid)
     end
     return t[want] == true
   end
-  ask(seat, sourceName .. ": return a " .. want, "Click RETURN on the " .. want .. " to return to its owner's hand.",
+  local shown = want == "nonland" and "nonland permanent" or want
+  ask(seat, sourceName .. ": return a " .. shown, "Click RETURN on the " .. shown .. " to return to its owner's hand.",
     { { label = "SKIP", value = false } }, function(obj)
       if obj then
         returnToHand(obj)
@@ -2732,6 +3532,13 @@ local function fits(obj, owner, a, seat, sourceGuid)
   if a.other and sourceGuid and obj.getGUID() == sourceGuid then
     return false
   end
+  if a.tapped then
+    local s = TableSetup.seat(owner)
+    local diff = s and ((obj.getRotation().y - s.yaw + 540) % 360) - 180 or 0
+    if math.abs(diff) <= 30 then
+      return false
+    end
+  end
   local t = cardTypes(obj)
   for _, want in ipairs(a.types) do
     if want == "permanent" or t[want] then
@@ -2798,6 +3605,13 @@ function Effects.pickRemove(seat, a, sourceName, sourceGuid)
             Trackers.changeLife(seat, -mv, sourceName)
           end
           printToAll("MTG > " .. sourceName .. ": " .. (a.verb == "exile" and "exiled " or "destroyed ") .. name .. ".", GOOD)
+          if a.untilLeaves and sourceGuid and not obj.hasTag("Token") then
+            local held = GameState.data.heldExile or {}
+            GameState.data.heldExile = held
+            held[sourceGuid] = held[sourceGuid] or {}
+            table.insert(held[sourceGuid], { guid = obj.getGUID(), owner = owner, name = name })
+            broadcastToColor(name .. " stays exiled until " .. sourceName .. " leaves the battlefield.", seat, INFO)
+          end
         end
       else
         printToAll("MTG > " .. sourceName .. ": no target chosen.", INFO)
@@ -3025,6 +3839,26 @@ end
 
 -- true / false for the conditions it knows, nil for the rest (asked as YES / NO).
 function Effects.condValue(cond, seat, name)
+  do
+    local n = cond:match("^you gained (%d+) or more life this turn$")
+    if n then
+      return Trackers.lifeThisTurn(seat).gained >= tonumber(n)
+    end
+    if cond == "you didn't lose life this turn" or cond == "you did not lose life this turn" then
+      return Trackers.lifeThisTurn(seat).lost == 0
+    end
+    if cond == "you lost life this turn" then
+      return Trackers.lifeThisTurn(seat).lost > 0
+    end
+    local x, y = cond:match("^(%d+) is (%d+) or more$")
+    if x then
+      return tonumber(x) >= tonumber(y)
+    end
+    local word = cond:match("^you control an? (%a+)$") or cond:match("^you control another (%a+)$")
+    if word and word ~= "creature" and word ~= "permanent" then
+      return Effects.controlsWord(seat, word, name)
+    end
+  end
   if cond == "a player controls no creatures" then
     for _, c in ipairs(players()) do
       if creatureCount(c) == 0 then
@@ -3083,10 +3917,33 @@ end
 -- as a free cast (onto the stack).
 function Effects.exileCast(seat, a, it)
   local who = a.everyone and orderFrom(seat) or { seat }
-  local pending, cards = #who, {}
+  local pending, cards, allExiled = #who, {}, {}
+  local function mvOf(card)
+    local mv = 0
+    pcall(function() mv = tonumber(JSON.decode(card.getGMNotes()).cmc) or 0 end)
+    return mv
+  end
+  local function restToBottom(except)
+    if not a.bottomRest then
+      return
+    end
+    local rest = {}
+    for _, c in ipairs(allExiled) do
+      if c ~= except and not c.isDestroyed() then
+        table.insert(rest, c)
+      end
+    end
+    if #rest > 0 then
+      Library.putBottomRandom(seat, rest, function()
+        printToAll("MTG > " .. it.name .. ": the other " .. #rest .. " exiled card" .. (#rest == 1 and "" or "s")
+          .. " go to the bottom of " .. seat .. "'s library in a random order.", INFO)
+      end)
+    end
+  end
   local function offer()
     if #cards == 0 then
       printToAll("MTG > " .. it.name .. ": no nonland cards were exiled.", INFO)
+      restToBottom(nil)
       return
     end
     for _, card in ipairs(cards) do
@@ -3096,21 +3953,47 @@ function Effects.exileCast(seat, a, it)
         local d = JSON.decode(card.getGMNotes())
         oracle = type(d) == "table" and tostring(d.oracle or "") or ""
       end)
+      local choices = { { label = "CAST", value = "cast" } }
+      if a.discover then
+        table.insert(choices, { label = "TO HAND", value = "hand" })
+      else
+        table.insert(choices, { label = "NO", value = false })
+      end
       ask(seat, it.name .. ": cast " .. name .. " free?", (#oracle > 150 and (oracle:sub(1, 148) .. "...") or oracle),
-        { { label = "CAST", value = true }, { label = "NO", value = false } }, function(yes)
-          if yes and not card.isDestroyed() then
+        choices, function(pick)
+          if pick == "cast" and not card.isDestroyed() then
             printToAll("MTG > " .. seat .. " casts " .. name .. " without paying its mana cost (" .. it.name .. ").", GOOD)
             Stack.pushCard(card, seat)
+            restToBottom(card)
+          elseif pick == "hand" and not card.isDestroyed() then
+            printToAll("MTG > " .. seat .. " puts " .. name .. " into their hand (" .. it.name .. ").", GOOD)
+            card.setPositionSmooth(Player[seat].getHandTransform().position, false, true)
+            Wait.time(function() if not card.isDestroyed() then Zones.refresh(card) end end, 0.8)
+            restToBottom(card)
           else
-            printToAll("MTG > " .. seat .. " doesn't cast " .. name .. " (stays exiled).", INFO)
+            printToAll("MTG > " .. seat .. " doesn't cast " .. name .. (a.bottomRest and "." or " (stays exiled)."), INFO)
+            restToBottom(nil)
           end
         end)
+    end
+  end
+  local accept
+  if a.mvLess or a.mvMax then
+    accept = function(card)
+      local mv = mvOf(card)
+      if a.mvLess then
+        return mv < a.mvLess
+      end
+      return mv <= a.mvMax
     end
   end
   for _, s in ipairs(who) do
     Library.exileUntilNonland(s, not a.untilNonland, function(card, exiled)
       printToAll("MTG > " .. s .. " exiled " .. #exiled .. " card" .. (#exiled == 1 and "" or "s") .. " from their library ("
         .. it.name .. ").", INFO)
+      for _, c in ipairs(exiled) do
+        table.insert(allExiled, c)
+      end
       if card then
         table.insert(cards, card)
       end
@@ -3118,7 +4001,7 @@ function Effects.exileCast(seat, a, it)
       if pending == 0 then
         offer()
       end
-    end)
+    end, accept)
   end
 end
 
