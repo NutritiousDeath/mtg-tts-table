@@ -95,7 +95,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.28 (cascade, storm, Zoo + Wanderer audit)"
+SCRIPT_VERSION = "1.29 (counterspells, copies, blink, Dark Depths, One Ring)"
 
 function onLoad(saved)
   GameLog.setup()

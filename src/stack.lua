@@ -361,6 +361,36 @@ function Stack.counterTop(byColor)
   end
 end
 
+-- What is on the stack right now (a copy of the list, bottom to top).
+function Stack.entries()
+  local out = {}
+  for i, it in ipairs(items()) do
+    out[i] = it
+  end
+  return out
+end
+
+-- Counter one item by its object GUID (a counterspell resolving).
+function Stack.counterGuid(guid, byName)
+  local list = items()
+  for i, it in ipairs(list) do
+    if it.guid == guid then
+      local obj = getObjectFromGUID(it.guid)
+      removeAt(i)
+      log(it.name .. (it.kind == "ability" and "'s ability" or "") .. " is countered (by " .. tostring(byName) .. ").", WARN)
+      if obj then
+        if it.kind == "ability" then
+          obj.destruct()
+        else
+          sendCard(obj, it, "graveyard")
+        end
+      end
+      return it
+    end
+  end
+  return nil
+end
+
 -- Take row r of the panel (1 = top) off the stack.
 function Stack.removeRow(r, byColor)
   local list = items()
@@ -572,7 +602,8 @@ end
 function Stack.activatedAbilities(obj)
   local text = oracleOf(obj)
   local list = {}
-  for _, line in ipairs(splitLines(text)) do
+  local all = splitLines(text)
+  for li, line in ipairs(all) do
     local colon = line:find(":", 1, true)
     if colon and colon <= 100 then
       local cost = line:sub(1, colon - 1)
@@ -584,6 +615,12 @@ function Stack.activatedAbilities(obj)
         cost = cost:sub(dash + #DASH)
       end
       local effect = line:sub(colon + 1):gsub("^%s+", "")
+      -- "Choose one —" modes are the lines that follow.
+      local nextLine = li + 1
+      while all[nextLine] and all[nextLine]:find("^%s*•") do
+        effect = effect .. "\n" .. all[nextLine]
+        nextLine = nextLine + 1
+      end
       local low = cost:lower()
       local isCost = low:find("{", 1, true) or low:find("sacrifice", 1, true) or low:find("pay ", 1, true)
         or low:find("discard", 1, true) or low:find("exile", 1, true) or low:find("remove", 1, true)
@@ -654,6 +691,21 @@ function Stack.activate(obj, playerColor, ab)
   end
   local _, cardName = oracleOf(obj)
   local low = ab.cost:lower()
+  -- {X} in the cost ("{X}, Remove X +1/+1 counters from Marath"): the player says X first.
+  if not ab.xDone and (low:find("{x}", 1, true) or low:find("remove x ", 1, true)) and Effects and Effects.askNumber then
+    Effects.askNumber(playerColor, obj.getName() .. ": what is X?", ab.cost .. "\nType X, then OK.", function(n)
+      local function sub(text)
+        local t2 = " " .. text:gsub("%s*X can't be 0%.", "") .. " "
+        for _ = 1, 2 do
+          t2 = t2:gsub("([^%a])[Xx]([^%a])", "%1" .. n .. "%2")
+        end
+        return (t2:gsub("^ ", ""):gsub(" $", ""))
+      end
+      local cost2 = ab.cost:gsub("{[Xx]}", "{" .. n .. "}")
+      Stack.activate(obj, playerColor, { cost = sub(cost2), effect = sub(ab.effect), line = ab.line, xDone = true })
+    end)
+    return
+  end
   local tap = low:find("{t}", 1, true) ~= nil
   if tap and tappedNow(obj, seat) then
     broadcastToColor(obj.getName() .. " is already tapped.", playerColor, WARN)

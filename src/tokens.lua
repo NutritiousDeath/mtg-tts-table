@@ -148,6 +148,7 @@ function Tokens.spawn(color, r, n, opts)
       rotation = { 0, opts and opts.tapped and (s.yaw + 90) % 360 or s.yaw, 0 },
       callback_function = function(obj)
         obj.setName(r.name)
+        Zones.presetFrom(obj, color)
         Zones.refresh(obj)
         -- "create a 1/1 Goblin token with haste": no summoning sickness this turn.
         if opts and opts.haste and Counters and Counters.addTempKeyword then

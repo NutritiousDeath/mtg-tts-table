@@ -167,6 +167,14 @@ local function handOwner(obj)
   return nil
 end
 
+-- A card made by script (a token, a copy) has no earlier area: say it came
+-- from the stack, so "enters the battlefield" watchers see it arrive.
+function Zones.presetFrom(obj, seat)
+  if obj ~= nil and not obj.isDestroyed() and where[obj.getGUID()] == nil then
+    where[obj.getGUID()] = { seat = seat, region = "stack" }
+  end
+end
+
 function Zones.refresh(obj)
   if not isCard(obj) or obj.held_by_color then
     return

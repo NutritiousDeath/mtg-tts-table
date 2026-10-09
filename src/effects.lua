@@ -105,6 +105,17 @@ function Effects.parse(text, sourceName)
   -- Several paragraphs (a spell: "This spell can't be countered." then
   -- "Destroy all creatures."): read them as sentences.
   t = t:gsub("\n", " ")
+  -- A named token ("create Marit Lage, a legendary 20/20 black Avatar creature
+  -- token"): the name is just a label for the token that follows.
+  do
+    local a, b, nm, art = t:find("create ([%a' ]+), (an?) ")
+    if a and nm and not nm:find("token", 1, true) then
+      local first = nm:match("^(%a+)")
+      if first and not NUMBERS[first] and first ~= "x" then
+        t = t:sub(1, a - 1) .. "create " .. art .. " " .. t:sub(b + 1)
+      end
+    end
+  end
   -- Swords to Plowshares: "Its controller gains life equal to its power."
   -- is handled with the exile itself.
   local lifeEqualPower, loseEqualMV = false, false
@@ -170,6 +181,35 @@ function Effects.parse(text, sourceName)
     local ww = t:match("you may discard your hand%. if you do, draw (%w+) cards")
     if ww and num(ww) then
       return { optional = false, notes = {}, conds = {}, actions = { { what = "wheel", who = "you", n = num(ww) } } }
+    end
+  end
+  if t:find("you gain protection from everything until your next turn", 1, true) then
+    return { optional = false, notes = {}, conds = {},
+      actions = { { what = "playerPro", who = "you", n = 1 } } }
+  end
+  -- Kiki-Jiki / Twinflame: a token copy of a creature you control (haste, then sacrificed / exiled at end step).
+  do
+    local one = t:find("create a token that's a copy of target ", 1, true)
+    local many = t:find("for each of them, create a token that's a copy of it", 1, true)
+    if one or many then
+      return { optional = false, notes = {}, conds = {},
+        actions = { { what = "copyCreature", who = "you", n = 1, many = many ~= nil,
+          nonlegendary = t:find("nonlegendary", 1, true) ~= nil,
+          haste = t:find("except it has haste", 1, true) ~= nil or t:find("except it has haste", 1, true) ~= nil,
+          endHow = (t:find("sacrifice it at the beginning of the next end step", 1, true) and "sacrifice")
+            or (t:find("exile those tokens at the beginning of the next end step", 1, true) and "exile")
+            or (t:find("exile it at the beginning of the next end step", 1, true) and "exile") or nil } } }
+    end
+  end
+  -- Counterspells: "Counter target spell." / "...noncreature spell" / "...blue spell" /
+  -- "counter target activated or triggered ability". Mana Drain adds the mana later.
+  if t:find("^%s*counter target ") then
+    local filt = t:match("^%s*counter target ([%a ]-)spell")
+    local ability = t:find("^%s*counter target [%a ]-ability") ~= nil
+    if filt or ability then
+      return { optional = false, notes = {}, conds = {},
+        actions = { { what = "counterSpell", who = "you", n = 1, filter = (filt or ""):gsub("%s+$", ""), ability = ability,
+          drain = t:find("add an amount of {c} equal to that spell's mana value", 1, true) ~= nil } } }
     end
   end
   if t:find("contract counter", 1, true) and t:find("discard their hand", 1, true) and t:find("draw seven cards", 1, true) then
@@ -429,6 +469,12 @@ function Effects.parse(text, sourceName)
         if verb == "exile" and (t:find("then return", 1, true) or t:find("return that card", 1, true)
             or t:find("return it to the battlefield", 1, true)) then
           types = {}
+          -- Blink: the table exiles it and brings it back (enters triggers, summon sickness...).
+          if (t:find("return it to the battlefield", 1, true) or t:find("return that card to the battlefield", 1, true))
+              and phrase:find("creature", 1, true) then
+            table.insert(actions, { what = "blink", who = "you", n = 1, thatCreature = phrase:find("that creature", 1, true) ~= nil,
+              own = phrase:find("you own", 1, true) ~= nil, other = phrase:find("another", 1, true) ~= nil })
+          end
         end
         if #types > 0 then
           local scope = "any"
@@ -689,7 +735,8 @@ function Effects.parse(text, sourceName)
   end
   -- "sacrifice ~, then put a creature card exiled with ~ onto the battlefield
   -- under your control with two additional +1/+1 counters on it".
-  if t:find("sacrifice ~", 1, true) and not t:find("you may sacrifice ~", 1, true) then
+  if (t:find("sacrifice ~", 1, true) and not t:find("you may sacrifice ~", 1, true))
+      or ((t:find(", sacrifice it", 1, true) or t:find("^%s*sacrifice it%s*%.?%s*$") or t:find("^%s*sacrifice it%.")) and not t:find("you may sacrifice it", 1, true)) then
     table.insert(actions, { what = "sacSelf", who = "you", n = 1 })
   end
   do
@@ -782,6 +829,26 @@ function Effects.parse(text, sourceName)
       or "other"
     table.insert(actions, { what = "counter", who = "you", n = num(cn), kind = kind, label = ckind })
   end
+  -- "put three +1/+1 counters on target creature (you control)": pick it on the table.
+  do
+    local t2 = t:gsub("up to one target", "target")
+    local upTo = t2 ~= t
+    local pn, pk, pty = t2:match("put (%w+) ([%w%+/%-]+) counters? on target (%a+)")
+    if pn and num(pn) and pty and (pty == "creature" or pty == "permanent" or pty == "artifact" or pty == "planeswalker" or pty == "land") then
+      local after = t2:match("put %w+ [%w%+/%-]+ counters? on target %a+ ([%a ]*)") or ""
+      table.insert(actions, { what = "counterOn", who = "you", n = num(pn), kind = (pk == "+1/+1" and "plus") or (pk == "-1/-1" and "minus")
+        or (pk == "loyalty" and "loyalty") or "other", label = pk, ty = pty, mine = after:find("you control", 1, true) ~= nil,
+        upTo = upTo })
+    end
+  end
+  -- "remove an ice counter from ~" (Dark Depths).
+  do
+    local rn, rk = t:match("remove (%w+) ([%w%+/%-]+) counters? from ~")
+    if rn and num(rn) and not t:find("^[^:]*remove [^:]*:") then
+      local kind = (rk == "+1/+1" and "plus") or (rk == "-1/-1" and "minus") or (rk == "loyalty" and "loyalty") or "other"
+      table.insert(actions, { what = "counter", who = "you", n = -num(rn), kind = kind, label = rk })
+    end
+  end
   -- "return a land you control to its owner's hand" (bounce lands),
   -- "return target creature to its owner's hand": pick it on the table.
   local btype = t:match("return an? (%a+) you control to its owner's hand")
@@ -848,7 +915,20 @@ local function describe(a, target, controller)
   local you = who == "you"
   if a.what == "search" then
     return who .. (you and " search " or " searches ") .. "the library for " .. tostring(a.phrase)
+  elseif a.what == "counterOn" then
+    return a.n .. " " .. tostring(a.label) .. " counter" .. (a.n == 1 and "" or "s") .. " on a target " .. tostring(a.ty)
+  elseif a.what == "playerPro" then
+    return "protection from everything until their next turn"
+  elseif a.what == "counterSpell" then
+    return "a spell on the stack is countered"
+  elseif a.what == "blink" then
+    return "a creature is exiled and returns to the battlefield"
+  elseif a.what == "copyCreature" then
+    return "a token copy of a creature is made"
   elseif a.what == "counter" then
+    if a.n < 0 then
+      return (-a.n) .. " " .. tostring(a.label) .. " counter" .. (a.n == -1 and "" or "s") .. " removed"
+    end
     return a.n .. " " .. tostring(a.label) .. " counter" .. (a.n == 1 and "" or "s") .. " added"
   elseif a.what == "exactLife" then
     return "players with exactly " .. a.life .. " life lose the game, then everyone " .. (a.dir == "gain" and "gains " or "loses ") .. a.n .. " life"
@@ -1169,6 +1249,19 @@ local function apply(it, plan, target)
           Effects.untapAttacker(seat, a, it)
         elseif a.what == "oppExile" then
           Effects.oppExile(seat, a, it)
+        elseif a.what == "counterSpell" then
+          Effects.counterSpell(seat, a, it)
+        elseif a.what == "counterOn" then
+          Effects.counterOn(seat, a, it)
+        elseif a.what == "playerPro" then
+          GameState.data.playerPro = GameState.data.playerPro or {}
+          GameState.data.playerPro[seat] = true
+          printToAll("MTG > " .. seat .. " has protection from everything until their next turn (" .. it.name .. "): they can't be targeted.", GOOD)
+          broadcastToAll(seat .. " has PROTECTION FROM EVERYTHING until their next turn.", { 1, 0.85, 0.3 })
+        elseif a.what == "blink" then
+          Effects.blink(seat, a, it)
+        elseif a.what == "copyCreature" then
+          Effects.copyCreature(seat, a, it)
         elseif a.what == "sacSelf" then
           local src = it.source and getObjectFromGUID(it.source)
           if src and not src.isDestroyed() then
@@ -1335,6 +1428,308 @@ end
 function Effects.askChoice(seat, title, text, choices, onPick, pick)
   ask(seat, title, text, choices, onPick, pick)
 end
+
+-- Ask for a whole number (X): the box with OK. onPick(n) only on an answer.
+function Effects.askNumber(seat, title, text, onPick)
+  ask(seat, title, text, { { label = "CANCEL", value = false } }, function(n)
+    if n ~= false then
+      onPick(n)
+    end
+  end, nil, true)
+end
+
+---------------------------------------------------------------------------
+-- Counterspells and "at the beginning of your next ..." delayed effects
+---------------------------------------------------------------------------
+
+local function delayedList()
+  GameState.data.delayed = GameState.data.delayed or {}
+  return GameState.data.delayed
+end
+
+function Effects.addDelayed(rec)
+  table.insert(delayedList(), rec)
+end
+
+local COLOR_WORDS = { white = "W", blue = "U", black = "B", red = "R", green = "G" }
+
+local function spellFits(obj, filt)
+  if filt == nil or filt == "" then
+    return true
+  end
+  local d = {}
+  pcall(function() d = JSON.decode(obj.getGMNotes()) or {} end)
+  local tl = tostring(d.typeLine or ""):lower()
+  local colors = {}
+  for _, c in ipairs(type(d.colors) == "table" and d.colors or {}) do
+    colors[tostring(c):upper()] = true
+  end
+  local anyOf = filt:find(" or ", 1, true) ~= nil
+  local ok = not anyOf
+  for w in filt:gmatch("%a+") do
+    if w ~= "or" then
+      local fits
+      if w:sub(1, 3) == "non" then
+        fits = not (tl:find(w:sub(4), 1, true) or (COLOR_WORDS[w:sub(4)] and colors[COLOR_WORDS[w:sub(4)]]))
+      elseif COLOR_WORDS[w] then
+        fits = colors[COLOR_WORDS[w]] == true
+      else
+        fits = tl:find(w, 1, true) ~= nil
+      end
+      if anyOf then
+        ok = ok or fits
+      else
+        ok = ok and fits
+      end
+    end
+  end
+  return ok
+end
+
+function Effects.counterSpell(seat, a, it)
+  local cands = {}
+  for _, e in ipairs(Stack.entries()) do
+    local obj = getObjectFromGUID(e.guid)
+    if e.guid ~= it.card and obj ~= nil then
+      if a.ability then
+        if e.kind == "ability" then
+          table.insert(cands, e)
+        end
+      elseif e.kind == "card" and spellFits(obj, a.filter) then
+        table.insert(cands, e)
+      end
+    end
+  end
+  local function counter(e)
+    local mv = 0
+    local obj = getObjectFromGUID(e.guid)
+    if obj then
+      pcall(function() mv = tonumber(JSON.decode(obj.getGMNotes()).cmc) or 0 end)
+    end
+    Stack.counterGuid(e.guid, it.name)
+    printToAll("MTG > " .. it.name .. " counters " .. e.name .. ".", GOOD)
+    if a.drain then
+      Effects.addDelayed({ seat = seat, step = "main", kind = "mana", color = "C", amount = mv, name = it.name })
+      broadcastToColor(it.name .. ": you will get " .. mv .. " colorless mana at the beginning of your next main phase.", seat, GOOD)
+    end
+  end
+  if #cands == 0 then
+    broadcastToColor(it.name .. ": nothing on the stack for it to counter.", seat, INFO)
+    return
+  end
+  if #cands == 1 then
+    counter(cands[1])
+    return
+  end
+  local lines, choices = {}, {}
+  for i = #cands, 1, -1 do
+    if #choices < MAX_CHOICES then
+      table.insert(lines, #choices + 1 .. ") " .. cands[i].name .. " (" .. tostring(cands[i].controller) .. ")")
+      table.insert(choices, { label = tostring(#choices + 1), value = i })
+    end
+  end
+  ask(seat, it.name .. ": counter which?", table.concat(lines, "\n"), choices, function(i)
+    counter(cands[i])
+  end)
+end
+
+-- Exile a creature and return it: leaves and enters the battlefield, so
+-- "enters" triggers fire, counters go away and summoning sickness starts over.
+function Effects.blinkCard(obj, seat, srcName)
+  if obj == nil or obj.isDestroyed() then
+    return
+  end
+  local loc = Zones.regionAt(obj.getPosition())
+  local owner = loc.seat or seat
+  local from = { seat = owner, region = loc.region }
+  if Equip then
+    if Equip.isAttachment(obj) then
+      Equip.detach(obj, "silent")
+    end
+    for _, att in ipairs(Equip.attachments(obj)) do
+      Equip.detach(att, "its creature left")
+    end
+  end
+  local g = obj.getGUID()
+  if GameState.data.tempKeywords then
+    GameState.data.tempKeywords[g] = nil
+  end
+  local r = obj.getRotation()
+  obj.setRotationSmooth({ r.x, TableSetup.seat(owner).yaw, r.z }, false, true)
+  printToAll("MTG > " .. tostring(srcName) .. ": " .. obj.getName() .. " is exiled and returns to the battlefield.", GOOD)
+  Events.emit("cardMoved", { card = obj, name = obj.getName(), from = from, to = { seat = owner, region = "exile" } })
+  Wait.time(function()
+    if obj.isDestroyed() then
+      return
+    end
+    local now = Zones.regionAt(obj.getPosition())
+    if now.region ~= "battlefield" and now.region ~= "lands" then
+      return
+    end
+    Events.emit("cardMoved", { card = obj, name = obj.getName(), from = { seat = owner, region = "exile" }, to = from })
+    Counters.render(obj)
+  end, 0.8)
+end
+
+function Effects.blink(seat, a, it)
+  if a.thatCreature then
+    local obj = it.thatCard and getObjectFromGUID(it.thatCard)
+    if obj and not obj.isDestroyed() then
+      Effects.blinkCard(obj, seat, it.name)
+    else
+      broadcastToColor(it.name .. ": blink the creature yourself.", seat, INFO)
+    end
+    return
+  end
+  ask(seat, it.name .. ": blink a creature", "Click BLINK on the creature to exile and return, or SKIP.",
+    { { label = "SKIP", value = false } }, function(obj)
+      if obj then
+        Effects.blinkCard(obj, seat, it.name)
+      else
+        printToAll("MTG > " .. it.name .. ": nothing blinked.", INFO)
+      end
+    end, { filter = function(obj, owner)
+      return owner == seat and Effects.cardTypes(obj).creature == true and not (a.other and it.source and obj.getGUID() == it.source)
+    end, label = "BLINK" })
+end
+
+-- "Put N counters on target creature": click it on the table.
+function Effects.counterOn(seat, a, it)
+  ask(seat, it.name .. ": counters on a " .. a.ty, "Click COUNTER on the " .. a.ty .. " that gets " .. a.n .. " " .. a.label
+    .. " counter" .. (a.n == 1 and "" or "s") .. (a.upTo and ", or SKIP." or "."),
+    { { label = "SKIP", value = false } }, function(obj)
+      if obj then
+        Counters.change(obj, a.kind, a.n, seat)
+        printToAll("MTG > " .. it.name .. ": " .. a.n .. " " .. a.label .. " counter" .. (a.n == 1 and "" or "s") .. " on " .. obj.getName() .. ".", GOOD)
+      else
+        printToAll("MTG > " .. it.name .. ": no counters placed.", INFO)
+      end
+    end, { filter = function(obj, owner)
+      if a.mine and owner ~= seat then
+        return false
+      end
+      local types = Effects.cardTypes(obj)
+      return a.ty == "permanent" or types[a.ty] == true
+    end, label = "COUNTER", protect = false })
+end
+
+-- A token copy of a creature (Kiki-Jiki, Twinflame).
+function Effects.copyCard(obj, seat, a, srcName)
+  if obj == nil or obj.isDestroyed() then
+    return nil
+  end
+  local pos = obj.getPosition()
+  local s = TableSetup.seat(seat)
+  local c = obj.clone({ position = { x = pos.x + s.right.x * 3.2, y = pos.y + 0.6, z = pos.z + s.right.z * 3.2 } })
+  if c == nil then
+    broadcastToColor(srcName .. ": couldn't copy " .. obj.getName() .. " - make the token copy yourself.", seat, INFO)
+    return nil
+  end
+  c.addTag("Token")
+  c.memo = ""
+  Zones.presetFrom(c, seat)
+  Wait.time(function()
+    if c.isDestroyed() then
+      return
+    end
+    Zones.refresh(c)
+    Counters.setup(c)
+    if a.haste and Counters.addTempKeyword then
+      Counters.addTempKeyword(c, "haste")
+    end
+    Counters.render(c)
+  end, 0.7)
+  if a.endHow then
+    Effects.addDelayed({ seat = seat, anySeat = true, step = "end", kind = "removeCard", guid = c.getGUID(), how = a.endHow, name = srcName })
+  end
+  printToAll("MTG > " .. srcName .. ": " .. seat .. " makes a token copy of " .. obj.getName()
+    .. (a.haste and " with haste" or "") .. (a.endHow and (" (" .. a.endHow .. "d at the next end step)") or "") .. ".", GOOD)
+  return c
+end
+
+function Effects.copyCreature(seat, a, it)
+  local function filter(obj, owner)
+    if owner ~= seat or not Effects.cardTypes(obj).creature then
+      return false
+    end
+    if a.nonlegendary then
+      local d = {}
+      pcall(function() d = JSON.decode(obj.getGMNotes()) or {} end)
+      if tostring(d.typeLine or ""):find("Legendary", 1, true) then
+        return false
+      end
+    end
+    return true
+  end
+  local picked = {}
+  local function askNext()
+    ask(seat, it.name .. ": copy which creature?", (a.many and "Click COPY on each creature you want a copy of, then DONE." or "Click COPY on the creature.")
+      .. (a.nonlegendary and " (nonlegendary)" or ""),
+      { { label = a.many and "DONE" or "SKIP", value = false } }, function(obj)
+        if obj then
+          Effects.copyCard(obj, seat, a, it.name)
+          if a.many then
+            askNext()
+          end
+        end
+      end, { filter = filter, label = "COPY" })
+  end
+  askNext()
+end
+
+-- "Until your next turn" protection ends when their turn begins.
+Events.on("stepStarted", function(d)
+  local pro = GameState.data and GameState.data.playerPro
+  if pro and pro[d.seat] and (d.step == "untap" or d.step == "upkeep") then
+    pro[d.seat] = nil
+    printToAll("MTG > " .. d.seat .. "'s protection from everything ends.", INFO)
+  end
+end)
+
+-- Delayed effects come due when their step starts.
+Events.on("stepStarted", function(d)
+  if not enabled() or not GameState.data.started then
+    return
+  end
+  local list = delayedList()
+  for i = #list, 1, -1 do
+    local r = list[i]
+    if (r.seat == d.seat or r.anySeat) and (r.step == d.step or (r.step == "main" and (d.step == "main1" or d.step == "main2"))) then
+      table.remove(list, i)
+      if r.kind == "removeCard" then
+        local obj = getObjectFromGUID(r.guid)
+        if obj and not obj.isDestroyed() then
+          printToAll("MTG > " .. r.name .. ": " .. obj.getName() .. " token copy is " .. r.how .. "d.", GOOD)
+          if Combat and Combat.removeCard then
+            Combat.removeCard(obj, r.how == "exile" and "exile" or "graveyard")
+          else
+            obj.destruct()
+          end
+        end
+      elseif r.kind == "mana" then
+        Wait.time(function()
+          if r.amount > 0 then
+            ManaChips.add(r.seat, r.color, r.amount)
+          end
+          printToAll("MTG > " .. r.name .. ": " .. r.seat .. " adds " .. r.amount .. " {" .. r.color .. "}.", GOOD)
+          broadcastToColor(r.name .. ": " .. r.amount .. " colorless mana added (check the MANA tile).", r.seat, GOOD)
+        end, 0.8)
+      elseif r.kind == "pact" then
+        Wait.time(function()
+          ask(r.seat, r.name .. ": pay " .. r.cost .. "?", "Your upkeep: pay " .. r.cost .. " or lose the game.",
+            { { label = "PAID", value = true }, { label = "CAN'T PAY", value = false } }, function(paid)
+              if paid then
+                printToAll("MTG > " .. r.seat .. " paid for " .. r.name .. ".", GOOD)
+              else
+                printToAll("MTG > " .. r.seat .. " did not pay for " .. r.name .. ".", { 1, 0.4, 0.4 })
+                Trackers.flagLoss(r.seat, "didn't pay " .. r.cost .. " for " .. r.name)
+              end
+            end)
+        end, 0.8)
+      end
+    end
+  end
+end)
 
 function ui_effPick(player, arg)
   local seat, i = tostring(arg):match("^(%a+)_(%d+)$")
@@ -1539,6 +1934,86 @@ function Effects.resolve(it)
     end
     it = copy
   end
+  -- Pacts: "At the beginning of your next upkeep, pay {2}{G}{G}. If you don't, you lose the game."
+  do
+    local a1 = low:find("at the beginning of your next upkeep, pay ", 1, true)
+    if a1 and not it.pactDone then
+      local rest = raw:sub(a1 + #"at the beginning of your next upkeep, pay ")
+      local cost = rest:match("^([{}%w/]+)")
+      local stop = raw:find("lose the game.", a1, true)
+      if cost and stop then
+        Effects.addDelayed({ seat = it.controller, step = "upkeep", kind = "pact", cost = cost, name = it.name })
+        printToAll("MTG > " .. it.name .. ": " .. it.controller .. " must pay " .. cost .. " at their next upkeep or lose the game.", { 1, 0.75, 0.3 })
+        local copy = {}
+        for k, v in pairs(it) do
+          copy[k] = v
+        end
+        copy.text = (raw:sub(1, a1 - 1) .. raw:sub(stop + #"lose the game.")):gsub("%s+$", "")
+        copy.pactDone = true
+        it = copy
+        raw = copy.text
+        low = raw:lower()
+      end
+    end
+  end
+  -- "... for each burden counter on The One Ring": the table counts them.
+  do
+    local a1 = low:find(" for each ", 1, true)
+    local a2 = a1 and low:find(" counter on ", a1, true)
+    local src = it.source and getObjectFromGUID(it.source)
+    if a1 and a2 and a2 - a1 < 30 and src and not src.isDestroyed() and not it.countDone then
+      local kindWord = low:sub(a1 + #" for each ", a2 - 1)
+      local stopAt = raw:find("[%.,]", a2 + #" counter on ") or (#raw + 1)
+      local c = Counters.get(src)
+      local n = (kindWord == "+1/+1" and c.plus) or (kindWord == "-1/-1" and c.minus) or (kindWord == "loyalty" and c.loyalty) or c.other
+      -- Counters this very ability puts on first ("put a burden counter on it, then draw a card for each").
+      local added = low:sub(1, a1):match("put (%w+) " .. kindWord:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1") .. " counters? on ")
+      if added and num(added) then
+        n = n + num(added)
+      end
+      local before = raw:sub(1, a1 - 1)
+      local after = raw:sub(stopAt)
+      local b2 = before:gsub(" a card$", " " .. n .. " cards"):gsub(" an? card$", " " .. n .. " cards")
+      if b2 == before then
+        b2 = before:gsub("(%d+) life$", function(k) return (tonumber(k) * n) .. " life" end)
+      end
+      if b2 == before then
+        b2 = before:gsub("(%d+) damage$", function(k) return (tonumber(k) * n) .. " damage" end)
+      end
+      if b2 ~= before then
+        local copy = {}
+        for k, v in pairs(it) do
+          copy[k] = v
+        end
+        copy.text = b2 .. after
+        copy.countDone = true
+        printToAll("MTG > " .. it.name .. ": " .. n .. " " .. kindWord .. " counter" .. (n == 1 and "" or "s") .. " counted.", INFO)
+        it = copy
+        raw = copy.text
+        low = raw:lower()
+      end
+    end
+  end
+  -- Greater Good: "draw cards equal to the sacrificed creature's power": the player says what it was.
+  if low:find("equal to the sacrificed creature's power", 1, true) and not it.sacPowerDone then
+    local at = low:find("equal to the sacrificed creature's power", 1, true)
+    ask(it.controller, it.name .. ": sacrificed creature's power?", "Type the power of the creature you sacrificed, then OK.",
+      { { label = "SKIP", value = false } }, function(n)
+        if n == false then
+          printToAll("MTG > " .. it.name .. ": resolve it by hand.", INFO)
+          return
+        end
+        local copy = {}
+        for k, v in pairs(it) do
+          copy[k] = v
+        end
+        copy.text = raw:sub(1, at - 1):gsub("cards $", n .. " cards"):gsub("a card $", n .. " cards") .. raw:sub(at + #"equal to the sacrificed creature's power")
+        copy.text = copy.text:gsub("draw cards  ", "draw " .. n .. " cards "):gsub("Draw cards  ", "Draw " .. n .. " cards ")
+        copy.sacPowerDone = true
+        Effects.resolve(copy)
+      end, nil, true)
+    return
+  end
   -- Join forces (Collective Voyage): everyone may pay, then everyone searches.
   if low:find("join forces", 1, true) then
     Effects.joinForces(it)
@@ -1609,6 +2084,16 @@ function Effects.resolve(it)
         c.auto = auto
         c.silent = true
       end
+      -- "Sacrifice it. If you do, ...": the table sacrifices it itself, so it knows.
+      if c.cond == "you do" and c.auto == nil then
+        for _, a in ipairs(plan.actions) do
+          local src = it.source and getObjectFromGUID(it.source)
+          if a.what == "sacSelf" and src and not src.isDestroyed() then
+            c.auto = true
+            c.silent = true
+          end
+        end
+      end
       -- Approach of the Second Sun: the table knows what was cast.
       if c.cond:find("cast another spell named ~ this game", 1, true) then
         local n = Effects.castCount(seat, it.name)
@@ -1671,8 +2156,11 @@ function Effects.resolve(it)
       return
     end
     local choices = {}
+    local pro = GameState.data.playerPro or {}
     for _, c in ipairs(players()) do
-      if not (oppOnly and c == seat) then
+      if pro[c] and c ~= seat then
+        printToAll("MTG > " .. c .. " has protection from everything: " .. it.name .. " can't target them.", INFO)
+      elseif not (oppOnly and c == seat) then
         -- Opponents first, so a seat nobody sits in picks one by default.
         table.insert(choices, c == seat and #choices + 1 or 1, { label = string.upper(c), value = c })
       end
@@ -1889,6 +2377,17 @@ function effects_cardPick(obj, color, alt)
   current = nil
   UI.setAttribute("effAsk_" .. q.seat, "visibility", q.seat)
   Counters.render(obj)   -- its RETURN button goes before it moves
+  -- Picking someone else's permanent is targeting it ("becomes the target of...").
+  local ok, owner = pcall(fieldSeat, obj)
+  if ok and owner and owner ~= q.seat and Triggers and Triggers.onTargeted then
+    if Triggers.onTargeted(obj, q.seat) == true then
+      -- Gone before the spell resolved: nothing happens.
+      if current == nil then
+        nextQuestion()
+      end
+      return
+    end
+  end
   q.onPick(obj)
   if current == nil then
     nextQuestion()
@@ -2370,8 +2869,38 @@ Events.on("cardMoved", function(d)
   if Triggers and Triggers.stripReminder then
     t = Triggers.stripReminder(t)
   end
+  t = t:gsub("enters the battlefield", "enters")
   local w, kind = t:match("enters with (%w+) ([%w%+/%-]+) counters? on it")
   local n = num(w)
+  -- Counters that depend on a number only the player knows: X, or the mana
+  -- spent (Marath). The owner types it.
+  local ask_kind = t:match("enters with x ([%w%+/%-]+) counters? on it")
+  local mana_kind = t:match("enters with a number of ([%w%+/%-]+) counters on it equal to the amount of mana spent")
+    or t:match("enters with a number of ([%w%+/%-]+) counters on it equal to the mana value")
+  if n == nil and (ask_kind or mana_kind) and d.to.seat then
+    local k2 = ask_kind or mana_kind
+    local key2 = (k2 == "+1/+1" and "plus") or (k2 == "-1/-1" and "minus") or (k2 == "loyalty" and "loyalty") or "other"
+    local seat2 = d.to.seat
+    local mv = 0
+    pcall(function() mv = tonumber(JSON.decode(card.getGMNotes()).cmc) or 0 end)
+    Wait.time(function()
+      if card.isDestroyed() then
+        return
+      end
+      ask(seat2, name .. ": how many " .. k2 .. " counters?",
+        (ask_kind and "Type X (what it was cast with)" or ("Type the mana spent to cast it (its mana value is " .. mv .. ", plus any commander tax)"))
+          .. ", then OK.", { { label = "SKIP", value = false } }, function(v)
+          if v == false or card.isDestroyed() then
+            return
+          end
+          if v > 0 then
+            Counters.change(card, key2, v, seat2)
+          end
+          printToAll("MTG > " .. name .. " enters with " .. v .. " " .. k2 .. " counters.", INFO)
+        end, nil, true)
+    end, 0.6)
+    return
+  end
   if n == nil then
     return
   end

@@ -355,6 +355,7 @@ function Counters.change(obj, kind, delta, byColor)
     return
   end
   local c = Counters.get(obj)
+  local before = c[kind] or 0
   if kind == "tp" or kind == "tt" then
     c[kind] = (c[kind] or 0) + delta
   else
@@ -367,6 +368,9 @@ function Counters.change(obj, kind, delta, byColor)
   Counters.render(obj)
   if delta < 0 or kind == "minus" then
     Counters.checkDeath(obj)
+  end
+  if delta < 0 and before > 0 and (c[kind] or 0) == 0 and kind ~= "tp" and kind ~= "tt" and Triggers and Triggers.onCountersGone then
+    Triggers.onCountersGone(obj, kind)
   end
   if delta > 0 and kind ~= "tp" and kind ~= "tt" and Triggers and Triggers.onCounters then
     Triggers.onCounters(obj, kind, delta, byColor)

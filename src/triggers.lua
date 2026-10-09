@@ -342,6 +342,17 @@ local function parseTrigger(p)
       end
     end
   end
+  -- "When ~ has no ice counters on it" (Dark Depths): a state trigger on the last counter leaving.
+  do
+    local kindWord = between(p, "when ~ has no ", " counters on it")
+    if kindWord and #kindWord < 20 then
+      return { kind = "nocounters", self = true, counter = kindWord }
+    end
+  end
+  -- "When ~ becomes the target of a spell or ability an opponent controls" (Eternal Scourge).
+  if plainFind(p, "when ~ becomes the target of a spell or ability") or plainFind(p, "whenever ~ becomes the target of a spell or ability") then
+    return { kind = "targeted", self = true, opp = plainFind(p, "an opponent controls") }
+  end
   -- Dies (self).
   if plainFind(p, "when ~ dies") or plainFind(p, "whenever ~ dies") then
     return { kind = "dies", self = true }
@@ -1007,6 +1018,61 @@ Events.on("cardMoved", function(d)
   -- checked (it's already in the graveyard): add those by hand.
   pushAll(found, cardController, card.getGUID())
 end)
+
+-- A player picked this card as the target of their spell or ability (effects.lua).
+function Triggers.onTargeted(obj, bySeat)
+  if not enabled() or not GameState.data.started or obj == nil or obj.isDestroyed() then
+    return
+  end
+  local found = {}
+  for _, p in ipairs(permanents()) do
+    if p.obj == obj then
+      for _, a in ipairs(abilitiesOf(obj)) do
+        local tr = a.trig
+        if tr.kind == "targeted" and (not tr.opp or bySeat ~= p.controller) then
+          -- "...becomes the target..., exile ~": it leaves before the spell can do anything
+          -- (the table applies the spell right away), so the spell has no target left.
+          local low = tostring(a.text):lower()
+          local nm = obj.getName():lower()
+          local short = nm:match("^([^,]+),")
+          local tail = low:match(", exile (.-)%.?$")
+          if tail and (tail == nm or tail == short or tail == "it" or tail == "this creature") and Combat and Combat.removeCard then
+            printToAll("MTG > " .. obj.getName() .. " was targeted by " .. bySeat .. " and is exiled in response: the spell or ability has no target.", { 1, 0.75, 0.3 })
+            Combat.removeCard(obj, "exile")
+            return true
+          end
+          table.insert(found, { obj = obj, controller = p.controller, text = a.text })
+        end
+      end
+    end
+  end
+  pushAll(found, bySeat, obj.getGUID())
+  return false
+end
+
+-- The last counter of a kind left a card ("when ~ has no ice counters on it").
+function Triggers.onCountersGone(obj, kind)
+  if not enabled() or not GameState.data.started then
+    return
+  end
+  local found = {}
+  for _, p in ipairs(permanents()) do
+    if p.obj == obj then
+      for _, a in ipairs(abilitiesOf(obj)) do
+        local tr = a.trig
+        if tr.kind == "nocounters" then
+          local w = tostring(tr.counter)
+          local isPlus = w == "+1/+1" and kind == "plus"
+          local isMinus = w == "-1/-1" and kind == "minus"
+          if isPlus or isMinus or (kind == "other" and w ~= "+1/+1" and w ~= "-1/-1") then
+            table.insert(found, { obj = obj, controller = p.controller, text = a.text })
+          end
+        end
+      end
+    end
+  end
+  pushAll(found, nil, obj.getGUID())
+end
 
 -- Counters were put on a permanent (counters.lua): "whenever you put one or
 -- more counters on a Goblin you control".
