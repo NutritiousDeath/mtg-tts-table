@@ -1,0 +1,47 @@
+MTG TABLE - SOLO TEST CHECKLIST (v1.33)
+Chat should say: MTG > Scripts loaded: version 1.33 (Kasla, Arcum, Urza decks: Hangarback, Arcum, Urza ability, pumps)
+
+HOW: load a deck, solo, drag cards from hand to the battlefield (or cast from hand), then watch chat + the ask popups.
+Mark each: OK / WRONG (write what happened).
+
+== TOKENS / STATICS (Kasla + Urza + Arcum decks)
+[ ] Anointed Procession on battlefield, then make any token (Hero of Bladehold, Krenko): you get double.
+[ ] Academy Manufactor on battlefield, make a Treasure / Food / Clue: you get one of each.
+[ ] Karn the Great Creator -2 or Urza ETB: Construct token appears and shows +1/+1 per artifact you control (add an artifact, check the P/T).
+[ ] Intangible Virtue: creature tokens get +1/+1.
+[ ] Hangarback Walker: put 3 +1/+1 counters on it, send to graveyard: you get 3 Thopters (if the Thopter doesn't appear, use the TOKENS tile and tell me).
+
+== TRIGGERS
+[ ] Clarion Spirit: cast 2 spells in one turn -> Spirit token on the 2nd.
+[ ] Faerie Mastermind: opponent draws 2nd card in a turn -> you draw.
+[ ] The Endstone: play a land / cast a spell -> you draw.
+[ ] Ugin, Eye of the Storms: cast a colorless spell -> exile prompt.
+[ ] Crested Sunmare: another Horse/creature enters trigger asks properly.
+[ ] Resplendent Angel: the "until end of turn, gets +2/+2 and lifelink" resolves on its own.
+
+== EFFECTS
+[ ] Windfall: everyone discards and draws the biggest count.
+[ ] Finale of Glory / Increasing Devotion: X asks, and the "instead" (10+ / flashback style) version works.
+[ ] Martial Coup: X=5+ gives Soldiers and wipes the others.
+[ ] Cyclonic Rift (normal, and overloaded).
+[ ] Mind Over Matter: modal choice works.
+[ ] Tezzeret the Seeker +1 untaps; -X search lists only artifacts of that MV or less.
+[ ] Portal to Phyrexia: each opponent gets the sacrifice prompt (no prompt if they have no creatures).
+[ ] Metalworker / Nykthos: asks for the number/colour, adds the mana.
+
+== BLINK / CLONES / COPIES
+[ ] Thassa, Displacer Kitten, Ghostly Flicker: pick a permanent, it leaves and returns, ETB fires again.
+[ ] Phyrexian Metamorph / Copy Artifact: COPY prompt, token copy appears, real card parked; destroy the copy -> real card goes to graveyard.
+[ ] Mirrorworks: nontoken artifact enters -> PAY {2}? -> token copy.
+[ ] Helm of the Host: equip a creature, beginning of combat -> token copy with haste (needs the Equip link; tell me if "make it yourself" shows up).
+
+== NEW IN THIS VERSION
+[ ] Arcum Dagsson ability: click SACRIFICE on an artifact creature -> library search for MV+1 opens for ITS controller. (You must remember "noncreature".)
+[ ] Urza {5}: shuffles, exiles the top card, asks "play X free?". Test with a land on top (should drop on your lands) and a spell (goes to the stack).
+[ ] Discover N (Geological Appraiser etc.): exiles until nonland with MV<=N, CAST or TO HAND, rest to bottom.
+
+== STILL BY HAND (just confirm the table SAYS to do it by hand, not that it does it)
+Illusionist's Bracers, Lithoform Engine, Isochron Scepter, Mystic Forge, Chrome Mox / Semblance Anvil imprint, Mindslaver, Memory Jar, Spellskite, Emry, Portal reanimation from any graveyard, Baird's tax, Goblin Warchief discount, Purphoros devotion, Sunmare indestructible, Urza's tap-artifact mana, Endstone life halving, Basri emblem.
+
+== NOTES / BUGS
+(write here)
