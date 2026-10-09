@@ -69,6 +69,7 @@ require("src/walkers")
 require("src/effects")
 require("src/faces")
 require("src/flip")
+require("src/token_data")
 require("src/tokens")
 require("src/ui")
 require("src/importcards")
@@ -95,7 +96,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.29 (counterspells, copies, blink, Dark Depths, One Ring)"
+SCRIPT_VERSION = "1.30 (built-in token list)"
 
 function onLoad(saved)
   GameLog.setup()

@@ -99,10 +99,122 @@ local function urlEncode(s)
   end):gsub(" ", "%%20"))
 end
 
+---------------------------------------------------------------------------
+-- The built-in token list (token_data.lua, made by tools/make_token_data.py):
+-- found without asking the relay; the relay is only the fallback.
+---------------------------------------------------------------------------
+
+local CARD_BACK = "https://steamusercontent-a.akamaihd.net/ugc/1647720103762682461/35EF6E87970E2A5D6581E7D96A99F8A575B7A15F/"
+
+local COLOR_LETTERS = { "W", "U", "B", "R", "G" }
+
+-- A token record from the list as the panel and spawner use it. The TTS card
+-- (tpl) is only built when the token is actually made.
+local function fromData(e)
+  local set = {}
+  for ch in tostring(e.c or ""):gmatch("%a") do
+    set[ch] = true
+  end
+  return { name = e.n, typeLine = e.t, entry = e, colorsSet = set, pt = (e.p and e.u) and (e.p .. "/" .. e.u) or nil }
+end
+
+local function buildTpl(r)
+  local e = r.entry
+  local id = tostring(e.i)
+  local host = Importer.RELAY_HOST
+  local face = "https://" .. host .. "/large/front/" .. id:sub(1, 1) .. "/" .. id:sub(2, 2) .. "/" .. id .. ".jpg"
+  local types = {}
+  local main = tostring(e.t)
+  local dash = main:find(" — ", 1, true)
+  if dash then
+    main = main:sub(1, dash - 1)
+  end
+  for w in main:gmatch("%S+") do
+    table.insert(types, w)
+  end
+  local colors = {}
+  for ch in tostring(e.c or ""):gmatch("%a") do
+    table.insert(colors, ch)
+  end
+  local data = { v = 1, name = e.n, scryfallId = e.i, manaCost = "", cmc = 0, typeLine = e.t, types = types,
+    oracle = e.o or "", keywords = {}, colors = colors, colorIdentity = colors, isCommander = false }
+  local desc = { e.t }
+  if e.o and e.o ~= "" then
+    table.insert(desc, e.o)
+  end
+  if e.p and e.u then
+    data.power, data.toughness = e.p, e.u
+    table.insert(desc, e.p .. "/" .. e.u)
+  end
+  local entry = { FaceURL = face, BackURL = CARD_BACK, NumWidth = 1, NumHeight = 1, BackIsHidden = true, UniqueBack = false, Type = 0 }
+  local card = {
+    Name = "Card",
+    Transform = { posX = 0, posY = 0, posZ = 0, rotX = 0, rotY = 180, rotZ = 180, scaleX = 1, scaleY = 1, scaleZ = 1 },
+    Nickname = e.n,
+    Description = table.concat(desc, "\n"),
+    GMNotes = JSON.encode(data),
+    CardID = "@@CID1@@",
+    CustomDeck = { ["@@ID1@@"] = entry },
+    Tags = { "MTGCard" },
+  }
+  r.image = face
+  return JSON.encode(card)
+end
+
+local dataList
+local function allData()
+  if dataList == nil then
+    dataList = {}
+    for _, e in ipairs(TOKEN_DATA or {}) do
+      table.insert(dataList, fromData(e))
+    end
+  end
+  return dataList
+end
+
+-- Words of a search ("1/1 soldier", "treasure") against the list.
+local function searchData(query)
+  local words = {}
+  for w in tostring(query):lower():gmatch("%S+") do
+    table.insert(words, w)
+  end
+  local out = {}
+  for _, r in ipairs(allData()) do
+    local hay = (tostring(r.name) .. " " .. tostring(r.typeLine)):lower()
+    local ok = #words > 0
+    for _, w in ipairs(words) do
+      if w:match("^[%d%*]+/[%d%*]+$") then
+        ok = ok and r.pt == w
+      else
+        ok = ok and hay:find(w, 1, true) ~= nil
+      end
+    end
+    if ok then
+      table.insert(out, r)
+      if #out >= MAX_RESULTS then
+        break
+      end
+    end
+  end
+  return out
+end
+
 function Tokens.search(color, query)
   query = tostring(query or ""):gsub("^%s+", ""):gsub("%s+$", "")
   if query == "" then
     status(color, "Type a token name first.")
+    return
+  end
+  local mine = searchData(query)
+  if #mine > 0 then
+    for _, r in ipairs(mine) do
+      if r.tpl == nil then
+        r.tpl = buildTpl(r)
+      end
+    end
+    results[color] = mine
+    status(color, #mine .. " found. Click one to put it onto your battlefield.")
+    render(color)
     return
   end
   status(color, "Searching for \"" .. query .. "\"...")
@@ -133,6 +245,9 @@ end
 
 -- Put n copies of a token onto the seat's battlefield, face up, in a row.
 function Tokens.spawn(color, r, n, opts)
+  if r.tpl == nil and r.entry then
+    r.tpl = buildTpl(r)
+  end
   local s = TableSetup.seat(color)
   local base = TableSetup.slot(color, "battlefield", 2)
   for k = 1, n do
@@ -206,13 +321,13 @@ local function score(r, spec)
   end
   local s = 0
   if spec.pt then
-    if tostring(r.tpl):find(spec.pt, 1, true) then
+    if (r.pt and r.pt == spec.pt) or (r.pt == nil and r.tpl and tostring(r.tpl):find(spec.pt, 1, true)) then
       s = s + 2
     else
       return nil
     end
   end
-  local have = tplColors(r.tpl)
+  local have = r.colorsSet or tplColors(r.tpl)
   local same = true
   for _, c in ipairs({ "W", "U", "B", "R", "G" }) do
     if (have[c] or false) ~= (spec.colors[c] or false) then
@@ -241,6 +356,11 @@ function Tokens.create(color, spec, n, sourceName, opts)
   local fromDeck = best(p and p.deckTokens or {}, spec)
   if fromDeck then
     Tokens.spawn(color, fromDeck, n, opts)
+    return
+  end
+  local builtIn = best(allData(), spec)
+  if builtIn then
+    Tokens.spawn(color, builtIn, n, opts)
     return
   end
   local query = ((spec.pt or "") .. " " .. table.concat(spec.words, " ")):gsub("^%s+", "")
