@@ -1,5 +1,5 @@
 MTG TABLE - SOLO TEST CHECKLIST (v1.33)
-Chat should say: MTG > Scripts loaded: version 1.33 (Kasla, Arcum, Urza decks: Hangarback, Arcum, Urza ability, pumps)
+Chat should say: MTG > Scripts loaded: version 1.35 (mulligan style in the mulligan panel, Gamble random discard)
 
 HOW: load a deck, solo, drag cards from hand to the battlefield (or cast from hand), then watch chat + the ask popups.
 Mark each: OK / WRONG (write what happened).
@@ -42,6 +42,25 @@ Mark each: OK / WRONG (write what happened).
 
 == STILL BY HAND (just confirm the table SAYS to do it by hand, not that it does it)
 Illusionist's Bracers, Lithoform Engine, Isochron Scepter, Mystic Forge, Chrome Mox / Semblance Anvil imprint, Mindslaver, Memory Jar, Spellskite, Emry, Portal reanimation from any graveyard, Baird's tax, Goblin Warchief discount, Purphoros devotion, Sunmare indestructible, Urza's tap-artifact mana, Endstone life halving, Basri emblem.
+
+== MULLIGAN + GAMBLE (v1.35)
+[ ] Start Game panel no longer has mulligan options (just first player + Start).
+[ ] After Start, each mulligan panel has a line at the top: FRIENDLY / UNFRIENDLY - click it to switch (changes it for everyone). Locks once anyone has mulliganed. Resets to FRIENDLY each new game.
+[ ] Gamble: search opens, take a card, CLOSE: library shuffles AND you discard a random card from hand (chat says which).
+
+== ZOO DECK (Marath)
+[ ] Wheel of Fortune: everyone discards and draws 7, no questions.
+[ ] Birthing Pod / Eldritch Evolution: asks "sacrificed creature's MV?", type it, search opens at that +1 (exactly) / +2 (or less). Sacrifice the creature yourself first.
+[ ] Chord of Calling / Finale of Devastation / Green Sun's Zenith: asks X, search opens with that MV limit.
+[ ] Tutors (Worldly, Enlightened, Gamble, Eladamri's Call, Shared Summons, Crop Rotation, Imperial Recruiter, Ranger-Captain, Recruiter of the Guard): search window opens with the right destination.
+[ ] Winota: attack with a non-Human -> look at top six, take a Human; put it attacking BY HAND.
+[ ] Eternal Witness, Sevinne's Reclamation, Auriok Salvagers: graveyard pick works.
+[ ] Grenzo: combat damage -> goad / exile prompt. Toski: combat damage -> draw.
+[ ] Emiel {3} blink. Marath {X} Elemental token. Lukka +1 Dinosaur.
+[ ] Tibalt's Trickery: counter prompt. Turntimber Symbiosis: top 7 panel.
+[ ] Faithless Looting, Llanowar Visionary: draw/discard work.
+
+BY HAND in the Zoo (table will tell you, not do it): Esper Sentinel draw/tax, Cavern-Hoard Dragon Treasures, Chrome Mox / Mox Diamond, Dualcaster Mage copy, Ragavan, Sanctifier en-Vec, Jeska's Will, Shatterskull Smashing, Silence, Survival of the Fittest, Wheel of Misfortune, Sanctum Prelate, Sylvan Library, Conspiracy Theorist, Flamescroll Celebrant ping, City of Brass / Ancient Tomb / Mana Confluence damage, Gaea's Cradle, Utopia Sprawl, Mana Vault, LED, plus the stax pieces (Deafening Silence, Drannith, Dryad Militant, Samurai, Grand Abolisher: nothing enforces them).
 
 == NOTES / BUGS
 (write here)

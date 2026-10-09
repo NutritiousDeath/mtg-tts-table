@@ -597,7 +597,8 @@ function Effects.parse(text, sourceName)
     local mvMin = tonumber(rest:match("mana value (%d+) or greater") or "")
     local mvMax = tonumber(rest:match("mana value (%d+) or less") or "")
     table.insert(actions, { what = "search", who = "you", n = 1, query = q, where = where, mvMin = mvMin, mvMax = mvMax,
-      tapped = rest:find("battlefield tapped", 1, true) ~= nil, phrase = phrase, anyOf = anyOf })
+      tapped = rest:find("battlefield tapped", 1, true) ~= nil, phrase = phrase, anyOf = anyOf,
+      discardRandom = t:find("discard a card at random", 1, true) ~= nil })
   end
   -- "untap it" / "untap that permanent" (Amulet of Vigor): the card the
   -- trigger was about.
@@ -1315,7 +1316,10 @@ local function apply(it, plan, target)
           end
           LibSearch.open(seat, a.query, it.name .. " (" .. tostring(a.phrase) .. "): " .. how .. (a.where == "top" and "." or ", then CLOSE + SHUFFLE."),
             (a.where == "hand" or a.where == "top") and a.where or "battlefield", a.tapped,
-            { typeOnly = true, mvMin = a.mvMin, mvMax = a.mvMax, anyOf = a.anyOf, limit = a.where == "top" and 1 or nil })
+            { typeOnly = true, mvMin = a.mvMin, mvMax = a.mvMax, anyOf = a.anyOf, limit = a.where == "top" and 1 or nil,
+              onClose = a.discardRandom and function()
+                Wait.time(function() Actions.discardRandom(seat, 1, it.name) end, 0.6)
+              end or nil })
         elseif a.what == "counter" then
           local src = it.source and getObjectFromGUID(it.source)
           if src and not src.isDestroyed() then

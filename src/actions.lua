@@ -336,6 +336,29 @@ function Actions.discardHand(color, reason)
   return #hand
 end
 
+-- Discard cards at random from a hand (Gamble).
+function Actions.discardRandom(color, n, reason)
+  local hand = handCards(color)
+  local s = TableSetup.seat(color)
+  local names = {}
+  for i = 1, n do
+    if #hand == 0 then
+      break
+    end
+    local card = table.remove(hand, math.random(#hand))
+    table.insert(names, card.getName())
+    card.setPosition(TableSetup.slot(color, "graveyard", 2 + i * 0.3))
+    card.setRotation({ 0, s.yaw, 0 })
+    Library.toGraveyard(color, card)
+  end
+  if #names == 0 then
+    log(color .. " has no card to discard at random" .. (reason and (" (" .. reason .. ")") or "") .. ".")
+  else
+    log(color .. " discards " .. table.concat(names, ", ") .. " at random" .. (reason and (" (" .. reason .. ")") or "") .. ".")
+  end
+  return #names
+end
+
 local function renderDiscard(color)
   local st = discard[color]
   if st == nil then

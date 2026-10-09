@@ -97,7 +97,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.34 (Zoo deck: Wheel of Fortune, Birthing Pod, Eldritch Evolution)"
+SCRIPT_VERSION = "1.35 (mulligan style in the mulligan panel, Gamble random discard)"
 
 function onLoad(saved)
   GameLog.setup()

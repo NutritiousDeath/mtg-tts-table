@@ -119,7 +119,7 @@ function GameFlow.xml()
     end
     table.insert(mull, ([[
 <Panel id="mull_%s" visibility="%s" active="false"
-       rectAlignment="LowerCenter" offsetXY="0 230" width="520" height="170"
+       rectAlignment="LowerCenter" offsetXY="0 230" width="520" height="200"
        color="#0B0F17F5" outline="%s" outlineSize="2 2"
        allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="18 18 14 14" spacing="10" childForceExpandHeight="false">
@@ -128,6 +128,7 @@ function GameFlow.xml()
       <Text id="mullCount_%s" fontSize="14" color="#8B98A9" alignment="MiddleRight" flexibleWidth="1">Opening hand</Text>
     </HorizontalLayout>
     <Text id="mullText_%s" fontSize="15" color="#E6F1FF" alignment="MiddleLeft" preferredHeight="40">Mulligan</Text>
+    <Button id="mullMode_%s" onClick="ui_mullMode(%s)" color="#1B2333" textColor="#8B98A9" fontSize="12" preferredHeight="24">Mode</Button>
     <GridLayout id="mullCards_%s" active="false" cellSize="100 140" spacing="8 8"
                 constraint="FixedColumnCount" constraintCount="7" childAlignment="MiddleCenter" preferredHeight="140">]] .. table.concat(slots) .. [[</GridLayout>
     <HorizontalLayout spacing="10" preferredHeight="42">
@@ -137,7 +138,7 @@ function GameFlow.xml()
     </HorizontalLayout>
   </VerticalLayout>
 </Panel>
-]]):format(color, color, SEAT_HEX[color], SEAT_HEX[color], color, color, color, color, color, color, color, color, color))
+]]):format(color, color, SEAT_HEX[color], SEAT_HEX[color], color, color, color, color, color, color, color, color, color, color, color))
   end
 
   return [[
@@ -151,7 +152,7 @@ function GameFlow.xml()
 
 <Panel id="startPanel"
        active="false"
-       width="560" height="330"
+       width="560" height="260"
        color="#0D1117F2"
        outline="#3B5BDB" outlineSize="2 2"
        allowDragging="true" returnToOriginalPositionWhenReleased="false">
@@ -160,8 +161,6 @@ function GameFlow.xml()
     <Text fontSize="13" alignment="MiddleLeft" preferredHeight="36" color="#8B98A9">Every seated player with a deck joins. Cards in hands and on the battlefield, graveyard and exile go back into their owner's library; commanders return to the command zone. Life resets to 40.</Text>
     <Text fontSize="15" alignment="MiddleLeft" preferredHeight="22">First player</Text>
     <HorizontalLayout spacing="8" preferredHeight="36">]] .. table.concat(seatButtons) .. [[</HorizontalLayout>
-    <Toggle id="freeMull" onValueChanged="ui_freeMulligan" isOn="true" preferredHeight="28" textColor="#E6F1FF">Friendly mulligan: free first one, bottom cards (London)</Toggle>
-    <Toggle id="unfMull" onValueChanged="ui_unfriendlyMulligan" isOn="false" preferredHeight="28" textColor="#E6F1FF">Unfriendly mulligan: no free one, draw one card fewer each time</Toggle>
     <HorizontalLayout spacing="10" preferredHeight="44">
       <Button onClick="ui_startGame" color="#3B5BDB" fontStyle="Bold">Start</Button>
       <Button onClick="ui_toggleStart">Close</Button>
@@ -178,8 +177,6 @@ function GameFlow.refreshUI()
     UI.setAttribute("first_" .. color, "color", s.firstChoice == color and ON or OFF)
   end
   UI.setAttribute("first_Random", "color", s.firstChoice == "Random" and ON or OFF)
-  UI.setAttribute("freeMull", "isOn", (s.freeMulligan and not s.unfriendly) and "true" or "false")
-  UI.setAttribute("unfMull", "isOn", s.unfriendly and "true" or "false")
   for _, color in ipairs(TableSetup.activeSeats()) do
     GameFlow.renderMulligan(color)
   end
@@ -221,6 +218,13 @@ function GameFlow.renderMulligan(color)
     text = "Keeping now puts " .. bottom .. " card" .. plural .. " on the bottom of your library."
   end
   UI.setValue("mullText_" .. color, text)
+  local anyDone = false
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    local pp = GameState.player(c)
+    if pp and (pp.mulligans or 0) > 0 then anyDone = true end
+  end
+  UI.setValue("mullMode_" .. color, (s.unfriendly and "UNFRIENDLY: no free mulligan, one card fewer each time" or "FRIENDLY: first mulligan free, bottom cards (London)")
+    .. (anyDone and "  (locked: someone already mulliganed)" or "  - click to switch (everyone)"))
 
   UI.setAttribute("mullKeep_" .. color, "active", picking and "false" or "true")
   UI.setAttribute("mullMull_" .. color, "active", picking and "false" or "true")
@@ -373,6 +377,8 @@ function GameFlow.start(byColor)
 
   s.participants = players
   s.picks = {}
+  s.unfriendly = false
+  s.freeMulligan = GameState.format().freeFirstMulligan ~= false
   s.phase = "mulligan"
   GameState.data.started = false
   GameState.data.stack = {}
@@ -661,19 +667,25 @@ function ui_firstPlayer(player, choice)
   GameFlow.refreshUI()
 end
 
-function ui_unfriendlyMulligan(player, value)
-  local on = (value == true or value == "True" or value == "true")
-  setup().unfriendly = on
-  if on then
-    UI.setAttribute("freeMull", "isOn", "false")
+-- The mulligan style is chosen in the mulligan panel, once hands are dealt (until someone decides).
+function ui_mullMode(player, color)
+  local s = setup()
+  if s.phase ~= "mulligan" or player.color ~= color then
+    return
   end
-end
-
-function ui_freeMulligan(player, value)
-  setup().freeMulligan = (value == true or value == "True" or value == "true")
-  if setup().freeMulligan then
-    setup().unfriendly = false
-    UI.setAttribute("unfMull", "isOn", "false")
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    local pp = GameState.player(c)
+    if pp and (pp.mulligans or 0) > 0 then
+      broadcastToColor("The mulligan style is locked: " .. c .. " has already mulliganed.", player.color, WARN)
+      return
+    end
+  end
+  s.unfriendly = not s.unfriendly
+  s.freeMulligan = not s.unfriendly
+  broadcastToAll(player.color .. " switched to " .. (s.unfriendly and "UNFRIENDLY mulligans (no free one, one card fewer each time)."
+    or "FRIENDLY mulligans (first one free, bottom cards)."), { 0.7, 0.85, 1 })
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    GameFlow.renderMulligan(c)
   end
 end
 

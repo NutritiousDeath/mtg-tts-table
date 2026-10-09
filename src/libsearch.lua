@@ -261,6 +261,8 @@ function LibSearch.open(color, preset, note, where, tapped, opts)
   -- An effect's search ("a basic land card") matches the TYPE LINE only,
   -- not rules text, plus any mana value limit; typing a new search clears it.
   filters[color] = opts
+  LibSearch.onCloseCb = LibSearch.onCloseCb or {}
+  LibSearch.onCloseCb[color] = opts and opts.onClose or nil
   zoneOf[color] = opts and opts.zone or "library"
   look[color] = (opts and opts.topN) and { left = opts.topN, picks = opts.picks or 1 } or nil
   limit[color] = (opts and opts.limit) and { left = opts.limit } or nil
@@ -313,6 +315,11 @@ function LibSearch.close(color, quiet)
   held[color] = nil
   if h and not h.isDestroyed() then
     Library.holdRevealed(color, h)
+  end
+  local cb = LibSearch.onCloseCb and LibSearch.onCloseCb[color]
+  if cb then
+    LibSearch.onCloseCb[color] = nil
+    cb()
   end
 end
 
