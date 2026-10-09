@@ -100,13 +100,18 @@ function Counters.stats(obj)
   local data = cardData(obj)
   local c = Counters.get(obj)
   local bonus = c.plus - c.minus
+  -- Equipment / Auras attached to it (equip.lua).
+  local eqP, eqT = 0, 0
+  if Equip and Equip.bonus then
+    eqP, eqT = Equip.bonus(obj)
+  end
   local function apply(v, extra)
     local n = tonumber(v)
     return n and (n + bonus + extra) or v
   end
   return {
-    power = data.power and apply(data.power, c.tp) or nil,
-    toughness = data.toughness and apply(data.toughness, c.tt) or nil,
+    power = data.power and apply(data.power, c.tp + eqP) or nil,
+    toughness = data.toughness and apply(data.toughness, c.tt + eqT) or nil,
     loyalty = c.loyalty,
     counters = c,
   }
@@ -179,6 +184,7 @@ function Counters.render(obj)
     return
   end
   obj.clearButtons()
+  if Library and Library.decorateRevealed then Library.decorateRevealed(obj) end
   local c = Counters.get(obj)
   -- Each counter type is two short lines (name over number) so the text can
   -- be large and still fit inside the card's width.
@@ -194,16 +200,43 @@ function Counters.render(obj)
     end
     table.insert(lines, sg(c.tp) .. "/" .. sg(c.tt) .. " (turn)")
   end
-  if bonus ~= 0 or c.tp ~= 0 or c.tt ~= 0 then
+  local eqP, eqT = 0, 0
+  if Equip and Equip.bonus then
+    eqP, eqT = Equip.bonus(obj)
+  end
+  if eqP ~= 0 or eqT ~= 0 then
+    local function sg2(n)
+      return (n >= 0 and "+" or "") .. n
+    end
+    table.insert(lines, sg2(eqP) .. "/" .. sg2(eqT) .. " (equip)")
+  end
+  if bonus ~= 0 or c.tp ~= 0 or c.tt ~= 0 or eqP ~= 0 or eqT ~= 0 then
     local st = Counters.stats(obj)
     if type(st.power) == "number" and type(st.toughness) == "number" then
       table.insert(lines, st.power .. "/" .. st.toughness)
     end
   end
-  -- Keywords gained until end of turn.
+  -- Keywords gained until end of turn, and from attached equipment.
   local kws = Counters.tempKeywords(obj)
+  if Equip and Equip.keywordList then
+    for _, k in ipairs(Equip.keywordList(obj)) do
+      table.insert(kws, k)
+    end
+  end
   if #kws > 0 then
     table.insert(lines, table.concat(kws, ", "))
+  end
+  local pro = Equip and Equip.protectionOf and Equip.protectionOf(obj) or {}
+  if #pro > 0 then
+    table.insert(lines, "PRO " .. table.concat(pro, ", "))
+  end
+  local ringBadge = Ring and Ring.badge and Ring.badge(obj)
+  if ringBadge then
+    table.insert(lines, ringBadge)
+  end
+  local badge = Equip and Equip.badge and Equip.badge(obj)
+  if badge then
+    table.insert(lines, badge)
   end
   -- Planeswalkers on the battlefield show loyalty on their loyalty box
   -- (walkers.lua) instead.
@@ -335,6 +368,9 @@ function Counters.change(obj, kind, delta, byColor)
   if delta < 0 or kind == "minus" then
     Counters.checkDeath(obj)
   end
+  if delta > 0 and kind ~= "tp" and kind ~= "tt" and Triggers and Triggers.onCounters then
+    Triggers.onCounters(obj, kind, delta, byColor)
+  end
 end
 
 -- State-based actions: a planeswalker with 0 loyalty, or a creature with 0
@@ -443,6 +479,7 @@ function Counters.clear(obj)
   end
   obj.memo = ""
   obj.clearButtons()
+  if Library and Library.decorateRevealed then Library.decorateRevealed(obj) end
   Counters.decorate(obj)
 end
 
@@ -515,7 +552,8 @@ function Counters.menuSig(obj)
   if ON_BATTLEFIELD[region] and Combat and Combat.menuStep then
     step = Combat.menuStep()
   end
-  return region .. "|" .. step
+  local att = (Equip and Equip.isAttachment(obj) and Equip.hostOf(obj)) and "|attached" or ""
+  return region .. "|" .. step .. att
 end
 
 -- Rebuild the menu if what it was built for has changed.
@@ -559,6 +597,8 @@ function Counters.setup(obj)
   if LibSearch and LibSearch.addMenu then
     LibSearch.addMenu(obj)
   end
+  if Library and Library.addRevealedMenu then Library.addRevealedMenu(obj) end
+  if Equip and Equip.addMenu then Equip.addMenu(obj) end
   if onField then
     for _, item in ipairs(menuFor(obj)) do
       obj.addContextMenuItem(item[1], function(playerColor)

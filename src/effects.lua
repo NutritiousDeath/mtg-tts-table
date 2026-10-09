@@ -166,6 +166,12 @@ function Effects.parse(text, sourceName)
     end
   end
   -- Miss Highwater: combat damage to a player who has no contract counter.
+  do
+    local ww = t:match("you may discard your hand%. if you do, draw (%w+) cards")
+    if ww and num(ww) then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "wheel", who = "you", n = num(ww) } } }
+    end
+  end
   if t:find("contract counter", 1, true) and t:find("discard their hand", 1, true) and t:find("draw seven cards", 1, true) then
     return { optional = false, notes = {}, conds = {},
       actions = { { what = "contract", who = "that", n = 7 } } }
@@ -195,7 +201,7 @@ function Effects.parse(text, sourceName)
     local sentence = stop and t:sub(pos, stop) or t:sub(pos)
     local why
     for _, m in ipairs(MANUAL) do
-      if why == nil and (" " .. sentence .. " "):find(m, 1, true) then
+      if why == nil and (" " .. sentence:gsub("double strike", "double_strike") .. " "):find(m, 1, true) then
         why = m:gsub("^%s+", ""):gsub("%s+$", "")
       end
     end
@@ -418,6 +424,12 @@ function Effects.parse(text, sourceName)
         elseif phrase:find("noncreature", 1, true) then
           types = { "noncreature" }
         end
+        -- "Exile up to one target creature you own, then return it": the table
+        -- can't do the return part, so it's all by hand.
+        if verb == "exile" and (t:find("then return", 1, true) or t:find("return that card", 1, true)
+            or t:find("return it to the battlefield", 1, true)) then
+          types = {}
+        end
         if #types > 0 then
           local scope = "any"
           if phrase:find("you don't control", 1, true) or phrase:find("opponents control", 1, true)
@@ -591,6 +603,8 @@ function Effects.parse(text, sourceName)
         scope = "allOpp"
       elseif head:find("each creature", 1, true) or head:find("all creatures", 1, true) then
         scope = "all"
+      elseif head:find("equipped creature", 1, true) or head:find("enchanted creature", 1, true) then
+        scope = "equipped"
       elseif head:sub(-1) == "~" or head:find("~$") then
         scope = "self"
       elseif (" " .. head):find(" it$") or head:find("that creature$") then
@@ -711,6 +725,54 @@ function Effects.parse(text, sourceName)
       table.insert(actions, { what = "mill", who = "you", n = num(mw) })
     end
   end
+  -- Swords etc.: "that player discards a card", "target opponent discards two cards".
+  for _, dd in ipairs({ { "that player discards ", "that" }, { "target opponent discards ", "targetOpponent" },
+      { "target player discards ", "target" }, { "each opponent discards ", "opponents" },
+      { "each player discards ", "all" }, { "you discard ", "you" } }) do
+    local dn = t:match(dd[1] .. "(%w+) cards?")
+    if dn and num(dn) then
+      table.insert(actions, { what = "discard", who = dd[2], n = num(dn) })
+    end
+  end
+  do
+    local sw = t:match("^%s*discard (%w+) cards?")
+    if sw and num(sw) then
+      table.insert(actions, { what = "discard", who = "you", n = num(sw) })
+    end
+  end
+  -- Impulse draw: "exile the top card of your library. You may play that card."
+  if t:find("exile the top card of your library", 1, true)
+      and (t:find("you may play that card", 1, true) or t:find("you may play it", 1, true)
+        or t:find("you may cast that card", 1, true)) then
+    local untilWhen = t:find("end of your next turn", 1, true) and "the end of your next turn"
+      or (t:find("end of turn", 1, true) and "the end of this turn" or "later")
+    table.insert(actions, { what = "impulse", who = "you", n = 1, untilWhen = untilWhen })
+  end
+  -- "that player mills ten cards".
+  for _, dd in ipairs({ { "that player mills ", "that" }, { "target player mills ", "target" },
+      { "target opponent mills ", "targetOpponent" }, { "each opponent mills ", "opponents" } }) do
+    local mn = t:match(dd[1] .. "(%w+) cards?")
+    if mn and num(mn) then
+      table.insert(actions, { what = "mill", who = dd[2], n = num(mn) })
+    end
+  end
+  -- "untap all lands you control" (Sword of Feast and Famine).
+  do
+    local ut = t:match("untap all (%a+) you control")
+    if ut then
+      table.insert(actions, { what = "untapAll", who = "you", n = 1, type = (ut:gsub("s$", "")) })
+    end
+  end
+  -- Lord of the Rings: "the Ring tempts you".
+  if t:find("the ring tempts you", 1, true) then
+    table.insert(actions, { what = "ringTempts", who = "you", n = 1 })
+  end
+  do
+    local tw = t:match("then discard (%w+) cards?")
+    if tw and num(tw) then
+      table.insert(actions, { what = "discard", who = "you", n = num(tw) })
+    end
+  end
   -- "put a quest counter on ~": counters on the card itself.
   local cn, ckind = t:match("put (%w+) ([%w%+/%-]+) counters? on ~")
   if cn and num(cn) then
@@ -755,7 +817,7 @@ function Effects.parse(text, sourceName)
   end
   -- Etali: the exile happens; only the casting is optional (asked per card).
   for _, act in ipairs(actions) do
-    if act.what == "exileCast" or act.what == "untapAttacker" or act.what == "revealUntil" then
+    if act.what == "exileCast" or act.what == "untapAttacker" or act.what == "revealUntil" or act.what == "impulse" then
       optional = false
     end
   end
@@ -820,6 +882,16 @@ local function describe(a, target, controller)
     return who .. (a.surveil and (you and " surveil " or " surveils ") or (you and " scry " or " scries ")) .. a.n
   elseif a.what == "mill" then
     return who .. (you and " mill " or " mills ") .. a.n
+  elseif a.what == "discard" then
+    return who .. (you and " discard " or " discards ") .. a.n .. " card" .. (a.n == 1 and "" or "s")
+  elseif a.what == "untapAll" then
+    return "untap all " .. tostring(a.type) .. "s"
+  elseif a.what == "ringTempts" then
+    return "the Ring tempts " .. who
+  elseif a.what == "wheel" then
+    return who .. " may discard their hand and draw " .. a.n
+  elseif a.what == "impulse" then
+    return who .. " exile the top card and may play it until " .. tostring(a.untilWhen)
   elseif a.what == "removeAll" then
     return a.verb .. " all " .. tostring(a.phrase) .. " (" .. tostring(a.count or 0) .. ")"
   elseif a.what == "removeTarget" then
@@ -1055,6 +1127,29 @@ local function apply(it, plan, target)
           end
         elseif a.what == "mill" then
           Actions.mill(seat, a.n)
+        elseif a.what == "discard" then
+          Actions.forceDiscard(seat, a.n, it.name)
+        elseif a.what == "untapAll" then
+          Effects.untapAllOf(seat, a.type, it.name)
+        elseif a.what == "ringTempts" then
+          Ring.tempt(seat)
+        elseif a.what == "wheel" then
+          Effects.askChoice(seat, it.name .. ": discard your hand?", "Discard your hand. If you do, draw " .. a.n .. " cards.",
+            { { label = "YES", value = true }, { label = "NO", value = false } }, function(yes)
+              if yes then
+                Actions.discardHand(seat, it.name)
+                Actions.draw(seat, a.n, it.name)
+              else
+                printToAll("MTG > " .. seat .. " chose not to (" .. it.name .. ").", INFO)
+              end
+            end)
+        elseif a.what == "impulse" then
+          Library.exileUntilNonland(seat, true, function(card)
+            local nm = card and card.getName() or "the top card"
+            printToAll("MTG > " .. it.name .. ": " .. seat .. " exiles " .. nm .. " and may play it until " .. tostring(a.untilWhen)
+              .. " (it waits in exile).", GOOD)
+            broadcastToColor("You may play " .. nm .. " from exile until " .. tostring(a.untilWhen) .. ".", seat, GOOD)
+          end)
         elseif a.what == "removeAll" then
           a.count = Effects.removeAll(seat, a, it)
         elseif a.what == "removeTarget" then
@@ -1227,7 +1322,7 @@ end
 
 local function ask(seat, title, text, choices, onPick, pick, number)
   table.insert(queue, { seat = seat, title = title, text = text, choices = choices, onPick = onPick, pick = pick,
-    number = number })
+    number = number, src = Effects.currentSource })
   if current == nil then
     nextQuestion()
   end
@@ -1344,6 +1439,7 @@ function Effects.resolve(it)
   if it.resolvedTimes == nil then
     it.resolvedTimes = countResolve(it)
   end
+  Effects.currentSource = it.source or it.card
   -- "Choose one —" with "• mode" lines: the controller picks a mode first.
   local raw = tostring(it.text or "")
   local bullet = raw:find("•", 1, true)
@@ -1742,6 +1838,26 @@ function Effects.decorate(obj)
   local seat = fieldSeat(obj)
   if seat == nil or not q.pick.filter(obj, seat) then
     return
+  end
+  -- Protection: a targeted pick can't choose a creature that has protection
+  -- from the source's colour (shown instead of the pick button).
+  local PROT = { TARGET = true, GOAD = true, ["CHAOS WARP"] = true, DESTROY = true, EXILE = true }
+  if Equip and Equip.protectedFrom and PROT[q.pick.label] and q.pick.protect ~= false and q.pick.noProtect ~= true then
+    local pro = Equip.protectedFrom(obj, q.pick.src or q.src)
+    if pro then
+      obj.createButton({
+        click_function = "counters_noop",
+        function_owner = Global,
+        label = "PRO " .. string.upper(pro),
+        tooltip = "Protected: can't be targeted by this source.",
+        position = { 0, 0.3, 0.5 },
+        rotation = { 0, 0, 0 },
+        width = 800, height = 260, font_size = 150,
+        font_color = { 1, 1, 1 },
+        color = { 0.7, 0.15, 0.15, 0.95 },
+      })
+      return
+    end
   end
   obj.createButton({
     click_function = "effects_cardPick",
@@ -2299,6 +2415,20 @@ function Effects.pump(seat, a, it)
     broadcastToColor(it.name .. ": give it " .. tostring(a.label) .. " yourself.", seat, INFO)
     return 0
   end
+  if a.scope == "equipped" then
+    local src = it.source and getObjectFromGUID(it.source)
+    local card = src and not src.isDestroyed() and Equip and Equip.hostOf(src) or nil
+    if card == nil and it.thatCard then
+      card = getObjectFromGUID(it.thatCard)
+    end
+    if card and not card.isDestroyed() then
+      boost(card, a)
+      printToAll("MTG > " .. card.getName() .. " gets " .. tostring(a.label) .. " until end of turn.", GOOD)
+      return 1
+    end
+    broadcastToColor(it.name .. ": give the equipped creature " .. tostring(a.label) .. " yourself.", seat, INFO)
+    return 0
+  end
   if a.scope == "that" then
     local card = it.thatCard and getObjectFromGUID(it.thatCard)
     if card and not card.isDestroyed() and fieldSeat(card) then
@@ -2382,6 +2512,24 @@ function Effects.condValue(cond, seat, name)
     end
   end
   return nil
+end
+
+-- "Untap all lands you control": every tapped permanent of that type.
+function Effects.untapAllOf(seat, ty, name)
+  local s = TableSetup.seat(seat)
+  local n = 0
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) and fieldSeat(obj) == seat
+        and cardTypes(obj)[ty] then
+      local r = obj.getRotation()
+      local diff = ((r.y - s.yaw + 540) % 360) - 180
+      if math.abs(diff) > 30 then
+        obj.setRotationSmooth({ r.x, s.yaw, r.z }, false, true)
+        n = n + 1
+      end
+    end
+  end
+  printToAll("MTG > " .. tostring(name) .. ": " .. seat .. " untaps " .. n .. " " .. ty .. (n == 1 and "" or "s") .. ".", { 0.55, 0.9, 0.6 })
 end
 
 -- Players in turn order starting with `first`.
@@ -2532,7 +2680,7 @@ function Effects.oppExile(seat, a, it)
               GameState.data.exiledWith[it.source] = list
             end
           end
-        end, { filter = function(obj, owner) return owner == opp and cardTypes(obj).creature == true end, label = "EXILE" })
+        end, { filter = function(obj, owner) return owner == opp and cardTypes(obj).creature == true end, label = "EXILE", noProtect = true })
     end
   end
 end

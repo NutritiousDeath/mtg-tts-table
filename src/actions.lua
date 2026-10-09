@@ -381,6 +381,43 @@ function Actions.cleanupDiscard(color, onDone)
   renderDiscard(color)
 end
 
+-- Forced discard from an effect ("that player discards a card"): the player
+-- picks which cards in a panel only they see. A hand no bigger than the
+-- number goes entirely.
+function Actions.forceDiscard(color, n, reason, onDone)
+  local hand = handCards(color)
+  local need = math.min(n, #hand)
+  if need <= 0 then
+    log(color .. " has no cards to discard" .. (reason and (" (" .. reason .. ")") or ""))
+    if onDone then onDone() end
+    return
+  end
+  local solo = GameState.solo() and not Player[color].seated
+  if need == #hand or solo then
+    local s = TableSetup.seat(color)
+    local names = {}
+    for i = 1, need do
+      local card = hand[i]
+      table.insert(names, card.getName())
+      card.setPosition(TableSetup.slot(color, "graveyard", 2 + i * 0.3))
+      card.setRotation({ 0, s.yaw, 0 })
+      Library.toGraveyard(color, card)
+    end
+    log(color .. " discards " .. table.concat(names, ", ") .. (reason and (" (" .. reason .. ")") or ""))
+    if onDone then onDone() end
+    return
+  end
+  local order = {}
+  for _, card in ipairs(hand) do
+    local custom = card.getCustomObject()
+    table.insert(order, { guid = card.getGUID(), name = card.getName(), face = custom and custom.face or nil })
+  end
+  discard[color] = { need = need, order = order, picks = {}, onDone = onDone, forced = true, reason = reason }
+  broadcastToAll(color .. " must discard " .. need .. " card" .. (need == 1 and "" or "s")
+    .. (reason and (" (" .. reason .. ")") or "") .. ".", WARN)
+  renderDiscard(color)
+end
+
 local function finishDiscard(color)
   local st = discard[color]
   discard[color] = nil
@@ -442,12 +479,16 @@ function ui_discardConfirm(player, color)
     card.setRotation({ 0, s.yaw, 0 })
     Library.toGraveyard(color, card)
   end
-  log(color .. " discards " .. table.concat(names, ", ") .. " (cleanup)")
+  log(color .. " discards " .. table.concat(names, ", ") .. " (" .. tostring(st.reason or "cleanup") .. ")")
   finishDiscard(color)
 end
 
 function ui_discardSkip(player, color)
   if discard[color] == nil or player.color ~= color then
+    return
+  end
+  if discard[color].forced then
+    broadcastToColor("You have to discard: pick the card(s), then confirm.", color, WARN)
     return
   end
   log(color .. " keeps " .. #discard[color].order .. " cards (no maximum hand size)")

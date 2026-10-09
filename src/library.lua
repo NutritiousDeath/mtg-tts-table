@@ -284,6 +284,17 @@ function Library.pileIn(color, region, except)
 end
 
 function Library.draw(color, n, onDone)
+  -- A revealed card waiting beside the library goes on top before anything is drawn.
+  local rt = GameState.data.revealedTop
+  if rt and rt[color] and Library.revealedCard(color) then
+    Library.putRevealedOnTop(color, function()
+      Wait.time(function()
+        local drawn = Library.draw(color, n)
+        if onDone then onDone(drawn) end
+      end, 0.8)
+    end)
+    return 0
+  end
   if #libraryPiles(color) > 1 then
     Library.consolidate(color, function()
       local drawn = Library.draw(color, n)
@@ -544,6 +555,124 @@ function Library.revealTop(color, onDone)
   end
 end
 
+---------------------------------------------------------------------------
+-- A revealed card that is going on top of the library (Personal Tutor,
+-- Sylvan Tutor...): it stays face up beside the library, outside the library
+-- area, so everybody can see it and it isn't swept into the deck. It goes on
+-- top when its owner clicks the button (or draws, which does it first).
+---------------------------------------------------------------------------
+
+local function revealedTable()
+  local d = GameState.data
+  d.revealedTop = d.revealedTop or {}
+  return d.revealedTop
+end
+
+function Library.revealSpot(color)
+  local seat = TableSetup.seat(color)
+  local lib = TableSetup.slot(color, "library", 3.2)
+  if seat == nil or lib == nil then
+    return lib
+  end
+  -- Just past the library toward the table centre, clear of every area.
+  return { x = lib.x + seat.inward.x * 6.8, y = lib.y, z = lib.z + seat.inward.z * 6.8 }
+end
+
+function Library.revealedCard(color)
+  local guid = revealedTable()[color]
+  local obj = guid and getObjectFromGUID(guid) or nil
+  if obj == nil or obj.isDestroyed() then
+    revealedTable()[color] = nil
+    return nil
+  end
+  return obj
+end
+
+function Library.decorateRevealed(card)
+  if card == nil or card.isDestroyed() then
+    return
+  end
+  for color, guid in pairs(revealedTable()) do
+    if guid == card.getGUID() then
+      card.createButton({
+        click_function = "library_putRevealedOnTop",
+        function_owner = Global,
+        label = "PUT ON TOP",
+        tooltip = "Revealed: click to put this card on top of " .. color .. "'s library",
+        position = { 0, 0.3, 1.45 },
+        rotation = { 0, 0, 0 },
+        width = 900, height = 240, font_size = 160,
+        font_color = { 1, 1, 1 },
+        color = { 0.1, 0.55, 0.65, 0.95 },
+      })
+    end
+  end
+end
+
+function Library.addRevealedMenu(card)
+  for color, guid in pairs(GameState.data.revealedTop or {}) do
+    if guid == card.getGUID() then
+      card.addContextMenuItem("Put on top of library", function() Library.putRevealedOnTop(color) end)
+    end
+  end
+end
+
+-- Take `card` out of the library to the reveal spot, face up.
+function Library.holdRevealed(color, card)
+  if card == nil or card.isDestroyed() then
+    return
+  end
+  local s = TableSetup.seat(color)
+  local old = Library.revealedCard(color)
+  if old and old ~= card then
+    Library.putRevealedOnTop(color)   -- one at a time
+  end
+  revealedTable()[color] = card.getGUID()
+  card.setLock(false)
+  card.setPositionSmooth(Library.revealSpot(color), false, true)
+  card.setRotationSmooth({ 0, s.yaw, 0 }, false, true)
+  Wait.time(function()
+    if not card.isDestroyed() then
+      pcall(function()
+        card.clearButtons()
+        card.clearContextMenu()
+        card.addContextMenuItem("Put on top of library", function(c)
+          Library.putRevealedOnTop(color)
+        end)
+        Library.decorateRevealed(card)
+      end)
+    end
+  end, 1.0)
+  printToAll("MTG > " .. card.getName() .. " stays revealed beside " .. color .. "'s library. Click PUT ON TOP when ready (drawing does it automatically).", { 0.55, 0.9, 0.6 })
+end
+
+function Library.putRevealedOnTop(color, onDone)
+  local card = Library.revealedCard(color)
+  if card == nil then
+    if onDone then onDone(nil) end
+    return false
+  end
+  revealedTable()[color] = nil
+  pcall(function()
+    card.clearButtons()
+    card.clearContextMenu()
+  end)
+  Library.putAt(color, card, 0, function(lib)
+    printToAll("MTG > The revealed card is now on top of " .. color .. "'s library.", { 0.75, 0.8, 0.9 })
+    if onDone then onDone(lib) end
+  end)
+  return true
+end
+
+function library_putRevealedOnTop(obj, playerColor)
+  for color, guid in pairs(revealedTable()) do
+    if guid == obj.getGUID() then
+      Library.putRevealedOnTop(color)
+      return
+    end
+  end
+end
+
 -- Put these cards on the bottom of the library in a random order.
 function Library.putBottomRandom(color, cards, onDone)
   local list = {}
@@ -570,6 +699,10 @@ end
 -- Put a card into the library at depth (0 = top): Approach of the Second
 -- Sun goes 7th from the top. The deck is rebuilt with the card in place.
 function Library.putAt(color, card, depth, onDone)
+  if card == nil or card.isDestroyed() then
+    if onDone then onDone(Library.find(color)) end
+    return
+  end
   if #libraryPiles(color) > 1 then
     Library.consolidate(color, function() Library.putAt(color, card, depth, onDone) end)
     return

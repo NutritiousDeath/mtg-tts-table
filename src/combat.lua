@@ -151,6 +151,9 @@ local function hasKeyword(obj, kw)
   if Counters.hasTempKeyword and Counters.hasTempKeyword(obj, kw) then
     return true
   end
+  if Equip and Equip.hasKeyword and Equip.hasKeyword(obj, kw) then
+    return true
+  end
   for _, k in ipairs(cardData(obj).keywords or {}) do
     if tostring(k):lower() == kw then
       return true
@@ -563,6 +566,16 @@ end
 local function canBlock(blocker, attacker)
   if attacker == nil then
     return true
+  end
+  if Ring then
+    local okRing, whyRing = Ring.canBlock(attacker, blocker)
+    if not okRing then
+      return false, whyRing
+    end
+  end
+  local pro = Equip and Equip.blockedByProtection and Equip.blockedByProtection(attacker, blocker)
+  if pro then
+    return false, "has protection from " .. pro .. " (" .. blocker.getName() .. " is " .. pro .. ")"
   end
   if hasKeyword(attacker, "Flying") and not hasKeyword(blocker, "Flying") and not hasKeyword(blocker, "Reach") then
     local oracle = tostring(cardData(blocker).oracle or ""):lower()
@@ -1098,6 +1111,12 @@ function Combat.isSick(card)
     return false
   end
   if controller(card) ~= t.activeSeat or not isCreature(card) then
+    return false
+  end
+  -- Treasure, Food, Clue and friends are artifacts, never creatures.
+  local nm = tostring(card.getName()):lower()
+  if nm == "treasure" or nm == "food" or nm == "clue" or nm == "blood" or nm == "gold" or nm == "powerstone"
+      or nm == "map" or nm == "junk" or nm == "shard" or nm == "incubator" or nm == "role" then
     return false
   end
   return not hasKeyword(card, "Haste")

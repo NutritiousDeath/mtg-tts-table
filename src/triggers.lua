@@ -192,6 +192,41 @@ local function parseTrigger(p)
   if plainFind(p, "whenever you lose life") then
     return { kind = "life", dir = "loss", who = "you" }
   end
+  -- "Whenever you put one or more [+1/+1] counters on a Goblin, Orc, or Army you control".
+  do
+    local cAt = p:find("whenever you put one or more ", 1, true)
+    if cAt then
+      local seg = p:sub(cAt, cAt + 140)
+      local what = seg:match("one or more (.-)counters? on ")
+      local on = seg:match("counters? on (.-) you control")
+      if on then
+        local types = {}
+        for _, t in ipairs(SUBJECTS) do
+          if on:find(t, 1, true) then
+            table.insert(types, t)
+          end
+        end
+        if #types == 0 then
+          for word in on:gmatch("%a+") do
+            local w = word
+            if w ~= "or" and w ~= "and" and w ~= "a" and w ~= "an" and w ~= "another" and w ~= "other" then
+              if w:sub(-1) == "s" and w:sub(-2) ~= "ss" then
+                w = w:sub(1, -2)
+              end
+              table.insert(types, "sub:" .. w)
+            end
+          end
+        end
+        if #types > 0 then
+          return { kind = "counters", mine = true, subject = types[1], subjects = types,
+            counterKind = (what and what:find("+1/+1", 1, true)) and "plus" or nil }
+        end
+      end
+    end
+  end
+  if plainFind(p, "whenever the ring tempts you") then
+    return { kind = "ring", who = "you" }
+  end
   -- Drawing.
   if plainFind(p, "whenever an opponent draws a card") then
     return { kind = "draw", who = "opp" }
@@ -241,7 +276,8 @@ local function parseTrigger(p)
           lead = l
         end
       end
-      local clean = lead and not subj:find("~", 1, true) and not subj:find(",", 1, true)
+      local listy = subj:find(" or ", 1, true) ~= nil
+      local clean = lead and not subj:find("~", 1, true) and (listy or not subj:find(",", 1, true))
         and not subj:find(".", 1, true)
       if clean then
         local types = {}
@@ -258,15 +294,27 @@ local function parseTrigger(p)
         -- Zombie"), matched on the type line.
         if #types == 0 then
           local rest = subj:sub(#lead + 1):gsub("^nontoken ", ""):gsub("^other ", "")
-          local w = rest:match("^(%a+)")
-          local NOT = { player = true, spell = true, card = true, opponent = true, source = true, ability = true }
-          if w and not NOT[w] then
-            if w:sub(-3) == "ves" then
-              w = w:sub(1, -4) .. "f"
-            elseif w:sub(-1) == "s" and w:sub(-2) ~= "ss" then
-              w = w:sub(1, -2)
+          local cut = rest:find(" you control", 1, true) or rest:find(" an opponent controls", 1, true)
+            or rest:find(" your opponents control", 1, true)
+          if cut then
+            rest = rest:sub(1, cut - 1)
+          end
+          local NOT = { player = true, spell = true, card = true, opponent = true, source = true, ability = true,
+            or_ = true }
+          local first = true
+          for word in rest:gmatch("%a+") do
+            -- "Goblin, Orc, or Army": every word is a creature type; a single
+            -- subject keeps just its first word like before.
+            local w = word
+            if w ~= "or" and w ~= "and" and not NOT[w] and (listy or first) then
+              if w:sub(-3) == "ves" then
+                w = w:sub(1, -4) .. "f"
+              elseif w:sub(-1) == "s" and w:sub(-2) ~= "ss" then
+                w = w:sub(1, -2)
+              end
+              table.insert(types, "sub:" .. w)
+              first = false
             end
-            types = { "sub:" .. w }
           end
         end
         if #types > 0 then
@@ -349,6 +397,20 @@ local function parseCombat(p)
   if plainFind(p, "whenever a creature attacks you") or plainFind(p, "whenever one or more creatures attack you") then
     add({ kind = "attacks", targetsMe = true, once = plainFind(p, "one or more") })
   end
+  -- Equipment / Auras: "whenever equipped creature attacks", "...deals combat damage to a player".
+  for _, who in ipairs({ "equipped creature", "enchanted creature" }) do
+    if plainFind(p, "whenever " .. who .. " attacks") or plainFind(p, "whenever the " .. who .. " attacks") then
+      add({ kind = "attacks", equipped = true })
+    end
+    if plainFind(p, "whenever " .. who .. " deals combat damage to a player")
+        or plainFind(p, "whenever " .. who .. " deals combat damage to an opponent")
+        or plainFind(p, "whenever the " .. who .. " deals combat damage to a player") then
+      add({ kind = "combatDamage", equipped = true })
+    end
+    if plainFind(p, "whenever " .. who .. " blocks") then
+      add({ kind = "blocks", equipped = true })
+    end
+  end
   if plainFind(p, "whenever ~ deals combat damage to a player") or plainFind(p, "whenever ~ deals combat damage to an opponent") then
     add({ kind = "combatDamage", self = true })
   elseif plainFind(p, "whenever a creature you control deals combat damage to a player")
@@ -356,6 +418,17 @@ local function parseCombat(p)
     add({ kind = "combatDamage", mine = true })
   elseif plainFind(p, "whenever one or more creatures you control deal combat damage to a player") then
     add({ kind = "combatDamage", mine = true, once = true })
+  else
+    -- "Whenever an Army you control deals combat damage to a player" (Sauron).
+    local subj = between(p, "whenever an ", " you control deals combat damage to a player")
+      or between(p, "whenever a ", " you control deals combat damage to a player")
+    if subj and #subj < 30 and not subj:find(" ", 1, true) and subj ~= "creature" then
+      local w = subj
+      if w:sub(-1) == "s" and w:sub(-2) ~= "ss" then
+        w = w:sub(1, -2)
+      end
+      add({ kind = "combatDamage", mine = true, subjects = { "sub:" .. w }, subject = "sub:" .. w })
+    end
   end
   return out
 end
@@ -452,6 +525,32 @@ local function abilitiesOf(obj)
   end
   cache[key] = list
   return list
+end
+
+-- Paragraphs that read like triggered abilities ("Whenever...", "When...",
+-- "At the beginning of...") but that the table could not turn into a trigger
+-- it can watch for. Returns a list of texts.
+function Triggers.unrecognized(obj)
+  local d = cardData(obj)
+  if d == nil or type(d.oracle) ~= "string" or d.oracle == "" then
+    return {}
+  end
+  local known = {}
+  for _, a in ipairs(abilitiesOf(obj)) do
+    known[a.text] = true
+    known[(tostring(a.text):match("^[^\n]*"))] = true   -- a mode list counts under its first line
+  end
+  local out = {}
+  for _, raw in ipairs(lines(d.oracle)) do
+    local para = stripReminder(raw)
+    local low = para:lower()
+    if (low:sub(1, 9) == "whenever " or low:sub(1, 5) == "when " or low:sub(1, 21) == "at the beginning of t"
+        or low:sub(1, 21) == "at the beginning of y" or low:sub(1, 21) == "at the beginning of e")
+        and not known[para] then
+      table.insert(out, para)
+    end
+  end
+  return out
 end
 
 local function typesOf(obj)
@@ -713,6 +812,37 @@ function Triggers.orderXml()
   return table.concat(parts)
 end
 
+-- Triggers of the Equipment / Auras attached to `creature` that watch for
+-- `kind` ("attacks", "combatDamage", "blocks"): found-list entries.
+local function attachedTriggers(creature, kind)
+  local out = {}
+  if Equip == nil or creature == nil or creature.isDestroyed() then
+    return out
+  end
+  for _, a in ipairs(Equip.attachments(creature)) do
+    local loc = Zones.regionAt(a.getPosition())
+    local seat = loc.seat or (Zones.regionAt(creature.getPosition()).seat)
+    for _, ab in ipairs(abilitiesOf(a)) do
+      if ab.trig.equipped and ab.trig.kind == kind then
+        table.insert(out, { obj = a, controller = seat, text = ab.text, host = creature.getGUID() })
+      end
+    end
+  end
+  return out
+end
+
+-- The Ring-bearer's level triggers (ring.lua): found-list entries with a face.
+local function ringTriggers(obj, kind)
+  if Ring == nil then
+    return {}
+  end
+  local list = Ring.triggers(obj, kind)
+  for _, f in ipairs(list) do
+    f.face = faceOf(obj)
+  end
+  return list
+end
+
 -- Found triggers go out one seat at a time, active player first.
 local function pushAll(found, that, thatCard)
   if #found == 0 then
@@ -830,6 +960,16 @@ Events.on("cardMoved", function(d)
   end
   local kind = entering and "enters" or "dies"
   local cardController = entering and d.to.seat or d.from.seat
+  -- Warn about triggers the table can't watch for on a card that just arrived.
+  if entering and cardController then
+    local ok, miss = pcall(Triggers.unrecognized, card)
+    if ok and #miss > 0 then
+      for _, text in ipairs(miss) do
+        broadcastToColor(card.getName() .. ": I can't watch for \"" .. text:sub(1, 90) .. (#text > 90 and "..." or "")
+          .. "\" automatically. When it happens, right-click the card > Ability to stack.", cardController, { 1, 0.75, 0.3 })
+      end
+    end
+  end
   local found = {}
   -- The card's own "when ~ enters / dies".
   for _, a in ipairs(abilitiesOf(card)) do
@@ -857,6 +997,46 @@ Events.on("cardMoved", function(d)
   -- checked (it's already in the graveyard): add those by hand.
   pushAll(found, cardController, card.getGUID())
 end)
+
+-- Counters were put on a permanent (counters.lua): "whenever you put one or
+-- more counters on a Goblin you control".
+function Triggers.onCounters(obj, kind, amount, byColor)
+  if not enabled() or not GameState.data.started or obj == nil or obj.isDestroyed() then
+    return
+  end
+  local loc = Zones.regionAt(obj.getPosition())
+  if not IN_PLAY[loc.region] or loc.seat == nil then
+    return
+  end
+  local found = {}
+  for _, p in ipairs(permanents()) do
+    for _, a in ipairs(abilitiesOf(p.obj)) do
+      local t = a.trig
+      if t.kind == "counters" and matchesSubject(obj, t)
+          and not (t.counterKind == "plus" and kind ~= "plus")
+          and not (t.mine and loc.seat ~= p.controller) then
+        table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, amount = amount })
+      end
+    end
+  end
+  pushAll(found, loc.seat, obj.getGUID())
+end
+
+-- The Ring tempted `seat` (ring.lua): "whenever the Ring tempts you".
+function Triggers.onRing(seat)
+  if not enabled() or not GameState.data.started then
+    return
+  end
+  local found = {}
+  for _, p in ipairs(permanents()) do
+    for _, a in ipairs(abilitiesOf(p.obj)) do
+      if a.trig.kind == "ring" and p.controller == seat then
+        table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
+      end
+    end
+  end
+  pushAll(found, seat)
+end
 
 -- A player's life changed (called by trackers.lua): "whenever an opponent
 -- loses life", "whenever you gain life". `amount` is how much, for
@@ -934,6 +1114,14 @@ function Triggers.onAttack(list)
         table.insert(found, { obj = at.obj, controller = at.controller, text = a.text })
       end
     end
+    for _, f in ipairs(attachedTriggers(at.obj, "attacks")) do
+      f.controller = at.controller
+      f.thatCard = at.obj.getGUID()
+      table.insert(found, f)
+    end
+    for _, f in ipairs(ringTriggers(at.obj, "attacks")) do
+      table.insert(found, f)
+    end
   end
   for _, p in ipairs(permanents()) do
     for _, a in ipairs(abilitiesOf(p.obj)) do
@@ -986,9 +1174,17 @@ function Triggers.onBlock(list)
         table.insert(found, { obj = b.obj, controller = b.controller, text = a.text })
       end
     end
+    for _, f in ipairs(attachedTriggers(b.obj, "blocks")) do
+      f.controller = b.controller
+      f.thatCard = b.obj.getGUID()
+      table.insert(found, f)
+    end
     local att = b.attacker
     if att and not att.isDestroyed() and not blockedDone[att.getGUID()] then
       blockedDone[att.getGUID()] = true
+      for _, f in ipairs(ringTriggers(att, "blocked")) do
+        table.insert(found, f)
+      end
       for _, a in ipairs(abilitiesOf(att)) do
         if a.trig.kind == "blocked" and a.trig.self then
           table.insert(found, { obj = att, controller = b.attackerController, text = a.text })
@@ -1012,6 +1208,17 @@ function Triggers.onCombatDamage(list)
           table.insert(found, { obj = h.obj, controller = h.controller, text = a.text, amount = h.amount })
         end
       end
+      for _, f in ipairs(ringTriggers(h.obj, "combatDamage")) do
+        f.that = h.seat
+        table.insert(found, f)
+      end
+      for _, f in ipairs(attachedTriggers(h.obj, "combatDamage")) do
+        f.controller = h.controller
+        f.that = h.seat
+        f.amount = h.amount
+        f.thatCard = h.obj.getGUID()
+        table.insert(found, f)
+      end
     end
   end
   for _, p in ipairs(permanents()) do
@@ -1020,7 +1227,7 @@ function Triggers.onCombatDamage(list)
       if t.kind == "combatDamage" and t.mine then
         local n = 0
         for _, h in ipairs(list) do
-          if h.controller == p.controller then
+          if h.controller == p.controller and (t.subjects == nil or (not h.obj.isDestroyed() and matchesSubject(h.obj, t))) then
             n = n + 1
           end
         end
@@ -1040,6 +1247,22 @@ function Triggers.onCombatDamage(list)
     end
   end
   pushAll(found, list[1] and list[1].seat)
+end
+
+-- !triggers audit: every permanent with trigger text the table can't read.
+function Triggers.audit(color)
+  local n = 0
+  for _, p in ipairs(permanents()) do
+    local ok, miss = pcall(Triggers.unrecognized, p.obj)
+    if ok and #miss > 0 then
+      for _, text in ipairs(miss) do
+        n = n + 1
+        printToColor(p.obj.getName() .. " (" .. p.controller .. "): " .. text:sub(1, 110), color, { 1, 0.75, 0.3 })
+      end
+    end
+  end
+  printToColor(n == 0 and "Every trigger on the battlefield is one the table watches for."
+    or (n .. " trigger(s) above aren't watched: use right-click > Ability to stack when they happen."), color, INFO)
 end
 
 -- Debug (!triggers card): what the table reads on the card under the mouse.

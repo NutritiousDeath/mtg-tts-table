@@ -28,6 +28,7 @@
     !triggers off / on   turn trigger detection off / on
     !auto off / on       turn auto-resolving of simple effects off / on
     !triggers card       show the triggers read on the card under your mouse
+    !triggers audit      list trigger text on the battlefield the table can't watch for
     !solo on / off       solo test mode: one person plays every seat
     !import <link>       import an Archidekt / Moxfield link to your seat
     !import Red <link>   import an Archidekt / Moxfield link (or list) to a seat
@@ -62,6 +63,8 @@ require("src/gamelog")
 require("src/stack")
 require("src/triggers")
 require("src/combat")
+require("src/equip")
+require("src/ring")
 require("src/walkers")
 require("src/effects")
 require("src/faces")
@@ -92,7 +95,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.23 (table flip, summon-sick Zzz, goad, command zone, Fabricate, blocks/menace, token fixes)"
+SCRIPT_VERSION = "1.25 (Equip menu, protection, Ring tempts, Sauron)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -180,6 +183,7 @@ end
 function onObjectDrop(color, obj)
   Stack.onDrop(color, obj)
   Zones.onDrop(color, obj)
+  Equip.onDrop(color, obj)
   ManaChips.onDrop(obj)
 end
 
@@ -422,6 +426,18 @@ function onChat(message, sender)
     Effects.setEnabled(message == "!auto on")
     broadcastToAll("Auto-resolve " .. (message == "!auto on" and "ON" or "OFF") .. " (by " .. sender.color .. ").",
       { 0.7, 0.85, 1 })
+    return false
+  end
+
+  if message == "!ring" then
+    if TableSetup.isActive(sender.color) then
+      Ring.tempt(sender.color)
+    end
+    return false
+  end
+
+  if message == "!triggers audit" then
+    Triggers.audit(sender.color)
     return false
   end
 

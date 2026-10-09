@@ -42,6 +42,7 @@ local function setup()
     d.setup = {
       firstChoice = "Random",
       freeMulligan = GameState.format().freeFirstMulligan ~= false,
+      unfriendly = false,   -- true: no free mulligan, each mulligan draws one card fewer
       phase = nil,          -- "mulligan" while players are deciding
       participants = {},
       picks = {},           -- [color] = { [guid] = true } cards picked for the bottom
@@ -59,9 +60,21 @@ local function isParticipant(color)
   return false
 end
 
+-- Cards dealt for the player's current hand.
+local function dealCount(color)
+  local p = GameState.player(color)
+  if setup().unfriendly then
+    return math.max(1, HAND_SIZE - (p.mulligans or 0))
+  end
+  return HAND_SIZE
+end
+
 -- How many cards a player bottoms if they keep now.
 local function bottomCount(color)
   local p = GameState.player(color)
+  if setup().unfriendly then
+    return 0   -- unfriendly: you draw fewer cards instead of bottoming
+  end
   local n = p.mulligans or 0
   if setup().freeMulligan and n > 0 then
     n = n - 1
@@ -138,7 +151,7 @@ function GameFlow.xml()
 
 <Panel id="startPanel"
        active="false"
-       width="560" height="300"
+       width="560" height="330"
        color="#0D1117F2"
        outline="#3B5BDB" outlineSize="2 2"
        allowDragging="true" returnToOriginalPositionWhenReleased="false">
@@ -147,7 +160,8 @@ function GameFlow.xml()
     <Text fontSize="13" alignment="MiddleLeft" preferredHeight="36" color="#8B98A9">Every seated player with a deck joins. Cards in hands and on the battlefield, graveyard and exile go back into their owner's library; commanders return to the command zone. Life resets to 40.</Text>
     <Text fontSize="15" alignment="MiddleLeft" preferredHeight="22">First player</Text>
     <HorizontalLayout spacing="8" preferredHeight="36">]] .. table.concat(seatButtons) .. [[</HorizontalLayout>
-    <Toggle id="freeMull" onValueChanged="ui_freeMulligan" isOn="true" preferredHeight="28" textColor="#E6F1FF">Free first mulligan (Commander)</Toggle>
+    <Toggle id="freeMull" onValueChanged="ui_freeMulligan" isOn="true" preferredHeight="28" textColor="#E6F1FF">Friendly mulligan: free first one, bottom cards (London)</Toggle>
+    <Toggle id="unfMull" onValueChanged="ui_unfriendlyMulligan" isOn="false" preferredHeight="28" textColor="#E6F1FF">Unfriendly mulligan: no free one, draw one card fewer each time</Toggle>
     <HorizontalLayout spacing="10" preferredHeight="44">
       <Button onClick="ui_startGame" color="#3B5BDB" fontStyle="Bold">Start</Button>
       <Button onClick="ui_toggleStart">Close</Button>
@@ -164,7 +178,8 @@ function GameFlow.refreshUI()
     UI.setAttribute("first_" .. color, "color", s.firstChoice == color and ON or OFF)
   end
   UI.setAttribute("first_Random", "color", s.firstChoice == "Random" and ON or OFF)
-  UI.setAttribute("freeMull", "isOn", s.freeMulligan and "true" or "false")
+  UI.setAttribute("freeMull", "isOn", (s.freeMulligan and not s.unfriendly) and "true" or "false")
+  UI.setAttribute("unfMull", "isOn", s.unfriendly and "true" or "false")
   for _, color in ipairs(TableSetup.activeSeats()) do
     GameFlow.renderMulligan(color)
   end
@@ -189,7 +204,7 @@ function GameFlow.renderMulligan(color)
     count = "Opening hand"
   else
     count = n .. " mulligan" .. (n == 1 and "" or "s")
-      .. ((s.freeMulligan and n >= 1) and " (first one free)" or "")
+      .. ((s.freeMulligan and not s.unfriendly and n >= 1) and " (first one free)" or "")
   end
   UI.setValue("mullCount_" .. color, count)
 
@@ -199,7 +214,9 @@ function GameFlow.renderMulligan(color)
     for _ in pairs(s.picks[color]) do picked = picked + 1 end
     text = "Click " .. bottom .. " card" .. plural .. " to put on the bottom.   <b>" .. picked .. " / " .. bottom .. "</b>"
   elseif n == 0 then
-    text = "Keep these 7, or shuffle back and draw a new 7?"
+    text = "Keep these 7, or shuffle back and draw a new " .. (s.unfriendly and "6 (one fewer)" or "7") .. "?"
+  elseif s.unfriendly then
+    text = "Unfriendly: you hold " .. dealCount(color) .. " cards. Mulligan again for " .. math.max(1, dealCount(color) - 1) .. "."
   else
     text = "Keeping now puts " .. bottom .. " card" .. plural .. " on the bottom of your library."
   end
@@ -264,6 +281,17 @@ local function returnCommanders(color)
   end
 end
 
+-- Hand size right now (cards in the player's hand, not on the table).
+local function handCount(color)
+  local n = 0
+  for _, obj in ipairs(Player[color].getHandObjects() or {}) do
+    if obj.type == "Card" then
+      n = n + 1
+    end
+  end
+  return n
+end
+
 local function deal(color)
   local lib = Library.find(color)
   if lib == nil then
@@ -273,14 +301,58 @@ local function deal(color)
   lib.shuffle()
   Wait.time(function()
     local l = Library.find(color)
-    if l then
-      l.deal(HAND_SIZE, color)
+    if l == nil then
+      return
     end
+    local want = dealCount(color)
+    -- Only deal what is missing: nothing may already be sitting in the hand.
+    local have = handCount(color)
+    if have > 0 then
+      broadcastToAll(color .. " still had " .. have .. " card(s) in hand when dealing; sending them back first.", WARN)
+      local back = {}
+      for _, obj in ipairs(Player[color].getHandObjects() or {}) do
+        if obj.type == "Card" then table.insert(back, obj) end
+      end
+      Library.returnCards(color, back)
+      l = Library.find(color)
+      if l then l.shuffle() end
+    end
+    Wait.time(function()
+      local l2 = Library.find(color)
+      if l2 then
+        l2.deal(want, color)
+      end
+      -- Safety net: if the deal doubled up, send the extras back.
+      Wait.time(function()
+        local extra = handCount(color) - want
+        if extra > 0 then
+          broadcastToAll(color .. " was dealt " .. extra .. " too many; returning them to the library.", WARN)
+          local cards = {}
+          for _, obj in ipairs(Player[color].getHandObjects() or {}) do
+            if obj.type == "Card" then table.insert(cards, obj) end
+          end
+          local back = {}
+          for i = want + 1, #cards do table.insert(back, cards[i]) end
+          Library.returnCards(color, back)
+          local l3 = Library.find(color)
+          if l3 then l3.shuffle() end
+        end
+        GameFlow.renderMulligan(color)
+      end, 2.2)
+    end, have > 0 and 1.2 or 0)
   end, 0.6)
 end
 
+local lastStart = 0
+
 function GameFlow.start(byColor)
   local s = setup()
+  -- A double click (or two players pressing Start) must not deal twice.
+  local now = os.time()
+  if now - lastStart < 3 then
+    return
+  end
+  lastStart = now
   local players, skipped = {}, {}
   for _, color in ipairs(TableSetup.activeSeats()) do
     if GameState.solo() and not Player[color].seated then
@@ -329,7 +401,8 @@ function GameFlow.start(byColor)
   end
 
   broadcastToAll("New game: " .. table.concat(players, ", ") .. ". " .. first .. " goes first."
-    .. (s.freeMulligan and " First mulligan is free." or ""), GOOD)
+    .. (s.unfriendly and " Unfriendly mulligans: no free one, one card fewer each time."
+      or (s.freeMulligan and " First mulligan is free." or "")), GOOD)
   for _, color in ipairs(skipped) do
     broadcastToAll(color .. " is seated but has no deck at their seat, so they're not in this game.", WARN)
   end
@@ -400,9 +473,14 @@ function GameFlow.mulligan(color)
   if s.phase ~= "mulligan" or not isParticipant(color) or p.hasKept or s.picks[color] then
     return
   end
+  if s.unfriendly and dealCount(color) <= 1 then
+    broadcastToColor("You are down to one card: you can't mulligan any further.", color, WARN)
+    return
+  end
   p.mulligans = (p.mulligans or 0) + 1
-  local free = s.freeMulligan and p.mulligans == 1
-  broadcastToAll(color .. " mulligans" .. (free and " (free)" or "") .. ".", INFO)
+  local free = s.freeMulligan and not s.unfriendly and p.mulligans == 1
+  broadcastToAll(color .. " mulligans" .. (free and " (free)" or "")
+    .. (s.unfriendly and (" and draws " .. dealCount(color)) or "") .. ".", INFO)
   Library.returnCards(color, handCards(color))
   UI.setAttribute("mull_" .. color, "active", "false")
   Wait.time(function()
@@ -583,8 +661,20 @@ function ui_firstPlayer(player, choice)
   GameFlow.refreshUI()
 end
 
+function ui_unfriendlyMulligan(player, value)
+  local on = (value == true or value == "True" or value == "true")
+  setup().unfriendly = on
+  if on then
+    UI.setAttribute("freeMull", "isOn", "false")
+  end
+end
+
 function ui_freeMulligan(player, value)
   setup().freeMulligan = (value == true or value == "True" or value == "true")
+  if setup().freeMulligan then
+    setup().unfriendly = false
+    UI.setAttribute("unfMull", "isOn", "false")
+  end
 end
 
 function ui_startGame(player)

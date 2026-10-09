@@ -307,15 +307,12 @@ function LibSearch.close(color, quiet)
       printToAll("MTG > " .. color .. " finished searching and shuffled their library.", INFO)
     end
   end
-  -- "...then shuffle and put that card on top": after the shuffle.
+  -- "...then shuffle and put that card on top": the card stays revealed beside
+  -- the library until its owner puts it on top (or draws).
   local h = held[color]
   held[color] = nil
   if h and not h.isDestroyed() then
-    Wait.time(function()
-      if not h.isDestroyed() then
-        Library.putAt(color, h, 0)
-      end
-    end, 1.2)
+    Library.holdRevealed(color, h)
   end
 end
 
@@ -332,7 +329,7 @@ local function take(color, slot, toBattlefield, tapped, toTop)
   local name = "a card"
   if toTop then
     if lib.type == "Deck" then
-      local card = lib.takeObject({ index = index, position = TableSetup.slot(color, "library", 3),
+      local card = lib.takeObject({ index = index, position = Library.revealSpot(color),
         rotation = { 0, s.yaw, 0 }, smooth = true })
       if card then
         held[color] = card
