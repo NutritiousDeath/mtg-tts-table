@@ -13,7 +13,8 @@
 
 LibSearch = {}
 
-local MAX_SHOWN = 24
+local MAX_SHOWN = 110   -- a whole Commander library fits; the grid scrolls
+local VIEW_ROWS = 3        -- rows visible at once
 local COLS = 8
 local INFO = { 0.75, 0.8, 0.9 }
 local WARN = { 1, 0.6, 0.2 }
@@ -84,11 +85,14 @@ function LibSearch.xml()
       </Panel>
     </HorizontalLayout>
     <Text id="lsStatus_%s" fontSize="12" color="#8B98A9" alignment="MiddleLeft" preferredHeight="18">Click a card to take it (the TO: button picks hand or battlefield).</Text>
-    <GridLayout id="lsGrid_%s" active="false" cellSize="146 204" spacing="8 8" constraint="FixedColumnCount" constraintCount="]] .. COLS .. [["
-                childAlignment="UpperLeft" preferredHeight="204">]] .. table.concat(slots) .. [[</GridLayout>
+    <VerticalScrollView id="lsScroll_%s" active="false" preferredHeight="204" scrollSensitivity="30" color="#00000000"
+                        scrollbarColors="#5AF0FF|#8FF7FF|#5AF0FF|#00000000" scrollbarBackgroundColor="#141B26">
+      <GridLayout id="lsGrid_%s" cellSize="144 204" spacing="8 8" constraint="FixedColumnCount" constraintCount="]] .. COLS .. [["
+                  childAlignment="UpperLeft" preferredHeight="204">]] .. table.concat(slots) .. [[</GridLayout>
+    </VerticalScrollView>
   </VerticalLayout>
 </Panel>
-]]):format(c, c, c, c, c, c, c, c, c, c, c))
+]]):format(c, c, c, c, c, c, c, c, c, c, c, c))
   end
   return table.concat(parts)
 end
@@ -115,9 +119,11 @@ end
 
 local function render(color, guids, faces, total, matched)
   local rows = math.max(1, math.ceil(#guids / COLS))
-  UI.setAttribute("lsGrid_" .. color, "active", #guids > 0 and "true" or "false")
+  local view = math.min(rows, VIEW_ROWS)
+  UI.setAttribute("lsScroll_" .. color, "active", #guids > 0 and "true" or "false")
+  UI.setAttribute("lsScroll_" .. color, "preferredHeight", view * 212)
   UI.setAttribute("lsGrid_" .. color, "preferredHeight", rows * 212)
-  UI.setAttribute("libsearch_" .. color, "height", 160 + (#guids > 0 and rows * 212 or 0))
+  UI.setAttribute("libsearch_" .. color, "height", 160 + (#guids > 0 and view * 212 or 0))
   for i = 1, MAX_SHOWN do
     local id = color .. "_" .. i
     local g = guids[i]

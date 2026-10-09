@@ -485,10 +485,20 @@ function Library.revealUntil(color, typeName, onDone)
       local match = false
       pcall(function()
         local d = JSON.decode(card.getGMNotes())
+        -- "nonland": any card that isn't a land.
+        local nonWord = want:match("^non(%a+)$")
+        local has = false
         for _, t in ipairs(type(d) == "table" and d.types or {}) do
-          if tostring(t):lower() == want then
+          local tl = tostring(t):lower()
+          if tl == want then
             match = true
           end
+          if nonWord and tl == nonWord then
+            has = true
+          end
+        end
+        if nonWord and not has then
+          match = true
         end
       end)
       if match then

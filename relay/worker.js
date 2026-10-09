@@ -166,15 +166,23 @@ function identifierFor(item, nameOnly) {
 }
 
 async function scryfallCollection(identifiers) {
-  const res = await fetch(SCRYFALL_COLLECTION, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Accept": "application/json",
-      "User-Agent": USER_AGENT,
-    },
-    body: JSON.stringify({ identifiers }),
-  });
+  // Scryfall sometimes answers 429 (rate limit) to Cloudflare's shared addresses:
+  // wait a moment and try again before giving up.
+  let res;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    res = await fetch(SCRYFALL_COLLECTION, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": USER_AGENT,
+      },
+      body: JSON.stringify({ identifiers }),
+    });
+    if (res.status !== 429 && res.status < 500) break;
+    const wait = Math.min(parseFloat(res.headers.get("Retry-After")) || (attempt + 1), 4);
+    await new Promise((r) => setTimeout(r, wait * 1000));
+  }
   if (!res.ok) {
     let detail = "";
     try { detail = (await res.text()).slice(0, 200); } catch (e) {}

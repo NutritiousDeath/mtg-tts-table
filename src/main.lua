@@ -32,6 +32,7 @@
     !import <link>       import an Archidekt / Moxfield link to your seat
     !import Red <link>   import an Archidekt / Moxfield link (or list) to a seat
     !forcepass   stop waiting on a player who isn't answering
+    !afk 45 / off   priority pop-ups pass by themselves after this many seconds (default 60)
     !walker      show the loyalty abilities read on the planeswalker under your mouse
     !log         snapshot every player and save the game log to the Notebook
     !logclear    start a fresh game log
@@ -89,7 +90,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.19 (Planechase: unpack / pack up, hand-rolled planar die)"
+SCRIPT_VERSION = "1.22 (shock lands, Aether Channeler, Treasure Hunt fix, AFK timer)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -456,6 +457,12 @@ function onChat(message, sender)
     else
       TableUI.importFor(importSeat, importText, sender.color)
     end
+    return false
+  end
+
+  local afkArg = message:match("^!afk%s*(.*)$")
+  if afkArg then
+    Turns.setAfk(sender.color, afkArg)
     return false
   end
 

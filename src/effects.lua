@@ -272,6 +272,13 @@ function Effects.parse(text, sourceName)
   end
   w = t:match("you lose (%w+) life")
   add("lose", "you", num(w))
+  -- Mana Vault / Black Vise style: "it deals 1 damage to you".
+  do
+    local _, e, dw = t:find("deals (%w+) damage to you")
+    if dw and not t:sub(e + 1, e + 1):match("%a") then
+      add("lose", "you", num(dw))
+    end
+  end
   -- "As an additional cost to cast this spell, pay 3 life" (X filled in).
   do
     local pAt = t:find("pay %w+ life")
@@ -572,6 +579,7 @@ function Effects.parse(text, sourceName)
       local toHand = t:find("into your hand", 1, true) ~= nil
       table.insert(actions, { what = "revealUntil", who = "you", n = 1, type = ty,
         where = toHand and "hand" or "battlefield",
+        allToHand = t:find("all cards revealed this way into your hand", 1, true) ~= nil,
         attacking = t:find("tapped and attacking", 1, true) ~= nil,
         tapped = t:find("tapped and attacking", 1, true) ~= nil or t:find("battlefield tapped", 1, true) ~= nil })
     end
@@ -647,8 +655,21 @@ function Effects.parse(text, sourceName)
     table.insert(actions, { what = "bounce", who = "you", n = 1, type = btype, mine = true })
   else
     btype = t:match("return target (%a+) to its owner's hand")
+    local other = false
+    if not btype then
+      -- Aether Channeler: "return another target nonland permanent to its owner's hand"
+      local ph = t:match("return another target ([%a ]-) to its owner's hand")
+      if ph then
+        other = true
+        btype = ph:match("^(nonland) permanent$") or ph:match("^(%a+)$")
+      end
+    end
+    if not btype then
+      local ph = t:match("return target (nonland) permanent to its owner's hand")
+      btype = ph
+    end
     if btype then
-      table.insert(actions, { what = "bounce", who = "you", n = 1, type = btype, mine = false })
+      table.insert(actions, { what = "bounce", who = "you", n = 1, type = btype, mine = false, other = other })
     end
   end
   if #actions == 0 and #conds == 0 then
@@ -837,7 +858,7 @@ local function apply(it, plan, target)
             broadcastToColor(it.name .. " isn't on the table any more: no counter added.", seat, INFO)
           end
         elseif a.what == "bounce" then
-          Effects.pickBounce(seat, a, it.name)
+          Effects.pickBounce(seat, a, it.name, it.source)
         elseif a.what == "token" then
           local made = amountOf(a, controller, it.name)
           if made < 1 then
@@ -1277,7 +1298,7 @@ function Effects.resolve(it)
   local function askConds()
     for _, c in ipairs(plan.conds or {}) do
       -- Conditions the table can see for itself.
-      local auto = Effects.condValue(c.cond, seat)
+      local auto = Effects.condValue(c.cond, seat, it.name)
       if auto ~= nil then
         c.auto = auto
         c.silent = true
@@ -1572,10 +1593,13 @@ local function returnToHand(obj)
   end, 1.2)
 end
 
-function Effects.pickBounce(seat, a, sourceName)
+function Effects.pickBounce(seat, a, sourceName, sourceGuid)
   local want = tostring(a.type)
   local filter = function(obj, owner)
     if a.mine and owner ~= seat then
+      return false
+    end
+    if a.other and sourceGuid and obj.getGUID() == sourceGuid then
       return false
     end
     local t = cardTypes(obj)
@@ -1647,11 +1671,37 @@ Events.on("cardMoved", function(d)
   if card.isDestroyed() or card.is_face_down then
     return
   end
+  local seat = d.to.seat
+  local function tapIt()
+    Wait.time(function()
+      if card.isDestroyed() then
+        return
+      end
+      local s = TableSetup.seat(seat)
+      local r = card.getRotation()
+      card.setRotationSmooth({ r.x, (s.yaw + 90) % 360, r.z }, false, true)
+      printToAll("MTG > " .. card.getName() .. " enters tapped.", INFO)
+    end, 0.8)
+  end
+  -- Shock lands: "you may pay 2 life. If you don't, it enters tapped."
+  local life = Effects.shockLife(card)
+  if life and seat and GameState.player(seat) then
+    local name = card.getName()
+    ask(seat, "Pay " .. life .. " life for " .. name .. "?", "Pay " .. life .. " life and it enters untapped, or let it enter tapped.",
+      { { label = "PAY " .. life .. " LIFE", value = true }, { label = "ENTER TAPPED", value = false } }, function(pay)
+        if pay then
+          Trackers.changeLife(seat, -life, name)
+          printToAll("MTG > " .. seat .. " pays " .. life .. " life: " .. name .. " enters untapped.", GOOD)
+        else
+          tapIt()
+        end
+      end)
+    return
+  end
   local how, clause = Effects.entersTapped(card)
   if how == nil then
     return
   end
-  local seat = d.to.seat
   if how == "maybe" then
     broadcastToColor(card.getName() .. " may enter tapped (" .. clause .. "): tap it if it does.", seat, INFO)
     return
@@ -1666,6 +1716,18 @@ Events.on("cardMoved", function(d)
     printToAll("MTG > " .. card.getName() .. " enters tapped.", INFO)
   end, 0.8)
 end)
+
+-- Shock land: how much life it asks for ("you may pay 2 life. If you don't,
+-- it enters tapped"), or nil.
+function Effects.shockLife(card)
+  local oracle = ""
+  pcall(function()
+    local data = JSON.decode(card.getGMNotes())
+    oracle = type(data) == "table" and type(data.oracle) == "string" and data.oracle or ""
+  end)
+  local n = oracle:lower():match("you may pay (%d+) life%. if you don't, [^.]* enters tapped")
+  return n and tonumber(n) or nil
+end
 
 -- Does this card enter tapped? "yes", "maybe" (a condition: "unless you
 -- control..."), or nil; plus the clause.
@@ -1975,7 +2037,7 @@ local function creatureCount(seat)
 end
 
 -- true / false for the conditions it knows, nil for the rest (asked as YES / NO).
-function Effects.condValue(cond, seat)
+function Effects.condValue(cond, seat, name)
   if cond == "a player controls no creatures" then
     for _, c in ipairs(players()) do
       if creatureCount(c) == 0 then
@@ -1985,6 +2047,14 @@ function Effects.condValue(cond, seat)
     return false
   elseif cond == "you control no creatures" then
     return creatureCount(seat) == 0
+  elseif cond == "~ is tapped" and name then
+    -- Mana Vault: is the permanent itself tapped? (the table can see it)
+    for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+      if obj.type == "Card" and not obj.isDestroyed() and obj.getName() == name and fieldSeat(obj) == seat then
+        local diff = ((obj.getRotation().y - TableSetup.seat(seat).yaw + 540) % 360) - 180
+        return math.abs(diff) > 30
+      end
+    end
   end
   return nil
 end
@@ -2236,6 +2306,21 @@ function Effects.revealUntil(seat, a, it)
           end
         end, 1.2)
       end
+    end
+    if a.allToHand then
+      -- Treasure Hunt: every revealed card goes to hand, nothing to the bottom.
+      local pos = Player[seat].getHandTransform().position
+      for _, c in ipairs(others) do
+        if c ~= nil and not c.isDestroyed() then
+          c.setLock(false)
+          c.setPosition(pos)
+          Wait.time(function()
+            if not c.isDestroyed() then Zones.refresh(c) end
+          end, 1)
+        end
+      end
+      printToAll("MTG > " .. it.name .. ": all " .. (#others + (found and 1 or 0)) .. " revealed cards go to " .. seat .. "'s hand.", INFO)
+      return
     end
     Library.putBottomRandom(seat, others)
   end)

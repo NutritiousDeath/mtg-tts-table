@@ -45,7 +45,8 @@ local DIE_IMAGE = "https://i.imgur.com/ptrUeHV.jpg"
 local CHEST = { x = 38, z = -38, yaw = 135 }       -- between White (south) and Blue (east)
 local DECK_AT = { x = -8.5, z = 3.8 }              -- west of the stack mat
 local PLANE_AT = { x = -8.5, z = -3.8 }
-local LAND = { x = 31, z = -31 }                    -- the planar die waits in front of the chest
+local LAND = { x = 8.5, z = 3.8 }                    -- the planar die's spot, east of the stack mat (empty until UNPACK)
+local SPOT_SIZE = 4.4
 local CARD_SCALE_UPRIGHT, CARD_SCALE_SIDEWAYS = 1.4, 1.6
 local YAW_UPRIGHT, YAW_SIDEWAYS = 180, 270   -- upright landscape pictures / sideways Scryfall ones
 local ID_BASE = 31000
@@ -487,7 +488,7 @@ putDie = function(cb)
         CustomDice = { Type = 1 } },
       Tags = { "PlanarDie" },
     },
-    position = { LAND.x, TableSetup.SURFACE_TOP + 3, LAND.z },
+    position = { LAND.x, TableSetup.SURFACE_TOP + 1.5, LAND.z },
     callback_function = function(o)
       o.addTag("PlanarDie")
       if cb then cb(o) end
@@ -620,11 +621,47 @@ local function addButtons(obj)
   end
 end
 
+-- The empty spot on the table where the planar die sits once unpacked.
+local function ensureSpot()
+  local img = BASE .. "die_spot.png" .. VERSION
+  for _, o in ipairs(getObjectsWithTag("PlanarDieSpot")) do
+    local co = o.getCustomObject()
+    if co and co.image == img then
+      o.setLock(true)
+      return
+    end
+    o.destruct()
+  end
+  local obj = spawnObject({
+    type = "Custom_Token",
+    position = { LAND.x, TableSetup.SURFACE_TOP + 0.05, LAND.z },
+    rotation = { 0, 0, 0 },
+    sound = false,
+    callback_function = function(o)
+      o.setName("Planar Die Spot")
+      o.setDescription("The planar die sits here after UNPACK.")
+      o.addTag("PlanarDieSpot")
+      Wait.condition(function()
+        local b = o.getBoundsNormalized()
+        local w = b and b.size and b.size.x or 0
+        if w > 0.05 then
+          local k = SPOT_SIZE / (w / o.getScale().x)
+          o.setScale({ k, 1, k })
+        end
+        o.setLock(true)
+      end, function() return o.isDestroyed() or not o.loading_custom end, 10,
+      function() o.setLock(true) end)
+    end,
+  })
+  obj.setCustomObject({ image = img, thickness = 0.05, merge_distance = 0, stackable = false })
+end
+
 function Planechase.ensure()
   if PLANECHASE_CARDS == nil then
     return
   end
   buildIndex()
+  ensureSpot()
   local plane = findPlane()
   if plane then
     planeMenu(plane)

@@ -147,10 +147,16 @@ local function renderStrip(color)
   if Turns.pendingLabel then
     pendingTo, waitingOn = Turns.pendingLabel()
   end
+  local size = (running and not pendingTo) and 300 or 190
   if running and pendingTo then
-    title = pendingTo .. "? WAITING ON " .. string.upper(waitingOn or "")
+    -- Two lines, sized to fit the title area (about 7 table units wide).
+    local l1 = string.upper(tostring(pendingTo)) .. "?"
+    local l2 = "WAITING ON " .. string.upper(waitingOn or "")
+    local longest = math.max(#l1, #l2)
+    title = l1 .. "\n" .. l2
+    size = math.max(70, math.min(170, math.floor(3300 / (0.66 * longest))))
   end
-  B({ label = title, width = 0, height = 0, font_size = (running and not pendingTo) and 300 or 190,
+  B({ label = title, width = 0, height = 0, font_size = size,
     font_color = { rgb[1], rgb[2], rgb[3] }, color = { 0, 0, 0, 0 } }, TITLE_X, 0.02)
   -- Step chips: the current one lit in the player's color, done ones dimmed.
   for i, label in ipairs(STRIP_LABELS) do
@@ -409,9 +415,68 @@ local function showPrompt(color, show)
   UI.setAttribute("respond_" .. color, "active", show and "true" or "false")
 end
 
+-- AFK timer: a player who doesn't answer a priority pop-up in time counts as
+-- "no response" (!afk 45 / !afk off). Stopped whenever the pop-ups close.
+local afkToken = 0
+
+local function afkSeconds()
+  local a = turn().afk
+  if a == nil then
+    return 60
+  end
+  return a
+end
+
 local function hideAllPrompts()
+  afkToken = afkToken + 1
   for _, c in ipairs(TableSetup.activeSeats()) do
     showPrompt(c, false)
+    UI.setValue("respondTimer_" .. c, "")
+  end
+end
+
+local function startAfkTimer(who)
+  afkToken = afkToken + 1
+  local tok = afkToken
+  local total = afkSeconds()
+  if total <= 0 then
+    UI.setValue("respondTimer_" .. who, "")
+    return
+  end
+  local left = total
+  local function tick()
+    if tok ~= afkToken then
+      return
+    end
+    local p = turn().pending
+    if not p or p.queue[p.at] ~= who then
+      return
+    end
+    if left <= 0 then
+      broadcastToAll(who .. " didn't answer in " .. total .. "s: counted as NO RESPONSE (AFK timer).", WARN)
+      Turns.respond(who, false)
+      return
+    end
+    UI.setValue("respondTimer_" .. who, "Passes by itself in " .. left .. "s")
+    left = left - 1
+    Wait.time(tick, 1)
+  end
+  tick()
+end
+
+-- !afk <seconds> / !afk off
+function Turns.setAfk(color, arg)
+  local t = turn()
+  arg = tostring(arg or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+  if arg == "off" or arg == "0" then
+    t.afk = 0
+    broadcastToAll(color .. " turned the AFK timer off.", INFO)
+  elseif tonumber(arg) and tonumber(arg) >= 5 then
+    t.afk = math.floor(tonumber(arg))
+    broadcastToAll(color .. " set the AFK timer: a priority pop-up passes by itself after " .. t.afk .. " seconds.", INFO)
+  else
+    broadcastToColor("AFK timer: " .. (afkSeconds() > 0 and (afkSeconds() .. " seconds") or "off")
+      .. ". Use !afk 45 (5 or more seconds) or !afk off.", color, INFO)
   end
 end
 
@@ -429,6 +494,7 @@ local function promptNext()
       .. (note and ("\n" .. note) or "") .. "\nAny responses?")
   end
   showPrompt(who, true)
+  startAfkTimer(who)
   Turns.render()
 end
 
@@ -646,18 +712,19 @@ function Turns.respondXml()
   local parts = {}
   for _, c in ipairs(TableSetup.activeSeats()) do
     table.insert(parts, ([[
-<Panel id="respond_%s" visibility="%s" active="false" rectAlignment="MiddleCenter" offsetXY="0 140" width="460" height="214"
+<Panel id="respond_%s" visibility="%s" active="false" rectAlignment="MiddleCenter" offsetXY="0 140" width="460" height="236"
        color="#0B0F17F5" outline="#5AF0FF" outlineSize="2 2">
   <VerticalLayout padding="16 16 14 14" spacing="10" childForceExpandHeight="false">
     <Text fontSize="20" fontStyle="Bold" color="#5AF0FF" preferredHeight="26">RESPONSES?</Text>
     <Text id="respondText_%s" fontSize="15" color="#E6F1FF" preferredHeight="70">-</Text>
+    <Text id="respondTimer_%s" fontSize="13" color="#FFB347" preferredHeight="18"></Text>
     <HorizontalLayout spacing="12" preferredHeight="48">
       <Button onClick="ui_respond(%s_no)" color="#00B3A4" textColor="#06130B" fontStyle="Bold" fontSize="16">NO RESPONSE</Button>
       <Button onClick="ui_respond(%s_yes)" color="#DB5454" textColor="#1A0606" fontStyle="Bold" fontSize="16">I HAVE A RESPONSE</Button>
     </HorizontalLayout>
   </VerticalLayout>
 </Panel>
-]]):format(c, c, c, c, c))
+]]):format(c, c, c, c, c, c))
   end
   return table.concat(parts)
 end
