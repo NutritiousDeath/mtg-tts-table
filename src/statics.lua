@@ -81,14 +81,22 @@ function Statics.compute()
     end
   end
   for _, p in ipairs(list) do
-    for line in (p.oracle .. "\n"):gmatch("(.-)\n") do
+    for line in (p.oracle .. "\n"):gmatch("([^\n]*)\n") do
       -- "This creature gets +1/+1 for each artifact you control."
       local a, b = line:match("^this creature gets %+(%d+)/%+(%d+) for each artifact you control")
       if a then
         add(p, tonumber(a) * (artifacts[p.seat] or 0), tonumber(b) * (artifacts[p.seat] or 0))
       end
       -- "Creature tokens you control get +1/+1 ..." / "Other Soldiers you control get +1/+1".
-      local subj, x, y = line:match("^(.-) you control get %+(%d+)/%+(%d+)")
+      -- (plain search first: MoonSharp gives up on lazy patterns over long rules text)
+      local subj, x, y
+      local at = line:find(" you control get +", 1, true)
+      if at and at <= 40 then
+        x, y = line:sub(at):match("^ you control get %+(%d+)/%+(%d+)")
+        if x then
+          subj = line:sub(1, at - 1)
+        end
+      end
       if subj and #subj < 40 then
         for _, q in ipairs(list) do
           if q.seat == p.seat and subjectMatches(subj, q, p) then

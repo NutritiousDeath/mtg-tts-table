@@ -97,7 +97,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.37 (painlands and Talismans take life when tapped for colored mana)"
+SCRIPT_VERSION = "1.38 (statics pattern fix, revealed-card button clears)"
 
 function onLoad(saved)
   GameLog.setup()

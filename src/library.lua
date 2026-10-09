@@ -843,3 +843,27 @@ function Library.arrangeTop(color, choices, onDone)
     end })
 end
 
+
+-- A revealed card that is drawn, cast or moved away is no longer "revealed": drop its PUT ON TOP button.
+Events.on("cardMoved", function(d)
+  local card = d.card
+  if card == nil or d.to == nil or card.isDestroyed() then
+    return
+  end
+  local r = d.to.region
+  if r ~= "hand" and r ~= "battlefield" and r ~= "lands" and r ~= "graveyard" and r ~= "exile" and r ~= "command" then
+    return
+  end
+  local t = revealedTable()
+  for color, guid in pairs(t) do
+    if guid == card.getGUID() then
+      t[color] = nil
+      pcall(function() card.clearButtons() end)
+      if Counters and Counters.setup then
+        Wait.time(function()
+          if not card.isDestroyed() then Counters.setup(card) end
+        end, 0.3)
+      end
+    end
+  end
+end)
