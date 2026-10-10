@@ -108,7 +108,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.51 (mana pool badges on the MANA tile)"
+SCRIPT_VERSION = "1.52 (mana pool badges; !resync prints to chat)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -453,8 +453,11 @@ function onChat(message, sender)
   if message == "!resync" then
     TableUI.refreshVisibility()
     Counters.refreshMenus()
-    broadcastToColor("MTG > Refreshed your panels. You are " .. tostring(sender.color) .. (TableSetup.isActive(sender.color)
-      and ", a seat in this game." or ", NOT a seat: pick a free color or type !seat <Color>."), sender.color, { 0.75, 0.8, 0.9 })
+    local msg = "MTG > Resync (script version " .. tostring(SCRIPT_VERSION):match("^[%d%.]+") .. "): refreshed your panels. You are "
+      .. tostring(sender.color) .. (TableSetup.isActive(sender.color)
+      and ", a seat in this game." or ", NOT a seat: pick a free color or type !seat <Color>.")
+    printToColor(msg, sender.color, { 0.75, 0.8, 0.9 })
+    broadcastToColor(msg, sender.color, { 0.75, 0.8, 0.9 })
     return false
   end
 
