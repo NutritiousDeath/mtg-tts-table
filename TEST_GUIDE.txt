@@ -1,5 +1,5 @@
 MTG COMMANDER TABLE (TTS) - TEST GUIDE
-Version being tested: 1.50
+Version being tested: 1.51
 After loading, chat should say:  MTG > Scripts loaded: version 1.49 (...)
 
 HOW TO USE THIS
@@ -85,7 +85,7 @@ METALCRAFT (Etched Champion, Mox Opal style text)
 [ ] 41. A trigger that says "if you control three or more artifacts": EXPECT it decides by itself (no YES/NO).
 
 MANA POOL (the MANA tile left of your command zones - no more chips)
-[ ] 52. DO: tap a basic land by hand.  EXPECT: a number appears beside that color's circle on the MANA tile (nothing shows at 0).
+[ ] 52. DO: tap a basic land by hand.  EXPECT: a small dark badge with the number appears at the upper right of that color's circle on the MANA tile (nothing shows at 0).
 [ ] 53. DO: tap a dual land / Command Tower.  EXPECT: a popup asks which color; the pool gets that color.
 [ ] 54. DO: tap a pain land (Adarkar Wastes) or Talisman.  EXPECT: asks COLORLESS (free) or COLORED (you lose 1 life), then which color.
 [ ] 55. DO: tap Ancient Tomb / a Treasure / a mana creature (Llanowar Elves).  EXPECT: the right mana is added (Tomb: 2 colorless and you lose 2 life; Treasure: asks which color).

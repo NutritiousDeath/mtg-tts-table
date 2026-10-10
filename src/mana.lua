@@ -18,7 +18,7 @@ local ART_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-tabl
 local ART_VERSION = "?v=2"
 local TILE_W = 6.4
 local INFO = { 0.75, 0.8, 0.9 }
-local NUM_DX = 0.95      -- the count sits to the right of its circle
+local BADGE_DX, BADGE_DZ = 0.58, -0.52   -- the count is a small badge at the circle's upper right
 local ORDER = { "W", "U", "B", "R", "G", "C" }
 
 -- Same order and spots as tools/make_mana_art.py (x right, z toward the player).
@@ -117,8 +117,10 @@ renderTile = function(color)
       width = 440, height = 440, color = { 0, 0, 0, 0 }, hover_color = { 1, 1, 1, 0.1 },
       press_color = { 1, 1, 1, 0.2 } }, c.x, c.z)
     if n > 0 then
-      Trackers.tileButton(tile, { label = tostring(n), click_function = "trk_noop",
-        width = 0, height = 0, font_size = 420, color = { 0, 0, 0, 0 }, font_color = { 1, 1, 1 } }, c.x + NUM_DX, c.z)
+      local digits = #tostring(n)
+      Trackers.tileButton(tile, { label = tostring(n), click_function = "trk_noop", tooltip = string.upper(c.name) .. ": " .. n,
+        width = 170 + 70 * (digits - 1), height = 170, font_size = 150, color = { 0.02, 0.03, 0.06, 0.94 },
+        font_color = { 1, 1, 1 } }, c.x + BADGE_DX, c.z + BADGE_DZ)
     end
   end
 end

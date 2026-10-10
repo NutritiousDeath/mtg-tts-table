@@ -108,7 +108,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.50 (mana pool counted on the MANA tile: taps, spell costs, no chips)"
+SCRIPT_VERSION = "1.51 (mana pool badges on the MANA tile)"
 
 function onLoad(saved)
   GameLog.setup()
