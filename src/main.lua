@@ -97,7 +97,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.41 (Doubling Season and other counter modifiers; asks before life, draw and damage replacement effects)"
+SCRIPT_VERSION = "1.43 (Oracle-checked Sephiroth deck: Consuming Corruption, Sephiroth sacrifice-draw and 4th-resolve transform, Takenuma order)"
 
 function onLoad(saved)
   GameLog.setup()

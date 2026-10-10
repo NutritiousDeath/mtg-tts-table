@@ -58,6 +58,18 @@ local function subjectMatches(subj, q, p)
   elseif subj == "nontoken creatures" then
     return not q.token
   end
+  -- "Skeletons, Vampires, and Zombies you control get +1/+1" (Death-Priest of Myrkul).
+  if subj:find(",", 1, true) or subj:find(" and ", 1, true) or subj:find(" or ", 1, true) then
+    for w in subj:gmatch("[%a%-]+") do
+      if w ~= "and" and w ~= "or" then
+        local base = w:gsub("s$", "")
+        if base ~= "" and q.tl:find(base, 1, true) then
+          return true
+        end
+      end
+    end
+    return false
+  end
   local word = subj:match("^([%a%-]+)s$") or subj:match("^([%a%-]+) creatures$")
   if word then
     return q.tl:find(word, 1, true) ~= nil

@@ -411,12 +411,21 @@ local function renderDiscard(color)
   UI.setAttribute("discard_" .. color, "height", 140 + rows * 134)
   -- Title and buttons say what this panel is for: cleanup discard, an effect's discard, or Sylvan Library.
   local forced, top = st.forced, st.dest == "top"
+  if st.owner then
+    -- Thoughtseize and friends: you look at someone else's hand and choose the card they discard.
+    UI.setValue("dTitle_" .. color, string.upper(tostring(st.reason or "EFFECT")) .. " · " .. string.upper(st.owner) .. "'S HAND")
+    UI.setValue("dConfirm_" .. color, "THEY DISCARD IT")
+    UI.setAttribute("dSkip_" .. color, "active", "false")
+    UI.setValue("dText_" .. color, "You see " .. st.owner .. "'s hand. Choose " .. (st.hint or "a card") .. ", then confirm.   "
+      .. picked .. " / " .. st.need)
+  else
   UI.setValue("dTitle_" .. color, top and (string.upper(tostring(st.reason or "EFFECT")) .. " · PUT ON TOP OF YOUR LIBRARY")
     or (forced and (string.upper(tostring(st.reason or "EFFECT")) .. " · DISCARD") or "CLEANUP · DISCARD TO 7"))
   UI.setValue("dConfirm_" .. color, top and "PUT ON TOP" or "DISCARD")
   UI.setAttribute("dSkip_" .. color, "active", forced and "false" or "true")
   UI.setValue("dText_" .. color, "You have " .. #st.order .. " cards: pick " .. st.need .. (st.dest == "top" and " to put on top of your library.   " or " to discard.   ")
     .. picked .. " / " .. st.need)
+  end
   for i = 1, MAX_DISCARD_SLOTS do
     local id = color .. "_" .. i
     local e = st.order[i]
@@ -509,6 +518,54 @@ function Actions.forceDiscard(color, n, reason, onDone, dest)
   renderDiscard(color)
 end
 
+-- Thoughtseize, Inquisition of Kozilek, Duress...: `chooser` looks at `owner`'s hand and picks the card
+-- that is discarded. pred(data) says which cards are legal (data = the card's rules data). The panel
+-- shows the whole hand; only legal cards can be picked.
+function Actions.chooseFromHand(chooser, owner, reason, pred, hint, onDone)
+  local hand = handCards(owner)
+  if #hand == 0 then
+    printToAll("MTG > " .. owner .. " has no cards in hand (" .. tostring(reason) .. ").", { 0.8, 0.8, 0.8 })
+    if onDone then onDone() end
+    return
+  end
+  local order, legal, first = {}, {}, nil
+  for _, card in ipairs(hand) do
+    local d = {}
+    pcall(function() d = JSON.decode(card.getGMNotes()) or {} end)
+    local custom = card.getCustomObject()
+    table.insert(order, { guid = card.getGUID(), name = card.getName(), face = custom and custom.face or nil })
+    if pred(d) then
+      legal[card.getGUID()] = true
+      first = first or card
+    end
+  end
+  if first == nil then
+    printToAll("MTG > " .. chooser .. " looks at " .. owner .. "'s hand (" .. table.concat((function()
+      local n = {}
+      for _, e in ipairs(order) do table.insert(n, e.name) end
+      return n
+    end)(), ", ") .. "): nothing to take (" .. tostring(reason) .. ").", { 0.35, 0.95, 1 })
+    if onDone then onDone() end
+    return
+  end
+  local function discardOne(card)
+    local s = TableSetup.seat(owner)
+    card.setPosition(TableSetup.slot(owner, "graveyard", 2.3))
+    card.setRotation({ 0, s.yaw, 0 })
+    Library.toGraveyard(owner, card)
+    log(chooser .. " makes " .. owner .. " discard " .. card.getName() .. " (" .. tostring(reason) .. ")")
+  end
+  if GameState.solo() and not Player[chooser].seated then
+    discardOne(first)
+    if onDone then onDone() end
+    return
+  end
+  discard[chooser] = { need = 1, order = order, picks = {}, onDone = onDone, forced = true, reason = reason,
+    owner = owner, legal = legal, hint = hint, discardOne = discardOne }
+  broadcastToAll(chooser .. " looks at " .. owner .. "'s hand (" .. tostring(reason) .. ").", { 0.35, 0.95, 1 })
+  renderDiscard(chooser)
+end
+
 local function finishDiscard(color)
   local st = discard[color]
   discard[color] = nil
@@ -528,6 +585,10 @@ function ui_discardPick(player, arg)
   end
   local e = st.order[tonumber(i)]
   if e == nil then
+    return
+  end
+  if st.legal and not st.legal[e.guid] then
+    broadcastToColor(e.name .. " isn't a legal choice: choose " .. tostring(st.hint or "another card") .. ".", color, WARN)
     return
   end
   local picked = 0
@@ -559,6 +620,14 @@ function ui_discardConfirm(player, color)
   end
   if #chosen ~= st.need then
     broadcastToColor("Pick exactly " .. st.need .. " card" .. (st.need == 1 and "" or "s") .. " first.", color, WARN)
+    return
+  end
+  if st.owner then
+    for _, card in ipairs(chosen) do
+      card.highlightOff()
+      st.discardOne(card)
+    end
+    finishDiscard(color)
     return
   end
   local s = TableSetup.seat(color)

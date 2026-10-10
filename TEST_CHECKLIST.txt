@@ -1,5 +1,5 @@
-MTG TABLE - SOLO TEST CHECKLIST (v1.41)
-Chat should say: MTG > Scripts loaded: version 1.41 (Doubling Season and other counter modifiers; asks before life, draw and damage replacement effects)
+MTG TABLE - SOLO TEST CHECKLIST (v1.43)
+Chat should say: MTG > Scripts loaded: version 1.43 (Oracle-checked Sephiroth deck: Consuming Corruption, Sephiroth sacrifice-draw and 4th-resolve transform, Takenuma order)
 
 HOW: load a deck, solo, drag cards from hand to the battlefield (or cast from hand), then watch chat + the ask popups.
 Mark each: OK / WRONG (write what happened).
@@ -83,6 +83,28 @@ Illusionist's Bracers, Lithoform Engine, Isochron Scepter, Mystic Forge, Chrome 
 [ ] Revealed card (Worldly Tutor, He-Man): PUT ON TOP button disappears once the card is cast or moved.
 [ ] Spirit Guides: hand menu "Exile for {X} mana" gives mana.
 [ ] Planeswalkers: loyalty buttons show the turn they land.
+
+== SEPHIROTH DECK (v1.43)
+[ ] Dark Confidant upkeep: top card goes to hand, chat names it, you lose its mana value.
+[ ] Castle Locthwain ability: draws, then loses life equal to cards in hand.
+[ ] Dark Ritual: three B on the mana chips. Ugin, Eye of the Storms 0: three C.
+[ ] Reanimate / Virtue of Persistence: asks which graveyard, pick a creature, it enters under your control (Reanimate also loses life = its mana value).
+[ ] Thoughtseize / Inquisition / Duress: you see their hand, only legal cards can be picked, the card goes to THEIR graveyard.
+[ ] Invoke Despair: opponent sacrifices a creature, enchantment, planeswalker, or loses 2 and you draw for each they can't.
+[ ] Accursed Marauder: each player picks a nontoken creature. Sheoldred's Edict: nontoken / token / planeswalker modes.
+[ ] Black Market Connections and Rankle: YES/NO per mode, all chosen modes happen. Insatiable Avarice (Spree) the same.
+[ ] Palantir of Orthanc end step: counter, scry 2, opponent picks draw or mill.
+[ ] The Soul Stone: nothing at upkeep until you activate the Harness ability, then it reanimates each upkeep.
+[ ] Lolth: her -8 emblem text does NOT trigger anything by itself. Hive of the Eye Tyrant: no attack trigger while it is a land.
+[ ] Case of the Stashed Skeleton: makes the Skeleton, chat tells you to suspect it yourself.
+[ ] Rat King / Elegy Acolyte end step: asks "did a permanent leave the battlefield?" then makes the token.
+[ ] Death-Priest of Myrkul: your Skeletons, Vampires and Zombies get +1/+1.
+[ ] Consuming Corruption: you gain life = Swamps you control (dual lands with the Swamp type count); chat reminds you to deal that damage by hand.
+[ ] Sephiroth enters/attacks: asks to sacrifice another creature (NO skips), draws 1. Back face: sacrifice any number, press DONE, draws that many.
+[ ] Sephiroth drain: each creature death drains 1; the 4th resolution in one turn transforms him. Chat counts "resolved N time(s)".
+[ ] Takenuma channel: mills 3 first, then you pick the creature or planeswalker to return.
+
+BY HAND in the Sephiroth deck: Meathook Massacre and Toxic Deluge -X/-X, Consuming Corruption damage (life is automatic), Agadeem's Awakening, Hive of the Eye Tyrant becoming a creature, Spymaster's Vault connive, Umbral Collar Zealot sacrifice, Forsaken Miner crime, Eyetwitch learn, Lord Skitter exile, Sothera end-step sacrifice and return, Sephiroth's Super Nova emblem, Takenuma channel counts, Lolth emblem.
 
 BY HAND in the Zoo (table will tell you, not do it): Esper Sentinel draw/tax, Cavern-Hoard Dragon Treasures, Chrome Mox / Mox Diamond, Dualcaster Mage copy, Ragavan, Sanctifier en-Vec, Shatterskull Smashing, Silence, Survival of the Fittest, Wheel of Misfortune, Sanctum Prelate, Conspiracy Theorist, Flamescroll Celebrant ping, City of Brass / Ancient Tomb / Mana Confluence damage, Gaea's Cradle, Utopia Sprawl, Mana Vault, LED, plus the stax pieces (Deafening Silence, Drannith, Dryad Militant, Samurai, Grand Abolisher: nothing enforces them).
 

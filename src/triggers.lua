@@ -116,7 +116,7 @@ local function normalize(text, name)
   if comma then
     swap(name:sub(1, comma - 1))
   end
-  for _, w in ipairs({ "creature", "permanent", "artifact", "enchantment", "land", "planeswalker", "card", "token", "vehicle" }) do
+  for _, w in ipairs({ "creature", "permanent", "artifact", "enchantment", "land", "planeswalker", "card", "token", "vehicle", "case", "class", "saga", "aura", "equipment" }) do
     t = t:gsub("this " .. w, "~")
   end
   t = t:gsub("enters the battlefield", "enters")
@@ -504,6 +504,25 @@ local function stripReminder(s)
 end
 Triggers.stripReminder = stripReminder
 
+-- The Soul Stone's infinity ability only counts once it has been harnessed (effects.lua sets the flag).
+local function visibleTo(obj, list)
+  if not list.hasHarness then
+    return list
+  end
+  local on = false
+  pcall(function() on = (GameState.data.harnessed or {})[obj.getGUID()] == true end)
+  if on then
+    return list
+  end
+  local out = {}
+  for _, e in ipairs(list) do
+    if not e.harness then
+      table.insert(out, e)
+    end
+  end
+  return out
+end
+
 local function abilitiesOf(obj)
   local d = cardData(obj)
   if d == nil or type(d.oracle) ~= "string" or d.oracle == "" then
@@ -511,9 +530,10 @@ local function abilitiesOf(obj)
   end
   local key = obj.getGUID() .. "|" .. tostring(d.name)
   if cache[key] then
-    return cache[key]
+    return visibleTo(obj, cache[key])
   end
   local list = {}
+  list.hasHarness = false
   -- "Choose one —" modes ("• ...") belong to the line before them.
   local paras = {}
   for _, raw in ipairs(lines(d.oracle)) do
@@ -526,18 +546,35 @@ local function abilitiesOf(obj)
   end
   for _, raw in ipairs(paras) do
     local para = stripReminder(raw)
-    if para ~= "" then
+    -- Loyalty abilities ("-8: You get an emblem with 'Whenever...'") and activated abilities
+    -- ("{3}{B}: ... 'Whenever this creature attacks...'") are not triggers of this card.
+    local isActivated = false
+    do
+      local lowp = para:lower()
+      local colon = para:find(":", 1, true)
+      if colon then
+        local w = lowp:find("whenever ", 1, true) or lowp:find("when ", 1, true) or lowp:find("at the beginning", 1, true)
+        isActivated = (w == nil) or colon < w
+      end
+    end
+    if para ~= "" and not isActivated then
       local norm = normalize(para, d.name)
+      -- Quoted rules text belongs to a token or emblem, not to this card.
+      norm = norm:gsub('"[^"]*"', "")
+      local harness = para:sub(1, 3) == "\226\136\158"   -- the infinity sign: active once harnessed
+      if harness then
+        list.hasHarness = true
+      end
       local trig = parseTrigger(norm)
       if norm:find("whenever you play a land or cast a spell", 1, true) then
         table.insert(list, { trig = { kind = "enters", subject = "land", subjects = { "land" }, mine = true, playedOnly = true }, text = para })
         trig = { kind = "cast", who = "you" }
       end
       if trig then
-        table.insert(list, { trig = trig, text = para })
+        table.insert(list, { trig = trig, text = para, harness = harness })
       end
       for _, ct in ipairs(parseCombat(norm)) do
-        table.insert(list, { trig = ct, text = para })
+        table.insert(list, { trig = ct, text = para, harness = harness })
       end
     end
   end
@@ -579,7 +616,7 @@ local function abilitiesOf(obj)
     end
   end
   cache[key] = list
-  return list
+  return visibleTo(obj, list)
 end
 
 -- Paragraphs that read like triggered abilities ("Whenever...", "When...",

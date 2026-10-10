@@ -49,6 +49,17 @@ local MANUAL = { " if ", " unless ", " for each ", " equal to ", " instead", " x
 
 -- The effect part of a trigger: what follows "Whenever / When / At ..., ".
 local function effectPart(t)
+  -- An ability word ("Disappear — ", "Void — ", "Landfall — ") is a label, not rules.
+  do
+    local a, b = t:find(" — ", 1, true)
+    if a and a <= 24 and not t:sub(1, a):find("[%.:,]") then
+      local rest = t:sub(b + 1)
+      local f2 = rest:sub(1, 8)
+      if f2:find("^whenever") or f2:find("^when ") or f2:find("^at ") then
+        t = rest
+      end
+    end
+  end
   local first = t:sub(1, 8)
   if first:find("^whenever") or first:find("^when ") or first:find("^at ") then
     local comma = t:find(", ", 1, true)
@@ -99,7 +110,7 @@ function Effects.parse(text, sourceName)
       swap(sourceName:sub(1, comma - 1))
     end
   end
-  for _, w in ipairs({ "creature", "land", "enchantment", "artifact", "permanent", "planeswalker" }) do
+  for _, w in ipairs({ "creature", "land", "enchantment", "artifact", "permanent", "planeswalker", "case", "class", "saga", "aura", "equipment" }) do
     t = t:gsub("this " .. w, "~")
   end
   -- Several paragraphs (a spell: "This spell can't be countered." then
@@ -146,6 +157,18 @@ function Effects.parse(text, sourceName)
       t = t:sub(1, a - 1) .. t:sub(a + #lm)
     end
   end
+  -- Sephiroth: "If this is the fourth time this ability has resolved this turn, transform ~."
+  local nthTransform
+  do
+    local p1, p2, ord = t:find("if this is the (%a+) time this ability has resolved this turn, transform ~%.?")
+    if p1 then
+      local ORD = { second = 2, third = 3, fourth = 4, fifth = 5 }
+      if ORD[ord] then
+        nthTransform = ORD[ord]
+        t = t:sub(1, p1 - 1) .. t:sub(p2 + 1)
+      end
+    end
+  end
   -- Aetherflux Reservoir: "You gain 1 life for each spell you've cast this
   -- turn." The table counts the spells itself.
   local perSpell = false
@@ -181,6 +204,26 @@ function Effects.parse(text, sourceName)
       counted = { kind = "token", word = w2, scope = who:find("opponent", 1, true) and "opponents" or "mine" }
       t = t:sub(1, c - 1) .. t:sub(d + 1)
       t = t:gsub("create x ", "create 1 ", 1)
+    end
+  end
+  -- Consuming Corruption: "deals X damage to target creature or planeswalker and you gain X life, where X is
+  -- the number of Swamps you control." The table counts X and gains the life; the damage is by hand.
+  do
+    local w = t:match("deals x damage to target creature or planeswalker and you gain x life, where x is the number of (%a+) you control")
+    if w then
+      return { optional = false, conds = {},
+        notes = { "deal X damage to the target creature or planeswalker by hand (X = your " .. w .. ", counted in chat)" },
+        actions = { { what = "gain", who = "you", n = 1, countWord = w, countScope = "mine" } } }
+    end
+  end
+  -- Sephiroth: "you may sacrifice another creature. If you do, draw a card." / "you may sacrifice any
+  -- number of other creatures. If you do, draw that many cards."
+  do
+    if t:find("you may sacrifice another creature. if you do, draw a card", 1, true) then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "sacDraw", who = "you", n = 1, max = 1 } } }
+    end
+    if t:find("you may sacrifice any number of other creatures. if you do, draw that many cards", 1, true) then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "sacDraw", who = "you", n = 1, max = 99 } } }
     end
   end
   -- Chaos Warp: the owner shuffles the permanent into their library, reveals
@@ -344,16 +387,86 @@ function Effects.parse(text, sourceName)
       end
     end
   end
+  -- The Soul Stone: "Harness The Soul Stone." turns its infinity ability on.
+  if t:find(" harness ", 1, true) then
+    return { optional = false, notes = {}, conds = {}, actions = { { what = "harness", who = "you", n = 1 } } }
+  end
+  -- Dark Confidant: reveal the top card, put it into your hand, lose life equal to its mana value.
+  if t:find("reveal the top card of your library and put that card into your hand", 1, true)
+      and t:find("you lose life equal to its mana value", 1, true) then
+    return { optional = false, notes = {}, conds = {}, actions = { { what = "bob", who = "you", n = 1 } } }
+  end
+  -- Castle Locthwain: draw a card, then lose life equal to the cards in your hand.
+  if t:find("draw a card, then you lose life equal to the number of cards in your hand", 1, true) then
+    return { optional = false, notes = {}, conds = {}, actions = { { what = "drawHandLife", who = "you", n = 1 } } }
+  end
+  -- "Add {B}{B}{B}." (Dark Ritual, Ugin's 0): the mana goes on your mana chips.
+  do
+    local syms = t:match("^%s*add ([{}%a]+)%s*%.?%s*$")
+    if syms and syms:find("{", 1, true) and syms:gsub("{%a}", "") == "" then
+      local colors, any = {}, false
+      for k in syms:gmatch("{(%a)}") do
+        local K = k:upper()
+        if K == "W" or K == "U" or K == "B" or K == "R" or K == "G" or K == "C" then
+          colors[K] = (colors[K] or 0) + 1
+          any = true
+        end
+      end
+      if any then
+        return { optional = false, notes = {}, conds = {}, actions = { { what = "addMana", who = "you", n = 1, colors = colors } } }
+      end
+    end
+  end
+  -- Reanimate / Virtue of Persistence: a creature card from ANY graveyard onto the battlefield under your control.
+  if t:find("put target creature card from a graveyard onto the battlefield under your control", 1, true) then
+    return { optional = false, notes = {}, conds = {},
+      actions = { { what = "reanimate", who = "you", n = 1,
+        loseMV = t:find("you lose life equal to its mana value", 1, true) ~= nil } } }
+  end
+  -- Palantir of Orthanc: counter, scry 2, then the opponent chooses.
+  if t:find("influence counter", 1, true) and t:find("target opponent may have you draw a card", 1, true) then
+    return { optional = false, notes = {}, conds = {}, actions = { { what = "palantir", who = "you", n = 1 } } }
+  end
+  -- Thoughtseize, Inquisition of Kozilek, Duress: look at a hand, choose a card, they discard it.
+  if t:find("reveals their hand", 1, true) and t:find("you choose a", 1, true) and t:find("discards that card", 1, true) then
+    local who = (t:find("target opponent reveals their hand", 1, true) and "targetOpponent")
+      or (t:find("target player reveals their hand", 1, true) and "target")
+      or (t:find("that player reveals their hand", 1, true) and "that") or nil
+    if who then
+      local at = t:find("you choose a", 1, true)
+      local seg = t:sub(at, at + 100)
+      local actions = {}
+      local lw = t:match("you lose (%w+) life")
+      if lw and num(lw) then
+        table.insert(actions, { what = "lose", who = "you", n = num(lw) })
+      end
+      table.insert(actions, { what = "handPick", who = who, n = 1, nonland = seg:find("nonland", 1, true) ~= nil,
+        noncreature = seg:find("noncreature", 1, true) ~= nil, mvMax = tonumber(seg:match("mana value (%d+) or less") or "") })
+      return { optional = false, notes = {}, conds = {}, actions = actions }
+    end
+  end
+  -- Invoke Despair: a creature, then an enchantment, then a planeswalker; each they can't give costs 2 life and draws you a card.
+  if t:find("sacrifices a creature of their choice", 1, true) and t:find("then repeat this process", 1, true) then
+    return { optional = false, notes = {}, conds = {}, actions = { { what = "despair", who = "targetOpponent", n = 1 } } }
+  end
   -- Edicts: "Each opponent sacrifices three creatures." / "Target player sacrifices a creature."
+  -- Also "a nontoken creature" and "a creature token".
   do
     for _, w in ipairs({ "each opponent", "each player", "target opponent", "target player", "that player", "defending player" }) do
-      local c, ty = t:match(w .. " sacrifices (%a+) (%a+)")
-      if c and (num(c) or c == "a" or c == "an") then
+      local c, ty, ty2 = t:match(w .. " sacrifices (%a+) (%a+) ?(%a*)")
+      local tokenMode
+      if c and (ty == "nontoken" or ty == "token") then
+        tokenMode = ty
+        ty = ty2
+      elseif c and ty2 == "token" then
+        tokenMode = "token"
+      end
+      if c and ty and (num(c) or c == "a" or c == "an") then
         ty = ty:gsub("s$", "")
         local TY = { creature = true, artifact = true, enchantment = true, land = true, permanent = true, planeswalker = true }
         if TY[ty] then
           return { optional = false, notes = {}, conds = {},
-            actions = { { what = "edict", who = "you", n = num(c) or 1, scope = w, ty = ty } } }
+            actions = { { what = "edict", who = "you", n = num(c) or 1, scope = w, ty = ty, tokenMode = tokenMode } } }
         end
       end
     end
@@ -396,6 +509,11 @@ function Effects.parse(text, sourceName)
   -- or more lands, untap that land.") is left to the players; the plain
   -- sentences around it still happen.
   local kept, notes, firstWhy = {}, {}, nil
+  -- "...create a 2/1 Skeleton token and suspect it": the token is made; suspecting is by hand.
+  if t:find(" and suspect it", 1, true) or t:find(", then suspect it", 1, true) then
+    t = t:gsub(" and suspect it", ""):gsub(", then suspect it", "")
+    table.insert(notes, "suspect the token yourself (it gets menace and can't block)")
+  end
   -- "If <condition>, <effect>." sentences: asked as YES / NO when it
   -- resolves ("Is this true: you control no creatures with decayed?").
   local conds = {}
@@ -523,6 +641,8 @@ function Effects.parse(text, sourceName)
     actions[#actions].perSpell = true
   end
   w = t:match("you lose (%w+) life")
+  -- "Lose 2 life." (a mode, or an ability worded without "you").
+  w = w or t:match("^%s*lose (%w+) life") or t:match("%. lose (%w+) life") or t:match("— lose (%w+) life")
   add("lose", "you", num(w))
   -- Mana Vault / Black Vise style: "it deals 1 damage to you".
   do
@@ -548,7 +668,18 @@ function Effects.parse(text, sourceName)
       table.insert(actions, { what = "toLibrary", who = "you", n = ORD[ord] })
     end
   end
-  w = t:match("each player draws (%w+) cards?")
+  -- "Target player draws three cards and loses 3 life." (Insatiable Avarice)
+  do
+    local tw = t:match("target player draws (%w+) cards?")
+    if tw and num(tw) then
+      add("draw", "target", num(tw))
+      local lw = t:match("target player draws %w+ cards? and loses (%w+) life")
+      if lw and num(lw) then
+        add("lose", "target", num(lw))
+      end
+    end
+  end
+  w = t:match("each player draws (%w+) cards?") or t:match("each player loses %w+ life and draws (%w+) cards?")
   if w then
     add("draw", "all", num(w))
   else
@@ -1110,6 +1241,22 @@ function Effects.parse(text, sourceName)
       optional = false
     end
   end
+  if nthTransform and #actions > 0 then
+    table.insert(actions, { what = "nthTransform", who = "you", n = nthTransform })
+  end
+  -- Takenuma: "Mill three cards, then return a creature ... card from your graveyard": mill first.
+  do
+    local mi, gi
+    for i, ac in ipairs(actions) do
+      if ac.what == "mill" and not mi then mi = i end
+      if ac.what == "graveReturn" and not gi then gi = i end
+    end
+    local tm = t:find("mill ", 1, true)
+    local tr = t:find("return ", 1, true)
+    if mi and gi and gi < mi and tm and tr and tm < tr then
+      actions[mi], actions[gi] = actions[gi], actions[mi]
+    end
+  end
   return { optional = optional, actions = actions, notes = notes, conds = conds }
 end
 
@@ -1139,6 +1286,22 @@ local function describe(a, target, controller)
     return "a creature is exiled; the Shards become copies of it until the next end step"
   elseif a.what == "edict" then
     return tostring(a.scope) .. " sacrifices " .. a.n .. " " .. tostring(a.ty) .. (a.n == 1 and "" or "s")
+  elseif a.what == "despair" then
+    return "target opponent sacrifices a creature, an enchantment and a planeswalker (or loses 2 life and you draw for each they can't)"
+  elseif a.what == "harness" then
+    return "it becomes harnessed (its infinity ability turns on)"
+  elseif a.what == "bob" then
+    return "reveal the top card, put it into your hand and lose life equal to its mana value"
+  elseif a.what == "drawHandLife" then
+    return "draw a card, then lose life equal to the cards in your hand"
+  elseif a.what == "addMana" then
+    return "add mana to the mana chips"
+  elseif a.what == "reanimate" then
+    return "a creature card from any graveyard comes back under your control" .. (a.loseMV and ", you lose life equal to its mana value" or "")
+  elseif a.what == "palantir" then
+    return "influence counter, scry 2, then the opponent picks: you draw, or you mill and they lose life"
+  elseif a.what == "handPick" then
+    return "look at the hand and choose a card to discard"
   elseif a.what == "sylvan" then
     return "you may draw two extra cards, then pay 4 life or put a card back on top for each of two cards"
   elseif a.what == "jeska" then
@@ -1182,6 +1345,9 @@ local function describe(a, target, controller)
     return "goads a target creature"
   elseif a.what == "bounceSelf" then
     return "it returns to its owner's hand"
+  elseif a.what == "sacDraw" then
+    return a.max == 1 and "you may sacrifice another creature; if you do, draw a card"
+      or "you may sacrifice any number of other creatures; draw that many cards"
   elseif a.what == "chaosWarp" then
     return "a target permanent is shuffled into its owner's library, then the top card may enter"
   elseif a.what == "fabricate" then
@@ -1226,6 +1392,8 @@ local function describe(a, target, controller)
     return who .. (you and " look" or " looks") .. " at the top " .. a.n .. " cards"
   elseif a.what == "transform" then
     return "it transforms"
+  elseif a.what == "nthTransform" then
+    return "it transforms if this is the " .. a.n .. "th time this turn (the table counts)"
   elseif a.what == "manifest" then
     return who .. " " .. a.kind .. "s the top card"
   elseif a.what == "win" then
@@ -1254,6 +1422,9 @@ local function describe(a, target, controller)
     end
     if a.perSpell then
       return who .. (you and " gain " or " gains ") .. a.n .. " life for each spell cast this turn"
+    end
+    if a.countWord then
+      return who .. (you and " gain " or " gains ") .. "life equal to your " .. a.countWord .. " count"
     end
     return who .. (you and " gain " or " gains ") .. a.n .. " life"
   elseif a.what == "lose" then
@@ -1337,6 +1508,9 @@ local function apply(it, plan, target)
       if seat and GameState.player(seat) then
         if a.what == "gain" then
           local gain = a.n
+          if a.countWord then
+            gain = amountOf(a, controller, it.name)
+          end
           if a.thatMuch then
             gain = it.amount or 0
           end
@@ -1532,6 +1706,8 @@ local function apply(it, plan, target)
           Effects.pickRemove(seat, a, it.name, it.source)
         elseif a.what == "sacrifice" then
           Effects.pickSacrifice(seat, a, it)
+        elseif a.what == "sacDraw" then
+          Effects.sacDraw(seat, a, it)
         elseif a.what == "poison" then
           Trackers.changePoison(seat, a.fromTrigger and (it.amount or 0) or a.n, it.name)
         elseif a.what == "revealUntil" then
@@ -1555,6 +1731,35 @@ local function apply(it, plan, target)
           Effects.nikoSwap(seat, a, it)
         elseif a.what == "edict" then
           Effects.edict(seat, a, it)
+        elseif a.what == "despair" then
+          Effects.despair(controller, seat, it)
+        elseif a.what == "harness" then
+          local src = it.source and getObjectFromGUID(it.source)
+          if src and not src.isDestroyed() then
+            GameState.data.harnessed = GameState.data.harnessed or {}
+            GameState.data.harnessed[src.getGUID()] = true
+            printToAll("MTG > " .. it.name .. " is harnessed: its infinity ability is on.", GOOD)
+          else
+            printToAll("MTG > " .. it.name .. " isn't on the table any more.", INFO)
+          end
+        elseif a.what == "bob" then
+          Effects.bob(seat, it)
+        elseif a.what == "drawHandLife" then
+          Effects.drawHandLife(seat, it)
+        elseif a.what == "addMana" then
+          local parts = {}
+          for key, n in pairs(a.colors) do
+            ManaChips.add(seat, key, n)
+            table.insert(parts, n .. " " .. key)
+          end
+          table.sort(parts)
+          printToAll("MTG > " .. it.name .. ": " .. seat .. " adds " .. table.concat(parts, ", ") .. " to their mana chips.", GOOD)
+        elseif a.what == "reanimate" then
+          Effects.reanimate(seat, a, it)
+        elseif a.what == "palantir" then
+          Effects.palantir(seat, it)
+        elseif a.what == "handPick" then
+          Effects.handPick(controller, seat, a, it)
         elseif a.what == "arcum" then
           Effects.arcum(seat, it)
         elseif a.what == "jeska" then
@@ -1606,6 +1811,24 @@ local function apply(it, plan, target)
           end
         elseif a.what == "manifest" then
           Faces.manifest(seat, a.kind, it.name)
+        elseif a.what == "nthTransform" then
+          local turn = (GameState.data.turn or {}).number or 0
+          local c = GameState.data.nthCount
+          if c == nil or c.turn ~= turn then
+            c = { turn = turn }
+            GameState.data.nthCount = c
+          end
+          local key = tostring(it.source or it.name)
+          c[key] = (c[key] or 0) + 1
+          printToAll("MTG > " .. it.name .. ": resolved " .. c[key] .. " time(s) this turn.", INFO)
+          if c[key] == a.n then
+            local src = it.source and getObjectFromGUID(it.source)
+            if src and not src.isDestroyed() and Faces.isDoubleFaced(src) then
+              Faces.flip(src, it.name)
+            else
+              broadcastToColor(it.name .. ": that was time " .. a.n .. " - transform it yourself (right-click > Transform / other face).", seat, INFO)
+            end
+          end
         elseif a.what == "transform" then
           local src = it.source and getObjectFromGUID(it.source)
           if src and not src.isDestroyed() and Faces.isDoubleFaced(src) then
@@ -2113,6 +2336,21 @@ function Effects.controlsWord(seat, word, name)
   return false
 end
 
+-- All the players still in the game, starting with `seat` (for "each player" effects).
+local function orderFrom(seat)
+  local all = players()
+  local out, start = {}, 1
+  for i, c in ipairs(all) do
+    if c == seat then
+      start = i
+    end
+  end
+  for k = 0, #all - 1 do
+    table.insert(out, all[((start - 1 + k) % #all) + 1])
+  end
+  return out
+end
+
 -- "Each opponent sacrifices N creatures": each victim picks their own.
 function Effects.edict(seat, a, it)
   local victims = {}
@@ -2134,7 +2372,9 @@ function Effects.edict(seat, a, it)
         for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
           if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) and Effects.fieldSeat(obj) == v then
             local ty = Effects.cardTypes(obj)
-            if a.ty == "permanent" or ty[a.ty] == true then
+            local isTok = obj.hasTag("Token")
+            if (a.ty == "permanent" or ty[a.ty] == true) and not (a.tokenMode == "token" and not isTok)
+                and not (a.tokenMode == "nontoken" and isTok) then
               n = n + 1
             end
           end
@@ -2167,6 +2407,13 @@ function Effects.edict(seat, a, it)
               return false
             end
             local ty = Effects.cardTypes(obj)
+            local isTok = obj.hasTag("Token")
+            if a.tokenMode == "token" and not isTok then
+              return false
+            end
+            if a.tokenMode == "nontoken" and isTok then
+              return false
+            end
             return a.ty == "permanent" or ty[a.ty] == true
           end, label = "SACRIFICE", protect = false })
       end
@@ -2195,6 +2442,231 @@ function Effects.edict(seat, a, it)
       run()
     end)
   end
+end
+
+-- Sephiroth: sacrifice other creatures you control (one, or any number), then draw that many cards.
+function Effects.sacDraw(seat, a, it)
+  local done = 0
+  local function step()
+    if done >= a.max then
+      return Effects.sacDrawEnd(seat, done, it)
+    end
+    ask(seat, it.name .. ": sacrifice a creature?",
+      (a.max == 1 and "You may sacrifice another creature to draw a card." or "Sacrifice other creatures, one at a time; you draw that many cards when you press DONE.")
+      .. " Click SACRIFICE on one of yours" .. (done > 0 and (" (" .. done .. " so far)") or "") .. ".",
+      { { label = done > 0 and "DONE" or "NO", value = false } }, function(obj)
+        if obj then
+          printToAll("MTG > " .. seat .. " sacrifices " .. obj.getName() .. " (" .. it.name .. ").", GOOD)
+          Combat.removeCard(obj, "graveyard")
+          done = done + 1
+          step()
+        else
+          Effects.sacDrawEnd(seat, done, it)
+        end
+      end, { filter = function(obj, owner)
+        if owner ~= seat or (it.source and (obj == it.source or obj.getGUID() == it.source)) then
+          return false
+        end
+        return Effects.cardTypes(obj).creature == true
+      end, label = "SACRIFICE", protect = false })
+  end
+  step()
+end
+
+function Effects.sacDrawEnd(seat, n, it)
+  if n > 0 then
+    Actions.draw(seat, n, it.name)
+  else
+    printToAll("MTG > " .. it.name .. ": nothing sacrificed, no cards drawn.", INFO)
+  end
+end
+
+-- Invoke Despair: the opponent sacrifices a creature, then an enchantment, then a planeswalker.
+-- Each one they can't sacrifice: they lose 2 life and the caster draws a card.
+function Effects.despair(caster, victim, it)
+  local types = { "creature", "enchantment", "planeswalker" }
+  local function eligible(ty)
+    local n = 0
+    for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+      if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) and Effects.fieldSeat(obj) == victim
+          and Effects.cardTypes(obj)[ty] == true then
+        n = n + 1
+      end
+    end
+    return n
+  end
+  local function step(i)
+    local ty = types[i]
+    if ty == nil then
+      return
+    end
+    if eligible(ty) == 0 then
+      printToAll("MTG > " .. it.name .. ": " .. victim .. " has no " .. ty .. " to sacrifice: loses 2 life, " .. caster .. " draws a card.", GOOD)
+      Trackers.changeLife(victim, -2, it.name)
+      Actions.draw(caster, 1, it.name)
+      step(i + 1)
+      return
+    end
+    local art = (ty == "enchantment") and "an " or "a "
+    ask(victim, it.name .. ": sacrifice " .. art .. ty, caster .. "'s " .. it.name .. " makes you sacrifice " .. art .. ty .. " (" .. i .. " of 3). Click SACRIFICE on one of yours.",
+      {}, function(obj)
+        if obj then
+          printToAll("MTG > " .. victim .. " sacrifices " .. obj.getName() .. " (" .. it.name .. ").", GOOD)
+          Combat.removeCard(obj, "graveyard")
+        end
+        step(i + 1)
+      end, { filter = function(obj, owner)
+        return owner == victim and Effects.cardTypes(obj)[ty] == true
+      end, label = "SACRIFICE", protect = false })
+  end
+  step(1)
+end
+
+-- Dark Confidant: the top card goes to your hand face up, you lose life equal to its mana value.
+function Effects.bob(seat, it)
+  local lib = Library.find(seat)
+  if lib == nil then
+    printToAll("MTG > " .. it.name .. ": " .. seat .. "'s library is empty.", INFO)
+    return
+  end
+  local s = TableSetup.seat(seat)
+  local hand = Player[seat].getHandTransform()
+  local function got(card)
+    local mv = 0
+    pcall(function() mv = tonumber(JSON.decode(card.getGMNotes()).cmc) or 0 end)
+    broadcastToAll(it.name .. ": " .. seat .. " reveals " .. card.getName() .. " (mana value " .. mv .. ")"
+      .. (mv > 0 and (" and loses " .. mv .. " life.") or "."), { 1, 0.85, 0.3 })
+    if mv > 0 then
+      Trackers.changeLife(seat, -mv, it.name)
+    end
+  end
+  if lib.type == "Deck" then
+    lib.takeObject({ index = 0, position = hand.position, rotation = { 0, s.yaw, 0 }, smooth = true, callback_function = got })
+  else
+    lib.setPositionSmooth(hand.position)
+    got(lib)
+  end
+end
+
+-- Castle Locthwain: draw a card, then lose life equal to the number of cards in your hand.
+function Effects.drawHandLife(seat, it)
+  Library.draw(seat, 1, function(drawn)
+    Wait.time(function()
+      local n = 0
+      for _, o in ipairs(Player[seat].getHandObjects() or {}) do
+        if o.type == "Card" then
+          n = n + 1
+        end
+      end
+      printToAll("MTG > " .. it.name .. ": " .. seat .. " has " .. n .. " card" .. (n == 1 and "" or "s") .. " in hand.", INFO)
+      if n > 0 then
+        Trackers.changeLife(seat, -n, it.name)
+      end
+    end, 1.2)
+  end)
+end
+
+-- Reanimate, Virtue of Persistence: pick a graveyard, then the creature card in it.
+function Effects.reanimate(seat, a, it)
+  local choices = {}
+  for _, c in ipairs(players()) do
+    table.insert(choices, { label = string.upper(c) .. "'S YARD", value = c })
+  end
+  ask(seat, it.name .. ": which graveyard?", "Put a creature card from a graveyard onto the battlefield under your control.", choices, function(yard)
+    LibSearch.open(seat, "creature", it.name .. ": click the creature card in " .. yard .. "'s graveyard to put it onto the battlefield under your control, then CLOSE.",
+      "battlefield", false, { typeOnly = true, zone = "graveyard", yardOf = yard,
+        onTake = a.loseMV and function(card)
+          local mv = 0
+          pcall(function() mv = tonumber(JSON.decode(card.getGMNotes()).cmc) or 0 end)
+          printToAll("MTG > " .. it.name .. ": " .. seat .. " loses " .. mv .. " life (" .. card.getName() .. " has mana value " .. mv .. ").", GOOD)
+          if mv > 0 then
+            Trackers.changeLife(seat, -mv, it.name)
+          end
+        end or nil })
+  end)
+end
+
+-- Palantir of Orthanc: influence counter, scry 2, then a target opponent chooses.
+function Effects.palantir(seat, it)
+  local src = it.source and getObjectFromGUID(it.source)
+  local counters = 0
+  if src and not src.isDestroyed() then
+    Counters.change(src, "other", 1, seat)
+    counters = Counters.get(src).other or 0
+  else
+    printToAll("MTG > " .. it.name .. " isn't on the table: count its influence counters by hand.", INFO)
+  end
+  Actions.openScry(seat)
+  Actions.openScry(seat)
+  local function opponentChooses(opp)
+    ask(opp, it.name .. " (" .. seat .. ")", seat .. " has " .. counters .. " influence counter" .. (counters == 1 and "" or "s")
+      .. ". Let " .. seat .. " draw a card, or they mill " .. counters .. " and you lose life equal to the total mana value of what they mill?",
+      { { label = "LET THEM DRAW", value = true }, { label = "MILL " .. counters .. ", I LOSE LIFE", value = false } }, function(draw)
+        if draw then
+          printToAll("MTG > " .. opp .. " lets " .. seat .. " draw a card (" .. it.name .. ").", INFO)
+          Actions.draw(seat, 1, it.name)
+          return
+        end
+        local total = 0
+        local lib = Library.find(seat)
+        if lib and lib.type == "Deck" then
+          local entries = lib.getData().ContainedObjects or {}
+          for i = 1, math.min(counters, #entries) do
+            local mv = 0
+            pcall(function() mv = tonumber(JSON.decode(entries[i].GMNotes).cmc) or 0 end)
+            total = total + mv
+          end
+        end
+        printToAll("MTG > " .. seat .. " mills " .. counters .. " (" .. it.name .. "): " .. opp .. " loses " .. total .. " life.", GOOD)
+        Actions.mill(seat, counters)
+        if total > 0 then
+          Trackers.changeLife(opp, -total, it.name)
+        end
+      end)
+  end
+  local opps = {}
+  for _, c in ipairs(players()) do
+    if c ~= seat then
+      table.insert(opps, c)
+    end
+  end
+  if #opps == 0 then
+    return
+  elseif #opps == 1 then
+    opponentChooses(opps[1])
+  else
+    local choices = {}
+    for _, c in ipairs(opps) do
+      table.insert(choices, { label = string.upper(c), value = c })
+    end
+    ask(seat, it.name .. ": target opponent", "Choose the opponent who decides.", choices, opponentChooses)
+  end
+end
+
+-- Thoughtseize, Inquisition of Kozilek, Duress: `target` shows their hand to `caster`, who picks the card.
+function Effects.handPick(caster, target, a, it)
+  local function pred(d)
+    local types = {}
+    for _, ty in ipairs(type(d.types) == "table" and d.types or {}) do
+      types[tostring(ty):lower()] = true
+    end
+    local tl = tostring(d.typeLine or ""):lower()
+    local isLand = types.land or tl:find("land", 1, true) ~= nil
+    local isCreature = types.creature or tl:find("creature", 1, true) ~= nil
+    if a.nonland and isLand then
+      return false
+    end
+    if a.noncreature and isCreature then
+      return false
+    end
+    if a.mvMax and (tonumber(d.cmc) or 0) > a.mvMax then
+      return false
+    end
+    return true
+  end
+  local hint = (a.noncreature and "a noncreature, " or "a ") .. (a.nonland and "nonland " or "") .. "card"
+    .. (a.mvMax and (" with mana value " .. a.mvMax .. " or less") or "")
+  Actions.chooseFromHand(caster, target, it.name, pred, hint, nil)
 end
 
 -- Windfall: everyone discards their hand, then draws as many cards as the most anyone discarded.
@@ -2838,8 +3310,20 @@ function Effects.resolve(it)
     end
   end
   local bullet = raw:find("•", 1, true)
-  if bullet and not it.modePicked then
+  -- Spree (Insatiable Avarice): "+ {2}{B} — Target player draws three cards..." lines are the modes.
+  local spree = raw:lower():find("spree", 1, true) and raw:find("\n+ ", 1, true)
+  if (bullet or spree) and not it.modePicked then
     local modes = {}
+    if spree then
+      for line in raw:gmatch("[^\n]+") do
+        if line:sub(1, 2) == "+ " then
+          local body = line:match("— (.*)$") or line:sub(3)
+          local cost = line:match("^%+ ([^—]*)—") or ""
+          cost = cost:gsub("%s+$", "")
+          table.insert(modes, (body:gsub("%s+$", "")) .. (cost ~= "" and (" [pay " .. cost .. "]") or ""))
+        end
+      end
+    else
     local rest = raw:sub(bullet)
     local pos = 1
     while true do
@@ -2854,6 +3338,41 @@ function Effects.resolve(it)
       if not b then
         break
       end
+    end
+    end
+    -- "Choose one or more" / "any number" / Spree: a YES / NO for each mode, then all the chosen ones resolve.
+    local lowRaw = raw:lower()
+    if #modes > 0 and (spree or lowRaw:find("choose one or more", 1, true) or lowRaw:find("choose any number", 1, true)) then
+      local chosen = {}
+      local function step(i)
+        if i > #modes then
+          if #chosen == 0 then
+            printToAll("MTG > " .. it.controller .. " chose no mode (" .. it.name .. ").", INFO)
+            return
+          end
+          printToAll("MTG > " .. it.controller .. " chose: " .. table.concat(chosen, " + "), INFO)
+          broadcastToAll(it.name .. " (" .. it.controller .. ") chose " .. #chosen .. " mode" .. (#chosen == 1 and "" or "s") .. ".", { 1, 0.85, 0.3 })
+          for _, m in ipairs(chosen) do
+            local copy = {}
+            for k, v in pairs(it) do
+              copy[k] = v
+            end
+            copy.text = (m:gsub(" %[pay [^%]]*%]$", ""))
+            copy.modePicked = true
+            Effects.resolve(copy)
+          end
+          return
+        end
+        ask(it.controller, it.name .. ": mode " .. i .. " of " .. #modes, modes[i],
+          { { label = "USE IT", value = true }, { label = "SKIP IT", value = false } }, function(yes)
+            if yes then
+              table.insert(chosen, modes[i])
+            end
+            step(i + 1)
+          end)
+      end
+      step(1)
+      return
     end
     if #modes > 0 then
       local lines, choices = {}, {}
@@ -3377,6 +3896,13 @@ function Effects.countPermanents(seat, word, scope)
       if owner and ((scope == "mine" and owner == seat) or (scope == "opponents" and owner ~= seat) or scope == "all") then
         local name = tostring(obj.getName()):lower()
         local hit = cardTypes(obj)[word] or name:find(word, 1, true) ~= nil
+        if not hit then
+          pcall(function()
+            local d = JSON.decode(obj.getGMNotes())
+            local tl = " " .. tostring(d.typeLine or ""):lower():gsub("[^%a]", " ") .. " "
+            hit = tl:find(" " .. word .. " ", 1, true) ~= nil
+          end)
+        end
         if not hit and word == "artifact" then
           hit = ARTIFACT_TOKENS[name] or ARTIFACT_TOKENS[name:match("^(%a+) token") or ""] or false
           if not hit then

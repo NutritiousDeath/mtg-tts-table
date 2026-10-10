@@ -29,6 +29,7 @@ local searched = {}  -- [color] = true once the panel has looked at the library
 local dest = {}      -- [color] = { where = "hand"|"battlefield", tapped = bool }
 local filters = {}   -- [color] = { typeOnly, mvMin, mvMax, zone } from an effect, or nil
 local zoneOf = {}    -- [color] = "library" (default) or "graveyard" (Eternal Witness...)
+local yardOf = {}    -- [color] = whose graveyard is searched (Reanimate: any); nil = their own
 -- "Look at the top N cards": { left = cards still in that top group, picks =
 -- how many may still be taken }. Not cleared by typing a new search.
 local look = {}
@@ -38,7 +39,7 @@ local limit = {}
 -- The pile being searched: the library, or the graveyard.
 local function pileFor(color)
   if zoneOf[color] == "graveyard" then
-    return Library.pileIn(color, "graveyard")
+    return Library.pileIn(yardOf[color] or color, "graveyard")
   end
   return Library.find(color)
 end
@@ -264,6 +265,9 @@ function LibSearch.open(color, preset, note, where, tapped, opts)
   LibSearch.onCloseCb = LibSearch.onCloseCb or {}
   LibSearch.onCloseCb[color] = opts and opts.onClose or nil
   zoneOf[color] = opts and opts.zone or "library"
+  yardOf[color] = opts and opts.yardOf or nil
+  LibSearch.onTakeCb = LibSearch.onTakeCb or {}
+  LibSearch.onTakeCb[color] = opts and opts.onTake or nil
   look[color] = (opts and opts.topN) and { left = opts.topN, picks = opts.picks or 1 } or nil
   limit[color] = (opts and opts.limit) and { left = opts.limit } or nil
   UI.setValue("lsTitle_" .. color, look[color] and ("TOP " .. opts.topN .. " CARDS")
@@ -352,6 +356,10 @@ local function take(color, slot, toBattlefield, tapped, toTop)
       local yaw = tapped and (s.yaw + 90) % 360 or s.yaw
       local card = lib.takeObject({ index = index, position = pos, rotation = { 0, yaw, 0 }, smooth = true })
       name = card and card.getName() or name
+      local onTake = LibSearch.onTakeCb and LibSearch.onTakeCb[color]
+      if card and onTake then
+        pcall(onTake, card)
+      end
       -- It entered the battlefield: let triggers see it (landfall, Amulet...).
       if card then
         Wait.time(function()
@@ -364,6 +372,10 @@ local function take(color, slot, toBattlefield, tapped, toTop)
       lib.setPositionSmooth(pos)
       lib.setRotationSmooth({ 0, s.yaw, 0 })
       name = lib.getName()
+      local onTake = LibSearch.onTakeCb and LibSearch.onTakeCb[color]
+      if onTake then
+        pcall(onTake, lib)
+      end
     end
     printToAll("MTG > " .. color .. " put " .. name .. " onto the battlefield" .. (tapped and " tapped" or "")
       .. " from their " .. fromWhere .. ".", INFO)
