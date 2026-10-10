@@ -348,7 +348,7 @@ function Faces.turnUp(obj, byColor, flipIt)
   printToAll("MTG > " .. tostring(byColor or seatOf(obj) or "?") .. " turned " .. name .. " face up"
     .. (cost and (" (" .. kind .. " " .. cost .. ")") or "") .. ".", GOOD)
   if kind == "megamorph" then
-    Counters.change(obj, "plus", 1, byColor)
+    Counters.place(obj, "plus", 1, byColor)
   end
   local seat = seatOf(obj) or byColor
   local oracle = tostring(real.oracle or "")

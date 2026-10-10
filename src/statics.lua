@@ -165,6 +165,120 @@ function Statics.tokenMultiplier(seat)
   return m
 end
 
+-- Counter replacement effects: Doubling Season ("twice that many of those counters"), Hardened Scales
+-- and Winding Constrictor ("that many plus one"), Branching Evolution, Primal Vigor, Pir, Vorinclex
+-- ("twice that many" for you, "half that many" for opponents). Read from the rules text of every
+-- permanent in play, a sentence at a time. Additions come first, then doubling, then halving
+-- (the usual best order for the player; they can fix it by hand if they pick another).
+-- Returns the new amount and the names of the permanents that changed it.
+function Statics.counterAmount(obj, kind, n, putter)
+  if type(n) ~= "number" or n <= 0 or kind == "tp" or kind == "tt" then
+    return n, {}
+  end
+  local owner
+  pcall(function() owner = Zones.regionAt(obj.getPosition()).seat end)
+  local tl = tostring(dataOf(obj).typeLine or ""):lower()
+  local isCreature = tl:find("creature", 1, true) ~= nil
+  local isArtifact = tl:find("artifact", 1, true) ~= nil
+  local adds, muls, halves, names = 0, 0, 0, {}
+  for _, p in ipairs(perms()) do
+    local o = p.oracle
+    if o:find("counter", 1, true) and o:find("would", 1, true) then
+      for s in o:gmatch("[^%.\n]+") do
+        local mode
+        if s:find("twice that many", 1, true) then
+          mode = "mul"
+        elseif s:find("that many plus one", 1, true) or s:find("one additional", 1, true) then
+          mode = "add"
+        elseif s:find("half that many", 1, true) then
+          mode = "half"
+        end
+        if mode and s:find("counter", 1, true) and s:find("would", 1, true)
+            and not (s:find("player", 1, true) and not s:find("permanent", 1, true)) then
+          local ok = true
+          if s:find("+1/+1 counter", 1, true) and kind ~= "plus" then
+            ok = false
+          end
+          if s:find("artifact or creature", 1, true) then
+            ok = ok and (isArtifact or isCreature)
+          elseif not s:find("permanent", 1, true) and s:find("creature", 1, true) then
+            ok = ok and isCreature
+          end
+          if s:find("you control", 1, true) then
+            ok = ok and owner ~= nil and owner == p.seat
+          elseif s:find("an opponent would", 1, true) then
+            ok = ok and putter ~= nil and putter ~= p.seat
+          elseif s:find("if you would", 1, true) then
+            ok = ok and (putter or owner) == p.seat
+          end
+          if ok then
+            if mode == "add" then
+              adds = adds + 1
+            elseif mode == "mul" then
+              muls = muls + 1
+            else
+              halves = halves + 1
+            end
+            table.insert(names, p.obj.getName())
+          end
+        end
+      end
+    end
+  end
+  local out = n + adds
+  for _ = 1, muls do
+    out = out * 2
+  end
+  for _ = 1, halves do
+    out = math.floor(out / 2)
+  end
+  return out, names
+end
+
+-- Replacement effects the table can't do the math for (Rhox Faithmender, Tainted Remedy, Boon Reflection,
+-- Thought Reflection, Furnace of Rath, Torbran, Sulfuric Vortex...). kind: "gain", "lose", "draw" or "damage";
+-- subject: the seat that gains / loses / draws / is dealt damage. Returns the names of the permanents in play
+-- that may change the amount, so auto-resolve can ask for the real number.
+local WATCH = {
+  gain = { "would gain life" },
+  lose = { "would lose life", "would pay life" },
+  draw = { "would draw" },
+  damage = { "would deal damage", "would be dealt damage", "would deal noncombat damage", "would be dealt noncombat damage" },
+}
+
+function Statics.replacers(kind, subject)
+  local found, seen = {}, {}
+  local phrases = WATCH[kind] or {}
+  for _, p in ipairs(perms()) do
+    local o = p.oracle
+    if o:find("would", 1, true) then
+      for s in o:gmatch("[^%.\n]+") do
+        local hit = false
+        for _, ph in ipairs(phrases) do
+          if s:find(ph, 1, true) then
+            hit = true
+          end
+        end
+        if hit and (s:find("instead", 1, true) or s:find("plus", 1, true) or s:find("double", 1, true)) then
+          local ok = true
+          if kind ~= "damage" then
+            if s:find("an opponent would", 1, true) then
+              ok = subject ~= nil and subject ~= p.seat
+            elseif s:find("if you would", 1, true) then
+              ok = subject == p.seat
+            end
+          end
+          if ok and not seen[p.obj.getGUID()] then
+            seen[p.obj.getGUID()] = true
+            table.insert(found, p.obj.getName())
+          end
+        end
+      end
+    end
+  end
+  return found
+end
+
 -- Academy Manufactor: a Clue, Food or Treasure becomes one of each.
 function Statics.hasManufactor(seat)
   for _, p in ipairs(perms()) do

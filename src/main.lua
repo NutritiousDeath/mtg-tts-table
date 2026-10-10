@@ -97,7 +97,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.40 (Sylvan Library and effect discards get their own panel wording)"
+SCRIPT_VERSION = "1.41 (Doubling Season and other counter modifiers; asks before life, draw and damage replacement effects)"
 
 function onLoad(saved)
   GameLog.setup()

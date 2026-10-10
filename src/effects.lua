@@ -1277,6 +1277,38 @@ local function amountOf(a, controller, name)
   return a.n
 end
 
+-- Replacement effects in play (Rhox Faithmender, Tainted Remedy, Thought Reflection...): the table can't do
+-- their math, so the controller confirms the real amount before it goes through.
+local WATCH_VERB = { gain = "gain", lose = "lose", draw = "draw", damage = "be dealt" }
+local WATCH_NOUN = { gain = " life", lose = " life", draw = " card(s)", damage = " damage" }
+
+local function watched(kind, subject, n, controller, name, run)
+  if type(n) ~= "number" or n <= 0 then
+    run(n)
+    return
+  end
+  local names = {}
+  if Statics and Statics.replacers then
+    local ok, list = pcall(Statics.replacers, kind, subject)
+    if ok and list then
+      names = list
+    end
+  end
+  if #names == 0 then
+    run(n)
+    return
+  end
+  Effects.askAmount(controller, name .. ": " .. table.concat(names, ", ") .. " may change this",
+    tostring(subject) .. " would " .. WATCH_VERB[kind] .. " " .. n .. WATCH_NOUN[kind]
+      .. ". Type the real amount (0 for none), then OK, or keep " .. n .. ".",
+    "KEEP " .. n, function(v)
+      if v == "keep" then
+        v = n
+      end
+      run(v)
+    end)
+end
+
 local function apply(it, plan, target)
   local controller = it.controller
   local done = {}
@@ -1313,14 +1345,27 @@ local function apply(it, plan, target)
             printToAll("MTG > " .. it.name .. ": " .. controller .. " has cast " .. math.max(1, Effects.spellsThisTurn(controller))
               .. " spell(s) this turn.", INFO)
           end
-          Trackers.changeLife(seat, gain, it.name)
+          watched("gain", seat, gain, controller, it.name, function(v)
+            if v > 0 then
+              Trackers.changeLife(seat, v, it.name)
+            end
+          end)
         elseif a.what == "lose" then
           local lost = amountOf(a, controller, it.name)
           if lost > 0 then
-            Trackers.changeLife(seat, -lost, it.name)
+            local isDamage = tostring(it.text or ""):lower():find("damage", 1, true) ~= nil
+            watched(isDamage and "damage" or "lose", seat, lost, controller, it.name, function(v)
+              if v > 0 then
+                Trackers.changeLife(seat, -v, it.name)
+              end
+            end)
           end
         elseif a.what == "draw" then
-          Actions.draw(seat, a.n, it.name)
+          watched("draw", seat, a.n, controller, it.name, function(v)
+            if v > 0 then
+              Actions.draw(seat, v, it.name)
+            end
+          end)
         elseif a.what == "search" then
           local how
           if a.where == "both" then
@@ -1345,7 +1390,7 @@ local function apply(it, plan, target)
             src = getObjectFromGUID(it.thatCard) or src
           end
           if src and not src.isDestroyed() then
-            Counters.change(src, a.kind, a.n, seat)
+            Counters.place(src, a.kind, a.n, seat)
           else
             broadcastToColor(it.name .. " isn't on the table any more: no counter added.", seat, INFO)
           end
@@ -1401,8 +1446,8 @@ local function apply(it, plan, target)
                   broadcastToColor("Look at " .. seat .. "'s hand: you may cast a spell from it for free (do it by hand).", controller, GOOD)
                 end
               elseif src and not src.isDestroyed() then
-                Counters.change(src, "plus", a.counters, controller)
-                printToAll("MTG > " .. seat .. " declines: " .. it.name .. " gets " .. a.counters .. " +1/+1 counters.", GOOD)
+                local placed = Counters.place(src, "plus", a.counters, controller)
+                printToAll("MTG > " .. seat .. " declines: " .. it.name .. " gets " .. placed .. " +1/+1 counters.", GOOD)
               else
                 printToAll("MTG > " .. seat .. " declines: " .. controller .. " puts " .. a.counters .. " +1/+1 counters on " .. it.name .. " by hand.", INFO)
               end
@@ -1435,8 +1480,8 @@ local function apply(it, plan, target)
             .. a.n .. " 1/1 Servo token" .. (a.n == 1 and "" or "s") .. ".",
             { { label = "+1/+1 COUNTER", value = 1 }, { label = "SERVO TOKEN", value = 2 } }, function(i)
               if i == 1 and src and not src.isDestroyed() then
-                Counters.change(src, "plus", a.n, seat)
-                printToAll("MTG > " .. seat .. " put " .. a.n .. " +1/+1 counter(s) on " .. it.name .. " (fabricate).", GOOD)
+                local placed = Counters.place(src, "plus", a.n, seat)
+                printToAll("MTG > " .. seat .. " put " .. placed .. " +1/+1 counter(s) on " .. it.name .. " (fabricate).", GOOD)
               else
                 if i == 1 then
                   printToAll("MTG > " .. it.name .. " isn't on the table: making Servo tokens instead.", INFO)
@@ -1706,6 +1751,13 @@ function Effects.askChoice(seat, title, text, choices, onPick, pick)
 end
 
 -- Ask for a whole number (X): the box with OK. onPick(n) only on an answer.
+-- A number box with a button that keeps the suggested amount.
+function Effects.askAmount(seat, title, text, keepLabel, onPick)
+  ask(seat, title, text, { { label = keepLabel, value = "keep" } }, function(v)
+    onPick(v)
+  end, nil, true)
+end
+
 function Effects.askNumber(seat, title, text, onPick)
   ask(seat, title, text, { { label = "CANCEL", value = false } }, function(n)
     if n ~= false then
@@ -1920,8 +1972,8 @@ function Effects.counterOn(seat, a, it)
     .. " counter" .. (a.n == 1 and "" or "s") .. (a.upTo and ", or SKIP." or "."),
     { { label = "SKIP", value = false } }, function(obj)
       if obj then
-        Counters.change(obj, a.kind, a.n, seat)
-        printToAll("MTG > " .. it.name .. ": " .. a.n .. " " .. a.label .. " counter" .. (a.n == 1 and "" or "s") .. " on " .. obj.getName() .. ".", GOOD)
+        local placed = Counters.place(obj, a.kind, a.n, seat)
+        printToAll("MTG > " .. it.name .. ": " .. placed .. " " .. a.label .. " counter" .. (placed == 1 and "" or "s") .. " on " .. obj.getName() .. ".", GOOD)
       else
         printToAll("MTG > " .. it.name .. ": no counters placed.", INFO)
       end
@@ -3871,8 +3923,8 @@ end
 function Effects.amass(seat, kind, n, sourceName)
   local army = armyOf(seat)
   if army then
-    Counters.change(army, "plus", n, seat)
-    printToAll("MTG > " .. seat .. " amasses " .. n .. " onto " .. army.getName() .. ".", GOOD)
+    local placed = Counters.place(army, "plus", n, seat)
+    printToAll("MTG > " .. seat .. " amasses " .. placed .. " onto " .. army.getName() .. ".", GOOD)
     return
   end
   -- No Army yet: a 0/0 black <Kind> Army token, then the counters.
@@ -3880,8 +3932,8 @@ function Effects.amass(seat, kind, n, sourceName)
   Wait.time(function()
     local made = armyOf(seat)
     if made then
-      Counters.change(made, "plus", n, seat)
-      printToAll("MTG > " .. seat .. " amasses " .. n .. " onto the new " .. made.getName() .. ".", GOOD)
+      local placed = Counters.place(made, "plus", n, seat)
+      printToAll("MTG > " .. seat .. " amasses " .. placed .. " onto the new " .. made.getName() .. ".", GOOD)
     else
       broadcastToColor(sourceName .. ": put " .. n .. " +1/+1 counter(s) on your Army yourself.", seat, INFO)
     end
@@ -3937,7 +3989,7 @@ Events.on("cardMoved", function(d)
             return
           end
           if v > 0 then
-            Counters.change(card, key2, v, seat2)
+            v = Counters.place(card, key2, v, seat2)
           end
           printToAll("MTG > " .. name .. " enters with " .. v .. " " .. k2 .. " counters.", INFO)
         end, nil, true)
@@ -3956,9 +4008,9 @@ Events.on("cardMoved", function(d)
   local key = (kind == "+1/+1" and "plus") or (kind == "-1/-1" and "minus") or (kind == "loyalty" and "loyalty") or "other"
   Wait.time(function()
     if not card.isDestroyed() then
-      Counters.change(card, key, n, d.to.seat)
-      printToAll("MTG > " .. card.getName() .. " enters with " .. n .. " " .. kind .. " counter"
-        .. (n == 1 and "" or "s") .. ".", INFO)
+      local placed = Counters.place(card, key, n, d.to.seat)
+      printToAll("MTG > " .. card.getName() .. " enters with " .. placed .. " " .. kind .. " counter"
+        .. (placed == 1 and "" or "s") .. ".", INFO)
     end
   end, 0.6)
 end)
@@ -4390,7 +4442,7 @@ function Effects.returnExiledWith(seat, a, it)
         return
       end
       if (a.counters or 0) > 0 then
-        Counters.change(card, "plus", a.counters, seat)
+        Counters.place(card, "plus", a.counters, seat)
       end
       if a.haste then
         Counters.addTempKeyword(card, "haste")

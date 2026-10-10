@@ -308,7 +308,9 @@ function Walkers.activate(obj, i, color, force)
   end
   GameState.data.walkersUsed = GameState.data.walkersUsed or {}
   GameState.data.walkersUsed[obj.getGUID()] = t.taken or 0
-  if a.cost and a.cost ~= 0 then
+  if a.cost and a.cost > 0 then
+    Counters.place(obj, "loyalty", a.cost, color)   -- Doubling Season doubles a plus cost
+  elseif a.cost and a.cost ~= 0 then
     Counters.change(obj, "loyalty", a.cost, color)
   else
     Counters.render(obj)

@@ -396,6 +396,29 @@ function Counters.change(obj, kind, delta, byColor)
   end
 end
 
+-- The amount that really goes on after Doubling Season, Hardened Scales and the like
+-- (statics.lua). Says so in chat when it changed.
+function Counters.modAmount(obj, kind, n, byColor)
+  if type(n) ~= "number" or n <= 0 or kind == "tp" or kind == "tt" or not (Statics and Statics.counterAmount) then
+    return n
+  end
+  local ok, out, names = pcall(Statics.counterAmount, obj, kind, n, byColor)
+  if not ok or type(out) ~= "number" or out == n then
+    return n
+  end
+  local label = (kind == "plus" and "+1/+1") or (kind == "minus" and "-1/-1") or (kind == "loyalty" and "loyalty") or "counters"
+  printToAll("MTG > " .. table.concat(names, " + ") .. ": " .. n .. " " .. label .. " -> " .. out .. " on " .. obj.getName()
+    .. " (additions first, then doubling; adjust by hand if you order them differently).", { 0.35, 0.95, 1 })
+  return out
+end
+
+-- Counters put on by an effect (not a hand click): replacement effects apply. Returns the amount placed.
+function Counters.place(obj, kind, n, byColor)
+  local final = Counters.modAmount(obj, kind, n, byColor)
+  Counters.change(obj, kind, final, byColor)
+  return final
+end
+
 -- State-based actions: a planeswalker with 0 loyalty, or a creature with 0
 -- or less toughness, goes to the graveyard. Checked a moment later, so a
 -- misclick on a loyalty box can be clicked back first.
@@ -556,7 +579,7 @@ local function startingLoyalty(obj)
   local printed = tonumber(cardData(obj).loyalty or "")
   if printed and Counters.get(obj).loyalty == 0 then
     local c = Counters.get(obj)
-    c.loyalty = printed
+    c.loyalty = Counters.modAmount(obj, "loyalty", printed, nil)
     save(obj, c)
   end
 end

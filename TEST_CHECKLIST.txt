@@ -1,5 +1,5 @@
-MTG TABLE - SOLO TEST CHECKLIST (v1.33)
-Chat should say: MTG > Scripts loaded: version 1.37 (painlands and Talismans take life when tapped for colored mana)
+MTG TABLE - SOLO TEST CHECKLIST (v1.41)
+Chat should say: MTG > Scripts loaded: version 1.41 (Doubling Season and other counter modifiers; asks before life, draw and damage replacement effects)
 
 HOW: load a deck, solo, drag cards from hand to the battlefield (or cast from hand), then watch chat + the ask popups.
 Mark each: OK / WRONG (write what happened).
@@ -70,7 +70,21 @@ Illusionist's Bracers, Lithoform Engine, Isochron Scepter, Mystic Forge, Chrome 
 [ ] Tibalt's Trickery: counter prompt. Turntimber Symbiosis: top 7 panel.
 [ ] Faithless Looting, Llanowar Visionary: draw/discard work.
 
-BY HAND in the Zoo (table will tell you, not do it): Esper Sentinel draw/tax, Cavern-Hoard Dragon Treasures, Chrome Mox / Mox Diamond, Dualcaster Mage copy, Ragavan, Sanctifier en-Vec, Jeska's Will, Shatterskull Smashing, Silence, Survival of the Fittest, Wheel of Misfortune, Sanctum Prelate, Sylvan Library, Conspiracy Theorist, Flamescroll Celebrant ping, City of Brass / Ancient Tomb / Mana Confluence damage, Gaea's Cradle, Utopia Sprawl, Mana Vault, LED, plus the stax pieces (Deafening Silence, Drannith, Dryad Militant, Samurai, Grand Abolisher: nothing enforces them).
+== NEW IN 1.38 - 1.41
+[ ] Doubling Season on battlefield: a +1/+1 counter effect puts TWO; chat says "Doubling Season: 1 +1/+1 -> 2".
+[ ] Doubling Season + planeswalker: a plus loyalty ability adds double, and a new planeswalker enters with double loyalty.
+[ ] Hardened Scales: +1/+1 counters get one extra. Winding Constrictor: any counters on your artifacts/creatures get one extra.
+[ ] Doubling Season + Hardened Scales together: 1 counter becomes 4 (add first, then double). Opponent's Doubling Season does NOT touch your permanents.
+[ ] Clicking a counter button by hand is never changed (only effects are).
+[ ] Rhox Faithmender (or Tainted Remedy / Boon Reflection) on battlefield, then gain life: a box asks for the real amount, with a KEEP button.
+[ ] Thought Reflection / Furnace of Rath / Torbran: draw or damage effects ask the same way.
+[ ] Sylvan Library: draw step offers it, the panel says Sylvan Library (not the cleanup wording), put-on-top works.
+[ ] Mulligan style button sits in the mulligan panel, locks once anyone has mulliganed.
+[ ] Revealed card (Worldly Tutor, He-Man): PUT ON TOP button disappears once the card is cast or moved.
+[ ] Spirit Guides: hand menu "Exile for {X} mana" gives mana.
+[ ] Planeswalkers: loyalty buttons show the turn they land.
+
+BY HAND in the Zoo (table will tell you, not do it): Esper Sentinel draw/tax, Cavern-Hoard Dragon Treasures, Chrome Mox / Mox Diamond, Dualcaster Mage copy, Ragavan, Sanctifier en-Vec, Shatterskull Smashing, Silence, Survival of the Fittest, Wheel of Misfortune, Sanctum Prelate, Conspiracy Theorist, Flamescroll Celebrant ping, City of Brass / Ancient Tomb / Mana Confluence damage, Gaea's Cradle, Utopia Sprawl, Mana Vault, LED, plus the stax pieces (Deafening Silence, Drannith, Dryad Militant, Samurai, Grand Abolisher: nothing enforces them).
 
 == NOTES / BUGS
 (write here)
