@@ -300,3 +300,25 @@ function Statics.hasManufactor(seat)
   end
   return false
 end
+
+-- Chatterfang, Squirrel General: "those tokens plus that many 1/1 green Squirrel creature tokens are created instead".
+function Statics.chatterfang(seat)
+  for _, p in ipairs(perms()) do
+    if p.seat == seat and p.oracle:find("plus that many", 1, true) and p.oracle:find("squirrel", 1, true)
+        and p.oracle:find("token", 1, true) then
+      return true
+    end
+  end
+  return false
+end
+
+-- Panharmonicon: how many of them this seat controls.
+function Statics.panharmonicons(seat)
+  local n = 0
+  for _, p in ipairs(perms()) do
+    if p.seat == seat and p.oracle:find("triggers an additional time", 1, true) and p.oracle:find("artifact or creature", 1, true) then
+      n = n + 1
+    end
+  end
+  return n
+end

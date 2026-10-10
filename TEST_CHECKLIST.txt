@@ -1,5 +1,5 @@
-MTG TABLE - SOLO TEST CHECKLIST (v1.43)
-Chat should say: MTG > Scripts loaded: version 1.43 (Oracle-checked Sephiroth deck: Consuming Corruption, Sephiroth sacrifice-draw and 4th-resolve transform, Takenuma order)
+MTG TABLE - SOLO TEST CHECKLIST (v1.44)
+Chat should say: MTG > Scripts loaded: version 1.44 (Xavier Sal token deck: Chatterfang, Panharmonicon, Clues, landfall, counters on tokens)
 
 HOW: load a deck, solo, drag cards from hand to the battlefield (or cast from hand), then watch chat + the ask popups.
 Mark each: OK / WRONG (write what happened).
@@ -107,6 +107,17 @@ Illusionist's Bracers, Lithoform Engine, Isochron Scepter, Mystic Forge, Chrome 
 BY HAND in the Sephiroth deck: Meathook Massacre and Toxic Deluge -X/-X, Consuming Corruption damage (life is automatic), Agadeem's Awakening, Hive of the Eye Tyrant becoming a creature, Spymaster's Vault connive, Umbral Collar Zealot sacrifice, Forsaken Miner crime, Eyetwitch learn, Lord Skitter exile, Sothera end-step sacrifice and return, Sephiroth's Super Nova emblem, Takenuma channel counts, Lolth emblem.
 
 BY HAND in the Zoo (table will tell you, not do it): Esper Sentinel draw/tax, Cavern-Hoard Dragon Treasures, Chrome Mox / Mox Diamond, Dualcaster Mage copy, Ragavan, Sanctifier en-Vec, Shatterskull Smashing, Silence, Survival of the Fittest, Wheel of Misfortune, Sanctum Prelate, Conspiracy Theorist, Flamescroll Celebrant ping, City of Brass / Ancient Tomb / Mana Confluence damage, Gaea's Cradle, Utopia Sprawl, Mana Vault, LED, plus the stax pieces (Deafening Silence, Drannith, Dryad Militant, Samurai, Grand Abolisher: nothing enforces them).
+
+== XAVIER SAL TOKEN DECK (v1.44) - texts written from memory, verify
+[ ] Chatterfang in play: every token you make also makes as many 1/1 Squirrels (chat says so). Doubling Season / Parallel Lives double both.
+[ ] Panharmonicon: Hornet Queen / Grave Titan / Bastion enters = chat says an extra trigger, two triggers to order.
+[ ] Tireless Tracker landfall: makes a Clue. Lotus Cobra landfall: asks a color, adds it to your mana chips.
+[ ] Avenger of Zendikar: a Plant per land you control; landfall asks, then +1/+1 counter on each Plant.
+[ ] Mycoloth / Sekki upkeep: tokens equal to the +1/+1 counters on them (chat shows the count).
+[ ] Kalonian Hydra attack: doubles +1/+1 counters on every creature you control (Doubling Season makes it triple).
+[ ] Scute Swarm landfall: Insect, or a copy of itself with six or more lands.
+[ ] Sly Requisitioner: every player gets a Treasure. Second Harvest: a copy of each token you control.
+BY HAND in the Xavier Sal deck: Xavier Sal and Kodama of the West Tree (texts not checked yet), Garruk -3 draw, Greater Good, Altar of Dementia, Victimize, Living Death, Abundance, Worldspine Wurm shuffle, Sekki damage prevention, Tireless Tracker's Clue-sacrifice counter, Cabal Coffers / Circle of Dreams Druid mana, Urborg and Yavimaya land types, Chatterfang's sacrifice ability.
 
 == NOTES / BUGS
 (write here)

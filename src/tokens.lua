@@ -376,6 +376,17 @@ function Tokens.create(color, spec, n, sourceName, opts)
       return
     end
   end
+  -- Chatterfang: as many 1/1 green Squirrels again (the doubler, if any, applies to those too).
+  if not (opts and opts.noChatter) and Statics and Statics.chatterfang and Statics.chatterfang(color) then
+    printToAll("MTG > Chatterfang: " .. n .. " more Squirrel token(s) with " .. tostring(table.concat(spec.words or {}, " ")) .. ".", { 0.55, 0.9, 0.6 })
+    local o2 = {}
+    for kk, vv in pairs(opts or {}) do
+      o2[kk] = vv
+    end
+    o2.noChatter = true
+    o2.tapped, o2.attacking, o2.haste = nil, nil, nil
+    Tokens.create(color, { pt = "1/1", words = { "squirrel" }, colors = { G = true } }, n, "Chatterfang", o2)
+  end
   local p = GameState.player(color)
   local fromDeck = best(p and p.deckTokens or {}, spec)
   if fromDeck then

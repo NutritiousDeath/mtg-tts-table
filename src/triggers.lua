@@ -1101,6 +1101,29 @@ Events.on("cardMoved", function(d)
       end
     end
   end
+  -- Panharmonicon: an artifact or creature entering makes your triggered abilities trigger an additional time.
+  if entering and Statics and Statics.panharmonicons then
+    local ty = typesOf(card)
+    if ty.creature or ty.artifact then
+      local extra = {}
+      for _, f in ipairs(found) do
+        local k = Statics.panharmonicons(f.controller)
+        for _ = 1, k do
+          local c2 = {}
+          for kk, vv in pairs(f) do
+            c2[kk] = vv
+          end
+          table.insert(extra, c2)
+        end
+      end
+      if #extra > 0 then
+        printToAll("MTG > Panharmonicon: " .. #extra .. " trigger(s) happen an additional time.", { 0.55, 0.9, 0.6 })
+      end
+      for _, c2 in ipairs(extra) do
+        table.insert(found, c2)
+      end
+    end
+  end
   -- "Whenever a creature dies" on a creature that died with it isn't
   -- checked (it's already in the graveyard): add those by hand.
   pushAll(found, cardController, card.getGUID())

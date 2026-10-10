@@ -97,7 +97,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.43 (Oracle-checked Sephiroth deck: Consuming Corruption, Sephiroth sacrifice-draw and 4th-resolve transform, Takenuma order)"
+SCRIPT_VERSION = "1.44 (Xavier Sal token deck: Chatterfang, Panharmonicon, Clues, landfall, counters on tokens)"
 
 function onLoad(saved)
   GameLog.setup()

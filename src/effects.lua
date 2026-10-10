@@ -199,6 +199,27 @@ function Effects.parse(text, sourceName)
         t = t:gsub("create x ", "create 1 ", 1)
       end
     end
+    -- "..., where X is the number of +1/+1 counters on ~" (Sekki) / "create a ... token for each +1/+1 counter on ~" (Mycoloth).
+    do
+      local e1, e2 = t:find(", where x is the number of +1/+1 counters on ~", 1, true)
+      if e1 and t:find("create x ", 1, true) then
+        counted = { kind = "token", word = "+1/+1 counters", scope = "mine", counters = true }
+        t = t:sub(1, e1 - 1) .. t:sub(e2 + 1)
+        t = t:gsub("create x ", "create 1 ", 1)
+      end
+      local f1, f2 = t:find(" for each +1/+1 counter on ~", 1, true)
+      if f1 and t:find("create ", 1, true) then
+        counted = { kind = "token", word = "+1/+1 counters", scope = "mine", counters = true }
+        t = t:sub(1, f1 - 1) .. t:sub(f2 + 1)
+      end
+      -- Avenger of Zendikar, Garruk: "create a 0/1 Plant creature token for each land you control".
+      local g1, g2, gw = t:find(" for each (%a+) you control", 1)
+      local cr = t:find("create ", 1, true)
+      if g1 and cr and cr < g1 and t:sub(cr, g1):find("token", 1, true) and not counted then
+        counted = { kind = "token", word = gw, scope = "mine" }
+        t = t:sub(1, g1 - 1) .. t:sub(g2 + 1)
+      end
+    end
     local c, d, w2, who = t:find(", where x is the number of (%a+) (%a+ ?%a*) control", 1)
     if c and t:find("create x ", 1, true) then
       counted = { kind = "token", word = w2, scope = who:find("opponent", 1, true) and "opponents" or "mine" }
@@ -224,6 +245,55 @@ function Effects.parse(text, sourceName)
     end
     if t:find("you may sacrifice any number of other creatures. if you do, draw that many cards", 1, true) then
       return { optional = false, notes = {}, conds = {}, actions = { { what = "sacDraw", who = "you", n = 1, max = 99 } } }
+    end
+  end
+  -- Token deck helpers (Xavier Sal deck).
+  do
+    -- Tireless Tracker and friends: "investigate" = create a Clue.
+    if t:find("investigate", 1, true) and not t:find("create a clue", 1, true) then
+      t = t:gsub("investigate", "create a clue token", 1)
+    end
+    -- Lotus Cobra: "Add one mana of any color."
+    if t:find("^%s*add one mana of any color%.?%s*$") then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "addManaAny", who = "you", n = 1 } } }
+    end
+    -- Kalonian Hydra: double the +1/+1 counters on each creature you control.
+    if t:find("double the number of +1/+1 counters on each creature you control", 1, true) then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "counterAll", who = "you", n = 1, mode = "double" } } }
+    end
+    -- Avenger of Zendikar: a +1/+1 counter on each Plant (creature) you control.
+    do
+      local i, j = t:find("put a +1/+1 counter on each ", 1, true)
+      if i then
+        local rest = t:sub(j + 1)
+        local w = rest:match("^([%a%-]+) creature you control")
+        local other = false
+        if w == "other" then
+          other, w = true, nil
+        end
+        if w or rest:find("^creature you control") or rest:find("^other creature you control") then
+          if rest:find("^other ") then
+            other = true
+          end
+          return { optional = t:find("you may put", 1, true) ~= nil, notes = {}, conds = {},
+            actions = { { what = "counterAll", who = "you", n = 1, mode = "add", word = w, other = other } } }
+        end
+      end
+    end
+    -- Scute Swarm: an Insect token, or a copy of itself with six or more lands.
+    if t:find("if you control six or more lands, create a token that's a copy of ~ instead", 1, true) then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "scute", who = "you", n = 1 } } }
+    end
+    -- Sly Requisitioner: each player creates a Treasure token.
+    do
+      local w = t:match("^%s*each player creates an? (%a+) token%.?%s*$")
+      if w then
+        return { optional = false, notes = {}, conds = {}, actions = { { what = "eachPlayerToken", who = "you", n = 1, word = w } } }
+      end
+    end
+    -- Second Harvest: a token copy of each token you control.
+    if t:find("create a token that's a copy of each token you control", 1, true) then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "copyEachToken", who = "you", n = 1 } } }
     end
   end
   -- Chaos Warp: the owner shuffles the permanent into their library, reveals
@@ -884,6 +954,7 @@ function Effects.parse(text, sourceName)
       if (counted.kind == "lose" and ac.what == "lose" and ac.who == "any")
           or (counted.kind == "token" and ac.what == "token") then
         ac.countWord, ac.countScope = counted.word, counted.scope
+        ac.countCounters = counted.counters
       end
     end
   end
@@ -1345,6 +1416,17 @@ local function describe(a, target, controller)
     return "goads a target creature"
   elseif a.what == "bounceSelf" then
     return "it returns to its owner's hand"
+  elseif a.what == "addManaAny" then
+    return "add one mana of any color (you pick)"
+  elseif a.what == "counterAll" then
+    return a.mode == "double" and "double the +1/+1 counters on each creature you control"
+      or ("a +1/+1 counter on each " .. (a.other and "other " or "") .. (a.word and (a.word .. " ") or "") .. "creature you control")
+  elseif a.what == "scute" then
+    return "an Insect token, or a copy of itself with six or more lands"
+  elseif a.what == "eachPlayerToken" then
+    return "each player creates a " .. tostring(a.word) .. " token"
+  elseif a.what == "copyEachToken" then
+    return "a token copy of each token you control"
   elseif a.what == "sacDraw" then
     return a.max == 1 and "you may sacrifice another creature; if you do, draw a card"
       or "you may sacrifice any number of other creatures; draw that many cards"
@@ -1439,7 +1521,16 @@ local function describe(a, target, controller)
   return who .. (you and " draw " or " draws ") .. a.n
 end
 
-local function amountOf(a, controller, name)
+local function amountOf(a, controller, name, it)
+  if a.countCounters then
+    local src = it and it.source and getObjectFromGUID(it.source)
+    local n = 0
+    if src and not src.isDestroyed() then
+      n = Counters.get(src).plus
+    end
+    printToAll("MTG > " .. tostring(name) .. ": " .. n .. " +1/+1 counter(s) on it.", INFO)
+    return n
+  end
   if a.countWord then
     local n = Effects.countPermanents(controller, a.countWord, a.countScope)
     printToAll("MTG > " .. tostring(name) .. ": " .. n .. " " .. a.countWord .. (a.countScope == "opponents" and " your opponents control." or " you control."), INFO)
@@ -1571,7 +1662,7 @@ local function apply(it, plan, target)
         elseif a.what == "bounce" then
           Effects.pickBounce(seat, a, it.name, it.source)
         elseif a.what == "token" then
-          local made = amountOf(a, controller, it.name)
+          local made = amountOf(a, controller, it.name, it)
           local opts = (a.tapped or a.attacking or a.haste)
             and { tapped = a.tapped, attacking = a.attacking, haste = a.haste, from = it.thatCard or it.source } or nil
           if made < 1 then
@@ -1708,6 +1799,51 @@ local function apply(it, plan, target)
           Effects.pickSacrifice(seat, a, it)
         elseif a.what == "sacDraw" then
           Effects.sacDraw(seat, a, it)
+        elseif a.what == "addManaAny" then
+          Effects.askChoice(seat, it.name .. ": which color?", "Pick the color of mana to add to your mana chips.",
+            { { label = "W", value = "W" }, { label = "U", value = "U" }, { label = "B", value = "B" },
+              { label = "R", value = "R" }, { label = "G", value = "G" } }, function(k)
+              ManaChips.add(seat, k, 1)
+              printToAll("MTG > " .. it.name .. ": " .. seat .. " adds " .. k .. " to their mana chips.", GOOD)
+            end)
+        elseif a.what == "counterAll" then
+          Effects.counterAll(seat, a, it)
+        elseif a.what == "scute" then
+          local src = it.source and getObjectFromGUID(it.source)
+          local lands = Effects.countPermanents(seat, "land", "mine")
+          if lands >= 6 and src and not src.isDestroyed() then
+            printToAll("MTG > " .. it.name .. ": " .. lands .. " lands - a copy of it instead of an Insect.", GOOD)
+            Effects.copyCard(src, seat, {}, it.name)
+          else
+            if lands >= 6 then
+              broadcastToColor(it.name .. ": " .. lands .. " lands - make the token copy of it yourself.", seat, INFO)
+            else
+              Tokens.create(seat, { pt = "1/1", words = { "insect" }, colors = { G = true } }, 1, it.name)
+            end
+          end
+        elseif a.what == "eachPlayerToken" then
+          for _, c in ipairs(Effects.orderFrom(seat)) do
+            Tokens.create(c, { words = { a.word }, colors = {} }, 1, it.name)
+          end
+        elseif a.what == "copyEachToken" then
+          local n = 0
+          for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+            if obj.type == "Card" and not obj.isDestroyed() and obj.hasTag("Token") and not Faces.unknown(obj)
+                and Effects.fieldSeat(obj) == seat then
+              n = n + 1
+            end
+          end
+          local mine = {}
+          for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+            if obj.type == "Card" and not obj.isDestroyed() and obj.hasTag("Token") and not Faces.unknown(obj)
+                and Effects.fieldSeat(obj) == seat then
+              table.insert(mine, obj)
+            end
+          end
+          printToAll("MTG > " .. it.name .. ": copying " .. n .. " token(s) you control.", INFO)
+          for _, obj in ipairs(mine) do
+            Effects.copyCard(obj, seat, {}, it.name)
+          end
         elseif a.what == "poison" then
           Trackers.changePoison(seat, a.fromTrigger and (it.amount or 0) or a.n, it.name)
         elseif a.what == "revealUntil" then
@@ -2260,6 +2396,27 @@ function Effects.copyCard(obj, seat, a, srcName)
   if obj == nil or obj.isDestroyed() then
     return nil
   end
+  -- Doubling Season / Parallel Lives / Chatterfang: more copies (each extra is made once, without re-applying).
+  if not a.noMods then
+    local m = 1
+    if Statics and Statics.tokenMultiplier then
+      m = Statics.tokenMultiplier(seat)
+    end
+    local extra = {}
+    for k, v in pairs(a) do
+      extra[k] = v
+    end
+    extra.noMods = true
+    if m > 1 then
+      printToAll("MTG > " .. srcName .. ": token doubler - " .. m .. " copies of " .. obj.getName() .. ".", { 0.55, 0.9, 0.6 })
+      for _ = 2, m do
+        Effects.copyCard(obj, seat, extra, srcName)
+      end
+    end
+    if Statics and Statics.chatterfang and Statics.chatterfang(seat) then
+      Tokens.create(seat, { pt = "1/1", words = { "squirrel" }, colors = { G = true } }, 1, "Chatterfang", { noChatter = true })
+    end
+  end
   local pos = obj.getPosition()
   local s = TableSetup.seat(seat)
   local c = obj.clone({ position = { x = pos.x + s.right.x * 3.2, y = pos.y + 0.6, z = pos.z + s.right.z * 3.2 } })
@@ -2350,6 +2507,7 @@ local function orderFrom(seat)
   end
   return out
 end
+Effects.orderFrom = orderFrom
 
 -- "Each opponent sacrifices N creatures": each victim picks their own.
 function Effects.edict(seat, a, it)
@@ -2442,6 +2600,34 @@ function Effects.edict(seat, a, it)
       run()
     end)
   end
+end
+
+-- Avenger of Zendikar / Kalonian Hydra: counters on every matching creature you control.
+function Effects.counterAll(seat, a, it)
+  local n = 0
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) and Effects.fieldSeat(obj) == seat
+        and Effects.cardTypes(obj).creature and not (a.other and it.source and obj.getGUID() == it.source) then
+      local ok = true
+      if a.word then
+        local d = {}
+        pcall(function() d = JSON.decode(obj.getGMNotes()) or {} end)
+        local tl = " " .. tostring(d.typeLine or ""):lower():gsub("[^%a]", " ") .. " "
+        ok = tl:find(" " .. a.word .. " ", 1, true) ~= nil
+      end
+      if ok then
+        local amt = a.n
+        if a.mode == "double" then
+          amt = Counters.get(obj).plus
+        end
+        if amt > 0 then
+          Counters.place(obj, "plus", amt, seat)
+          n = n + 1
+        end
+      end
+    end
+  end
+  printToAll("MTG > " .. it.name .. ": " .. (a.mode == "double" and "doubled the +1/+1 counters on " or "+1/+1 counter on ") .. n .. " creature(s).", GOOD)
 end
 
 -- Sephiroth: sacrifice other creatures you control (one, or any number), then draw that many cards.
@@ -3571,6 +3757,10 @@ function Effects.resolve(it)
         end, nil, true)
       return
     end
+  end
+  -- Scute Swarm has its own handler (counts the lands itself).
+  if not it.insteadDone and tostring(it.text or ""):lower():find("if you control six or more lands, create a token that's a copy of", 1, true) then
+    it.insteadDone = true
   end
   -- "Create five 1/1 tokens. If <condition>, create ten of those tokens instead.": pick the right sentence.
   if not it.insteadDone and tostring(it.text or ""):lower():find(" instead", 1, true) then
