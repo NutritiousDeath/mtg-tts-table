@@ -55,15 +55,11 @@ end
 local cache = {}   -- [guid .. name] = { abilities }, rebuilt when a card changes
 
 local function cardData(obj)
-  local notes = obj.getGMNotes() or ""
-  if notes == "" then
+  local d = CardData.get(obj)
+  if next(d) == nil then
     return nil
   end
-  local ok, d = pcall(function() return JSON.decode(notes) end)
-  if ok and type(d) == "table" then
-    return d
-  end
-  return nil
+  return d
 end
 
 local function plainFind(s, needle)
@@ -808,6 +804,8 @@ local function renderOrder()
 end
 
 local processNext
+local finishOrdering
+local ORDER_TIMEOUT = 25   -- seconds before an unanswered ordering panel keeps the found order
 
 -- Put a batch on the stack. `resolveOrder` lists them first-to-resolve
 -- first, so they're pushed from the end (the last pushed resolves first).
@@ -820,7 +818,9 @@ end
 processNext = function()
   while #queue > 0 do
     local b = table.remove(queue, 1)
-    if #b.list >= 2 and #b.list <= MAX_ORDER and seated(b.seat) then
+    local askOrder = #b.list >= 2 and #b.list <= MAX_ORDER and seated(b.seat)
+      and not (GameState.data and GameState.data.autoOrder)
+    if askOrder then
       -- Shown in resolve order: as found, the first found resolves last.
       local shown = {}
       for i = #b.list, 1, -1 do
@@ -829,7 +829,15 @@ processNext = function()
       ordering = { seat = b.seat, list = shown, picks = {}, count = 0 }
       renderOrder()
       broadcastToColor("You have " .. #b.list .. " triggers at once: click them in the order they should resolve"
-        .. " (or KEEP THIS ORDER).", b.seat, { 0.35, 0.95, 1 })
+        .. " (or KEEP THIS ORDER). If you don't answer in " .. ORDER_TIMEOUT .. " s they go in the order shown.", b.seat, { 0.35, 0.95, 1 })
+      -- An unanswered panel (player away, lag, panel hidden) must not hold up every later trigger.
+      local mine = ordering
+      Wait.time(function()
+        if ordering == mine and ordering ~= nil then
+          broadcastToAll("MTG > " .. tostring(mine.seat) .. " didn't order their triggers in time: using the order shown.", { 1, 0.8, 0.3 })
+          finishOrdering(mine.list)
+        end
+      end, ORDER_TIMEOUT)
       return
     end
     for _, f in ipairs(b.list) do
@@ -840,11 +848,20 @@ processNext = function()
   renderOrder()
 end
 
-local function finishOrdering(resolveOrder)
+finishOrdering = function(resolveOrder)
   ordering = nil
   renderOrder()
   pushInResolveOrder(resolveOrder)
   processNext()
+end
+
+-- !triggers flush: put anything waiting on the stack now (a stuck ordering panel).
+function Triggers.flush()
+  if ordering then
+    finishOrdering(ordering.list)
+  else
+    processNext()
+  end
 end
 
 function ui_trigOrder(player, arg)

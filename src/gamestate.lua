@@ -6,6 +6,42 @@
 
 GameState = {}
 
+-- Decoded GM Notes (the card's printed data) are read all over the place, many times a second
+-- (triggers, statics, counters, combat). Decoding a few KB of JSON each time is what made big
+-- boards sluggish, so the result is kept until the notes text changes. Treat the table as READ-ONLY.
+CardData = {}
+local cdCache, cdCount = {}, 0
+local EMPTY = {}
+function CardData.get(obj)
+  if obj == nil then
+    return EMPTY
+  end
+  local ok, notes = pcall(function() return obj.getGMNotes() end)
+  if not ok or notes == nil or notes == "" then
+    return EMPTY
+  end
+  local okg, guid = pcall(function() return obj.getGUID() end)
+  if not okg then
+    return EMPTY
+  end
+  local e = cdCache[guid]
+  if e and e.notes == notes then
+    return e.data
+  end
+  local ok2, d = pcall(JSON.decode, notes)
+  if not ok2 or type(d) ~= "table" then
+    d = EMPTY
+  end
+  if not e then
+    cdCount = cdCount + 1
+    if cdCount > 1500 then
+      cdCache, cdCount = {}, 0
+    end
+  end
+  cdCache[guid] = { notes = notes, data = d }
+  return d
+end
+
 -- Seat colors used for a 4-player Commander table (TTS player colors).
 GameState.SEATS = { "White", "Red", "Green", "Blue" }
 

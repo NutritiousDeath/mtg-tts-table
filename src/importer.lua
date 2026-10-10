@@ -56,6 +56,7 @@ local function backUrl(card)
 end
 
 local busy = false
+local busyAt = 0   -- when the running import last reported progress (a stalled one can be reset)
 
 local function lower(s)
   return (s or ""):lower()
@@ -899,10 +900,22 @@ end
 -- Public
 ---------------------------------------------------------------------------
 
+-- Clear a stuck "import already running" state.
+function Importer.reset()
+  local was = busy
+  busy = false
+  return was
+end
+
 function Importer.importDeck(color, text)
   if busy then
-    broadcastToColor("An import is already running. Wait for it to finish.", color, { 1, 0.6, 0.2 })
-    return
+    local idle = (Time and Time.time or os.time()) - busyAt
+    if idle < 90 then
+      broadcastToColor("An import is already running (last progress " .. math.floor(idle) .. "s ago). Wait for it, or type !import reset if it's stuck.", color, { 1, 0.6, 0.2 })
+      return
+    end
+    broadcastToAll("The previous import stalled (no progress for " .. math.floor(idle) .. "s) and was reset. Starting yours.", { 1, 0.8, 0.3 })
+    busy = false
   end
   if text == nil or text:match("^%s*$") then
     broadcastToColor("Paste a decklist first.", color, { 1, 0.6, 0.2 })
@@ -933,11 +946,13 @@ function Importer.importDeck(color, text)
   end
 
   busy = true
+  busyAt = Time and Time.time or os.time()
   broadcastToAll(color .. " is importing a deck (" .. deck.total .. " cards)...", { 0.7, 0.85, 1 })
 
   -- Timed progress lines in chat, so a slow step is easy to spot.
   local started = now()
   local function progress(msg)
+    busyAt = Time and Time.time or os.time()
     printToColor(string.format("[%.1fs] %s", now() - started, msg), color, { 0.6, 0.75, 0.9 })
   end
   local function onFetchProgress(done, total)

@@ -586,6 +586,24 @@ local function oracleOf(obj)
       name = d.name or name
     end
   end)
+  -- Soulbond: the "paired with another creature" line isn't an ability of its own; while paired the
+  -- creature has the quoted abilities it grants.
+  if Soulbond and text:find("paired with another creature", 1, true) then
+    local keep = {}
+    for line in (text .. "\n"):gmatch("([^\n]*)\n") do
+      if not line:find("paired with another creature", 1, true) then
+        table.insert(keep, line)
+      end
+    end
+    for _, a in ipairs(Soulbond.grantedLines(obj)) do
+      table.insert(keep, a)
+    end
+    text = table.concat(keep, "\n")
+  elseif Soulbond and Soulbond.partnerOf(obj) then
+    for _, a in ipairs(Soulbond.grantedLines(obj)) do
+      text = text .. "\n" .. a
+    end
+  end
   return text, name
 end
 

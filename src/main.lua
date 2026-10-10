@@ -18,6 +18,8 @@
     !where       show which zones the card under your mouse is in
     !hover       show what is under your mouse (for alt-zoom problems)
     !zones       count the cards tracked in each of your areas
+    !perf        how heavy the table is right now (objects, buttons, how long the board scan takes)
+    !zzz on/off  animate the summoning-sickness badge (off by default: it costs speed)
     !counters    show the counters stored on the card under your mouse
     !trackers    list the tracker tiles on the table and their buttons
     !next        next step (active player; same as the NEXT STEP button)
@@ -26,10 +28,13 @@
     !layout 2    two players facing each other (White, Green)
     !search      search your library by name, type or rules text
     !triggers off / on   turn trigger detection off / on
+    !order off / on      stop / start asking you to order simultaneous triggers
+    !triggers flush      put any trigger that is stuck waiting onto the stack
     !auto off / on       turn auto-resolving of simple effects off / on
     !triggers card       show the triggers read on the card under your mouse
     !triggers audit      list trigger text on the battlefield the table can't watch for
     !solo on / off       solo test mode: one person plays every seat
+    !import reset        clear a stuck "import already running" state
     !import <link>       import an Archidekt / Moxfield link to your seat
     !import Red <link>   import an Archidekt / Moxfield link (or list) to a seat
     !flip / !unflip   flip the table (just for fun) / put it back
@@ -68,6 +73,7 @@ require("src/ring")
 require("src/walkers")
 require("src/effects")
 require("src/statics")
+require("src/soulbond")
 require("src/faces")
 require("src/flip")
 require("src/token_data")
@@ -97,7 +103,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.45 (Xavier Sal deck, Oracle-checked: sacrifice costs, Kodama, Sly Requisitioner, proliferate, populate, devour)"
+SCRIPT_VERSION = "1.46 (smoother streaming, soulbond, copy-landing fix, trigger-order timeout, importer reset)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -375,6 +381,38 @@ function onChat(message, sender)
     return false
   end
 
+  if message == "!zzz on" or message == "!zzz off" then
+    local on = Counters.setZzzAnimation(message == "!zzz on")
+    broadcastToAll("MTG > Animated Zzz badge " .. (on and "ON" or "OFF (static badge, faster)"), { 0.75, 0.8, 0.9 })
+    return false
+  end
+
+  if message == "!perf" then
+    local cards, buttons, tokens = 0, 0, 0
+    for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+      if o.type == "Card" and not o.isDestroyed() then
+        cards = cards + 1
+        if o.hasTag("Token") then
+          tokens = tokens + 1
+        end
+        local ok, b = pcall(function() return o.getButtons() end)
+        if ok and b then
+          for _ in pairs(b) do
+            buttons = buttons + 1
+          end
+        end
+      end
+    end
+    local t0 = os.clock()
+    for _ = 1, 20 do
+      Statics.compute()
+    end
+    local ms = (os.clock() - t0) / 20 * 1000
+    print(string.format("MTG > Table load: %d loose cards (%d tokens), %d buttons on them. Board scan: %.1f ms. Tips: fewer sick tokens/animations, lower TTS graphics quality, close other apps.",
+      cards, tokens, buttons, ms))
+    return false
+  end
+
   if message == "!moves" then
     print("MTG > Card move log " .. (Zones.toggleMoveLog() and "ON" or "OFF"))
     return false
@@ -417,6 +455,17 @@ function onChat(message, sender)
     return false
   end
 
+  if message == "!order off" or message == "!order on" then
+    GameState.data.autoOrder = (message == "!order off")
+    broadcastToAll("MTG > Trigger ordering: " .. (GameState.data.autoOrder and "OFF (found order, no panel)" or "ON (you pick the order)"), { 0.75, 0.8, 0.9 })
+    return false
+  end
+
+  if message == "!triggers flush" then
+    Triggers.flush()
+    return false
+  end
+
   if message == "!triggers off" or message == "!triggers on" then
     Triggers.setEnabled(message == "!triggers on")
     broadcastToAll("Trigger detection " .. (message == "!triggers on" and "ON" or "OFF") .. " (by " .. sender.color .. ").",
@@ -454,6 +503,12 @@ function onChat(message, sender)
     broadcastToAll(GameState.data.solo
       and ("Solo test mode ON (by " .. sender.color .. "): you can act for every seat. Turn buttons, combat and planeswalkers work for anyone, no response pop-ups, empty seats keep their hands. Start Game includes every seat.")
       or "Solo test mode OFF.", { 0.7, 0.85, 1 })
+    return false
+  end
+
+  if message == "!import reset" then
+    local was = Importer.reset()
+    broadcastToAll("MTG > Importer reset" .. (was and " (a stuck import was cleared)." or " (nothing was running)."), { 0.7, 0.85, 1 })
     return false
   end
 

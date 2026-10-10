@@ -86,12 +86,7 @@ end
 
 -- The card's printed data (stored in GMNotes by the importer).
 local function cardData(obj)
-  local notes = obj.getGMNotes()
-  if notes == nil or notes == "" then
-    return {}
-  end
-  local ok, data = pcall(JSON.decode, notes)
-  return ok and type(data) == "table" and data or {}
+  return CardData.get(obj)
 end
 
 -- Current power/toughness/loyalty with counters applied. Values that aren't
@@ -132,6 +127,13 @@ local sickIndex = {}
 local SLEEP_FRAMES = { "z", "zZ", "zZz", "ZzZ", "Zz", "z" }
 local frame = 0
 local animating = false
+-- The animated Zzz re-sent a label to every player for every summoning-sick creature twice a second,
+-- which is a lot of traffic with a board full of tokens. Off unless asked for (!zzz).
+local ANIMATE_ZZZ = false
+function Counters.setZzzAnimation(on)
+  ANIMATE_ZZZ = on and true or false
+  return ANIMATE_ZZZ
+end
 
 -- Every 0.5 s: the Zzz on summoning-sick creatures cycles z / zZ / zZz...
 -- and creatures whose sickness has ended lose it (or gain it).
@@ -167,14 +169,14 @@ function Counters.animate()
           Counters.render(obj)
         elseif sick ~= has then
           Counters.render(obj)
-        elseif has then
+        elseif has and ANIMATE_ZZZ then
           pcall(function()
             obj.editButton({ index = sickIndex[g], label = SLEEP_FRAMES[frame] })
           end)
         end
       end
     end
-  end, 0.5, -1)
+  end, 1, -1)
 end
 
 -- Other modules' buttons on the card, drawn after the counters label
@@ -252,6 +254,10 @@ function Counters.render(obj)
   local ringBadge = Ring and Ring.badge and Ring.badge(obj)
   if ringBadge then
     table.insert(lines, ringBadge)
+  end
+  local sbBadge = Soulbond and Soulbond.badge and Soulbond.badge(obj)
+  if sbBadge then
+    table.insert(lines, sbBadge)
   end
   local badge = Equip and Equip.badge and Equip.badge(obj)
   if badge then
@@ -608,7 +614,8 @@ function Counters.menuSig(obj)
     step = Combat.menuStep()
   end
   local att = (Equip and Equip.isAttachment(obj) and Equip.hostOf(obj)) and "|attached" or ""
-  return region .. "|" .. step .. att
+  local sb = (Soulbond and Soulbond.menuKey) and Soulbond.menuKey(obj) or ""
+  return region .. "|" .. step .. att .. sb
 end
 
 -- Rebuild the menu if what it was built for has changed.
@@ -654,6 +661,7 @@ function Counters.setup(obj)
   end
   if Library and Library.addRevealedMenu then Library.addRevealedMenu(obj) end
   if Equip and Equip.addMenu then Equip.addMenu(obj) end
+  if onField and Soulbond and Soulbond.addMenu then Soulbond.addMenu(obj) end
   if onField then
     for _, item in ipairs(menuFor(obj)) do
       obj.addContextMenuItem(item[1], function(playerColor)

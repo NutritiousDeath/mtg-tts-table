@@ -126,5 +126,16 @@ BY HAND in the Zoo (table will tell you, not do it): Esper Sentinel draw/tax, Ca
 [ ] Victimize: asks which creature to sacrifice, then lets you click two creature cards in your graveyard (they return tapped).
 BY HAND in the Xavier Sal deck: Living Death, Abundance, Rite of Replication kicker (five copies), Sekki's damage prevention into Spirits and its return from the graveyard, Worldspine Wurm's shuffle clause, Tireless Tracker's Clue-sacrifice counter, Kodama's trample for modified creatures, Deep Forest Hermit vanishing, Cabal Coffers / Circle of Dreams Druid / Cryptolith Rite / Bloom Tender mana, Urborg and Yavimaya land types, Chatterfang's +X/-X ability, Liliana -9, Liliana Death's Majesty's Zombie type, Myr Battlesphere attack tapping.
 
+== v1.46: SMOOTHNESS, SOULBOND, COPIES, IMPORT
+[ ] Type !perf: shows card/button counts and how long a board scan takes. Run it while it lags and send me the line.
+[ ] The sleeping "Zzz" animation is OFF by default now (it redrew every card every second). !zzz on turns it back on.
+[ ] Trigger ordering: if two triggers ask for an order and nobody clicks for 25s, they go on in the shown order (chat says so). !order off = never ask, always auto-order. !order on = ask again. !triggers flush = unstick the trigger queue.
+[ ] Sporemound / landfall: play a land with Sporemound out. If nothing goes on the stack, type !triggers flush, then tell me what chat said.
+[ ] Altered Ego / Clone / Cackling Counterpart copy a creature: the copy lands on your battlefield and its enters-triggers go on the stack.
+[ ] Soulbond (Deadeye Navigator, Wolfir Silverheart...): cast the soulbond creature, click PAIR on another unpaired creature (or SKIP). Cast another creature while a soulbond one is unpaired: asks YES/NO. Both show "PAIRED: name".
+[ ] Wolfir Silverheart pair: both creatures show +4/+4. Deadeye pair: both get a right-click Activate "{1}{U}: Exile this creature, then return it" that blinks the creature. Pair ends when either leaves (chat says so).
+[ ] Right-click a soulbond creature: "Soulbond: pair with..." / "Soulbond: unpair" to fix mistakes.
+[ ] Import: !import reset clears a stuck "import already running". A stalled import (no progress 90s) resets by itself. If a friend's import fails, copy the chat lines (they have [12.3s] timings) and send them to me.
+
 == NOTES / BUGS
 (write here)

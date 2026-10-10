@@ -7,9 +7,7 @@ local bonus = {}        -- guid -> { p, t }
 local pending = false
 
 local function dataOf(obj)
-  local d = {}
-  pcall(function() d = JSON.decode(obj.getGMNotes()) or {} end)
-  return d
+  return CardData.get(obj)
 end
 
 local IN = { battlefield = true, lands = true }

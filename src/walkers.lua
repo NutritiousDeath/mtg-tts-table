@@ -50,12 +50,7 @@ local function parseCost(head)
 end
 
 local function cardData(obj)
-  local notes = obj.getGMNotes and obj.getGMNotes() or ""
-  if notes == "" then
-    return {}
-  end
-  local ok, d = pcall(function() return JSON.decode(notes) end)
-  return (ok and type(d) == "table") and d or {}
+  return CardData.get(obj)
 end
 
 local function isWalker(obj)

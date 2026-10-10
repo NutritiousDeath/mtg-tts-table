@@ -93,25 +93,45 @@ end
 
 -- The area containing a world position: { seat, region }, or a "table"
 -- location if it's outside every area.
+-- Seat and area rectangles never move while a layout is in use, so they're worked out once.
+local geo, geoLayout
+local function geometry()
+  local lay = TableSetup.layout()
+  if geo and geoLayout == lay then
+    return geo
+  end
+  geo = {}
+  for _, color in ipairs(TableSetup.activeSeats()) do
+    local s = TableSetup.seat(color)
+    local regs = {}
+    for _, name in ipairs(TRACKED_REGIONS) do
+      table.insert(regs, { name = name, r = TableSetup.region(color, name) })
+    end
+    table.insert(geo, { color = color, s = s, regs = regs })
+  end
+  geoLayout = lay
+  return geo
+end
+
 function Zones.regionAt(pos)
   -- The STACK mat in the middle of the table (stack.lua).
   if Stack and Stack.contains(pos) then
     return { seat = nil, region = "stack" }
   end
-  for _, color in ipairs(TableSetup.activeSeats()) do
-    local s = TableSetup.seat(color)
-    for _, name in ipairs(TRACKED_REGIONS) do
-      local r = TableSetup.region(color, name)
+  for _, g in ipairs(geometry()) do
+    local s = g.s
+    for _, e in ipairs(g.regs) do
+      local r = e.r
       local dx, dz = pos.x - r.center.x, pos.z - r.center.z
       -- Position in the seat's own directions (sideways, toward the middle).
       local side = dx * s.right.x + dz * s.right.z
       local depth = dx * s.inward.x + dz * s.inward.z
       if math.abs(side) <= r.w / 2 + EDGE_MARGIN and math.abs(depth) <= r.d / 2 + EDGE_MARGIN then
-        local as = REGION_AS[name]
+        local as = REGION_AS[e.name]
         if as then
-          return { seat = color, region = as[1], slot = as[2] }
+          return { seat = g.color, region = as[1], slot = as[2] }
         end
-        return { seat = color, region = name }
+        return { seat = g.color, region = e.name }
       end
     end
   end

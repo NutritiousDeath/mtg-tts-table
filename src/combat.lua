@@ -138,12 +138,7 @@ end
 ---------------------------------------------------------------------------
 
 local function cardData(obj)
-  local notes = obj and obj.getGMNotes and obj.getGMNotes() or ""
-  if notes == "" then
-    return {}
-  end
-  local ok, d = pcall(function() return JSON.decode(notes) end)
-  return (ok and type(d) == "table") and d or {}
+  return CardData.get(obj)
 end
 
 -- Static "creatures you control have haste" (Fervor, Anger, Urabrask...):

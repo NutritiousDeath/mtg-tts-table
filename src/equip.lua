@@ -30,12 +30,7 @@ local function attached()
 end
 
 local function cardData(obj)
-  local ok, notes = pcall(function() return obj.getGMNotes() end)
-  if not ok or notes == nil or notes == "" then
-    return {}
-  end
-  local ok2, d = pcall(function() return JSON.decode(notes) end)
-  return (ok2 and type(d) == "table") and d or {}
+  return CardData.get(obj)
 end
 
 local function typeLine(obj)
@@ -148,6 +143,10 @@ function Equip.bonus(creature)
     local m = modsOf(a)
     dp, dt = dp + m.dp, dt + m.dt
   end
+  if Soulbond and Soulbond.bonus then
+    local sp, st = Soulbond.bonus(creature)
+    dp, dt = dp + sp, dt + st
+  end
   return dp, dt
 end
 
@@ -157,6 +156,9 @@ function Equip.hasKeyword(creature, kw)
     if modsOf(a).kws[kw] then
       return true
     end
+  end
+  if Soulbond and Soulbond.hasKeyword and Soulbond.hasKeyword(creature, kw) then
+    return true
   end
   return false
 end
@@ -168,6 +170,14 @@ function Equip.keywordList(creature)
     local m = modsOf(a)
     for _, kw in ipairs(m.list) do
       if not seen[kw] and kw ~= "protection" then   -- protection has its own PRO line
+        seen[kw] = true
+        table.insert(out, kw)
+      end
+    end
+  end
+  if Soulbond and Soulbond.keywords then
+    for _, kw in ipairs(Soulbond.keywords(creature)) do
+      if not seen[kw] then
         seen[kw] = true
         table.insert(out, kw)
       end

@@ -259,6 +259,10 @@ function Effects.parse(text, sourceName)
     if tt == "create a token that's a copy of ~." or tt == "create a token that's a copy of ~" then
       return { optional = false, notes = {}, conds = {}, actions = { { what = "copySelf", who = "you", n = 1 } } }
     end
+    -- Soulbond (Deadeye Navigator): "Exile this creature, then return it to the battlefield under your control."
+    if tt:find("^exile ~, then return it to the battlefield under your control") or tt:find("^exile ~, then return ~ to the battlefield under your control") then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "blinkSelf", who = "you", n = 1 } } }
+    end
     -- Garruk, Primal Hunter -3.
     if tt:find("^draw cards equal to the greatest power among creatures you control") then
       return { optional = false, notes = {}, conds = {}, actions = { { what = "drawGreatest", who = "you", n = 1 } } }
@@ -1451,6 +1455,8 @@ local function describe(a, target, controller)
     return "it returns to its owner's hand"
   elseif a.what == "copySelf" then
     return "a token copy of itself"
+  elseif a.what == "blinkSelf" then
+    return "it is exiled and returns to the battlefield"
   elseif a.what == "drawGreatest" then
     return "draw cards equal to your greatest creature power"
   elseif a.what == "populate" then
@@ -1844,6 +1850,13 @@ local function apply(it, plan, target)
           Effects.pickSacrifice(seat, a, it)
         elseif a.what == "sacDraw" then
           Effects.sacDraw(seat, a, it)
+        elseif a.what == "blinkSelf" then
+          local src = it.source and getObjectFromGUID(it.source)
+          if src and not src.isDestroyed() then
+            Effects.blinkCard(src, seat, it.name)
+          else
+            broadcastToColor(it.name .. ": blink the creature yourself (the card wasn't found).", seat, INFO)
+          end
         elseif a.what == "copySelf" then
           local src = it.source and getObjectFromGUID(it.source)
           if src and not src.isDestroyed() then
@@ -2508,7 +2521,19 @@ function Effects.copyCard(obj, seat, a, srcName)
   end
   local pos = obj.getPosition()
   local s = TableSetup.seat(seat)
-  local c = obj.clone({ position = { x = pos.x + s.right.x * 3.2, y = pos.y + 0.6, z = pos.z + s.right.z * 3.2 } })
+  local spot = { x = pos.x + s.right.x * 3.2, y = pos.y + 0.6, z = pos.z + s.right.z * 3.2 }
+  -- The copy must land on the SAME area as the original, or "enters the battlefield" never fires for it
+  -- (a copy that slid off the battlefield was just a card sitting on the table).
+  local here, there = Zones.regionAt(pos), Zones.regionAt(spot)
+  if there.region ~= here.region or there.seat ~= here.seat then
+    spot = { x = pos.x - s.right.x * 3.2, y = pos.y + 0.6, z = pos.z - s.right.z * 3.2 }
+    there = Zones.regionAt(spot)
+    if there.region ~= here.region or there.seat ~= here.seat then
+      local slot = TableSetup.slot(seat, "battlefield", TableSetup.SURFACE_TOP + 1.5)
+      spot = { x = slot.x, y = slot.y, z = slot.z }
+    end
+  end
+  local c = obj.clone({ position = spot })
   if c == nil then
     broadcastToColor(srcName .. ": couldn't copy " .. obj.getName() .. " - make the token copy yourself.", seat, INFO)
     return nil
@@ -2516,6 +2541,22 @@ function Effects.copyCard(obj, seat, a, srcName)
   c.addTag("Token")
   c.memo = ""
   Zones.presetFrom(c, seat)
+  -- Tell the table it arrived as soon as its card data is readable (enters triggers need the rules text).
+  Wait.condition(function()
+    if not c.isDestroyed() then
+      Zones.refresh(c)
+    end
+  end, function()
+    if c.isDestroyed() then
+      return true
+    end
+    local ok, n = pcall(function() return c.getGMNotes() end)
+    return ok and n ~= nil and n ~= ""
+  end, 3, function()
+    if not c.isDestroyed() then
+      Zones.refresh(c)
+    end
+  end)
   Wait.time(function()
     if c.isDestroyed() then
       return
@@ -3329,6 +3370,21 @@ function Effects.cloneEnter(card, seat, kinds)
       GameState.data.clones = GameState.data.clones or {}
       GameState.data.clones[c.getGUID()] = { real = card.getGUID(), seat = seat, name = card.getName() }
       card.setPosition(TableSetup.slot(seat, "act_tokens", TableSetup.SURFACE_TOP + 1.5))
+      Wait.condition(function()
+        if not c.isDestroyed() then
+          Zones.refresh(c)
+        end
+      end, function()
+        if c.isDestroyed() then
+          return true
+        end
+        local ok, n = pcall(function() return c.getGMNotes() end)
+        return ok and n ~= nil and n ~= ""
+      end, 3, function()
+        if not c.isDestroyed() then
+          Zones.refresh(c)
+        end
+      end)
       Wait.time(function()
         if not c.isDestroyed() then
           Zones.refresh(c)
@@ -4205,7 +4261,7 @@ end
 local function cardTypes(obj)
   local t = {}
   pcall(function()
-    local d = JSON.decode(obj.getGMNotes())
+    local d = CardData.get(obj)
     for _, n in ipairs(type(d) == "table" and d.types or {}) do
       t[tostring(n):lower()] = true
     end
