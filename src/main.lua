@@ -18,6 +18,7 @@
     !where       show which zones the card under your mouse is in
     !hover       show what is under your mouse (for alt-zoom problems)
     !zones       count the cards tracked in each of your areas
+    !perf watch  counts what the script does for 15 seconds (send me the line if it lags)
     !perf        how heavy the table is right now (objects, buttons, how long the board scan takes)
     !zzz on/off  animate the summoning-sickness badge (off by default: it costs speed)
     !counters    show the counters stored on the card under your mouse
@@ -103,7 +104,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.46 (smoother streaming, soulbond, copy-landing fix, trigger-order timeout, importer reset)"
+SCRIPT_VERSION = "1.47 (metalcraft, !perf watch)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -384,6 +385,51 @@ function onChat(message, sender)
   if message == "!zzz on" or message == "!zzz off" then
     local on = Counters.setZzzAnimation(message == "!zzz on")
     broadcastToAll("MTG > Animated Zzz badge " .. (on and "ON" or "OFF (static badge, faster)"), { 0.75, 0.8, 0.9 })
+    return false
+  end
+
+  if message == "!perf watch" then
+    -- Count what the script does for 15 seconds: which calls it makes, so the lag can be pinned down.
+    local counts = {}
+    local originals = {}
+    local function wrap(tbl, name, label)
+      local orig = tbl[name]
+      if type(orig) ~= "function" then
+        return
+      end
+      originals[label] = { tbl = tbl, name = name, fn = orig }
+      counts[label] = 0
+      tbl[name] = function(...)
+        counts[label] = counts[label] + 1
+        return orig(...)
+      end
+    end
+    wrap(_G, "getObjectsWithTag", "getObjectsWithTag")
+    wrap(UI, "setValue", "UI.setValue")
+    wrap(UI, "setAttribute", "UI.setAttribute")
+    wrap(UI, "setAttributes", "UI.setAttributes")
+    wrap(UI, "setXml", "UI.setXml")
+    wrap(Wait, "time", "Wait.time")
+    wrap(Wait, "frames", "Wait.frames")
+    wrap(Counters, "render", "Counters.render")
+    wrap(Counters, "setup", "Counters.setup")
+    wrap(Statics, "compute", "Statics.compute")
+    wrap(Zones, "refresh", "Zones.refresh")
+    broadcastToAll("MTG > Perf watch started: leave the table as it is for 15 seconds (play normally).", { 0.75, 0.8, 0.9 })
+    Wait.time(function()
+      local names = {}
+      for label in pairs(counts) do
+        table.insert(names, label)
+      end
+      table.sort(names, function(x, y) return counts[x] > counts[y] end)
+      local parts = {}
+      for _, label in ipairs(names) do
+        table.insert(parts, label .. "=" .. counts[label])
+        local o = originals[label]
+        o.tbl[o.name] = o.fn
+      end
+      print("MTG > Perf watch (15s): " .. table.concat(parts, ", "))
+    end, 15)
     return false
   end
 

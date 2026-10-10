@@ -137,5 +137,9 @@ BY HAND in the Xavier Sal deck: Living Death, Abundance, Rite of Replication kic
 [ ] Right-click a soulbond creature: "Soulbond: pair with..." / "Soulbond: unpair" to fix mistakes.
 [ ] Import: !import reset clears a stuck "import already running". A stalled import (no progress 90s) resets by itself. If a friend's import fails, copy the chat lines (they have [12.3s] timings) and send them to me.
 
+== v1.47
+[ ] Metalcraft: with three or more artifacts of yours, an Etched Champion gets +2/+2 by itself; a trigger saying "if you control three or more artifacts" decides on its own (no YES/NO).
+[ ] When it lags, type !perf watch, play normally for 15 seconds, and send me the chat line it prints.
+
 == NOTES / BUGS
 (write here)

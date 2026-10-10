@@ -97,6 +97,25 @@ function Statics.compute()
       if a then
         add(p, tonumber(a) * (artifacts[p.seat] or 0), tonumber(b) * (artifacts[p.seat] or 0))
       end
+      -- Metalcraft: "~ gets +2/+2 as long as you control three or more artifacts."
+      do
+        local l2 = line
+        local nm = tostring(p.obj.getName()):lower()
+        local ds = l2:find(" — ", 1, true)
+        if ds and ds <= 14 then
+          l2 = l2:sub(ds + 5)
+        end
+        if nm ~= "" and l2:sub(1, #nm) == nm then
+          l2 = "this creature" .. l2:sub(#nm + 1)
+        end
+        local mp, mt, mn = l2:match("^this creature gets %+(%d+)/%+(%d+) as long as you control (%w+) or more artifacts")
+        if mp then
+          local need = tonumber(mn) or ({ two = 2, three = 3, four = 4, five = 5, six = 6 })[mn] or 3
+          if (artifacts[p.seat] or 0) >= need then
+            add(p, tonumber(mp), tonumber(mt))
+          end
+        end
+      end
       -- "Creature tokens you control get +1/+1 ..." / "Other Soldiers you control get +1/+1".
       -- (plain search first: MoonSharp gives up on lazy patterns over long rules text)
       local subj, x, y

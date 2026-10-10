@@ -5087,6 +5087,15 @@ function Effects.condValue(cond, seat, name)
     if x then
       return tonumber(x) >= tonumber(y)
     end
+    -- Metalcraft, Delirium-style counts: "you control three or more artifacts".
+    local nw, thing = cond:match("^you control (%w+) or more (%a+)$")
+    if nw then
+      local need = tonumber(nw) or ({ two = 2, three = 3, four = 4, five = 5, six = 6, seven = 7, eight = 8, ten = 10 })[nw]
+      if need then
+        local have = Effects.countPermanents(seat, thing, "mine")
+        return have >= need
+      end
+    end
     local word = cond:match("^you control an? (%a+)$") or cond:match("^you control another (%a+)$")
     if word and word ~= "creature" and word ~= "permanent" then
       return Effects.controlsWord(seat, word, name)
