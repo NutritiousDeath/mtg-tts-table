@@ -87,7 +87,7 @@ function Statics.compute()
   local artifacts = {}
   for _, p in ipairs(list) do
     if p.tl:find("artifact", 1, true) then
-      artifacts[p.seat] = (artifacts[p.seat] or 0) + 1
+      artifacts[p.seat] = (artifacts[p.seat] or 0) + (Pile and Pile.count(p.obj) or 1)
     end
   end
   for _, p in ipairs(list) do

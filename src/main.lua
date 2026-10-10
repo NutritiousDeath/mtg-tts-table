@@ -18,6 +18,7 @@
     !where       show which zones the card under your mouse is in
     !hover       show what is under your mouse (for alt-zoom problems)
     !zones       count the cards tracked in each of your areas
+    !stack on/off   token piles: identical plain tokens share one card (xN badge); !stack merge / !stack unstack
     !perf watch  counts what the script does for 15 seconds (send me the line if it lags)
     !perf        how heavy the table is right now (objects, buttons, how long the board scan takes)
     !zzz on/off  animate the summoning-sickness badge (off by default: it costs speed)
@@ -75,6 +76,7 @@ require("src/walkers")
 require("src/effects")
 require("src/statics")
 require("src/soulbond")
+require("src/pile")
 require("src/faces")
 require("src/flip")
 require("src/token_data")
@@ -85,6 +87,7 @@ require("src/music_tracks")
 require("src/music")
 require("src/planechase_data")
 require("src/planechase")
+Pile.install()
 
 local SAMPLE_DECK = [[
 Commander
@@ -104,7 +107,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.47 (metalcraft, !perf watch)"
+SCRIPT_VERSION = "1.48 (token piles, off by default: !stack on)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -159,6 +162,9 @@ function onObjectRotate(obj, spin, flip, playerColor, oldSpin, oldFlip)
   if Faces then
     Faces.onRotate(obj, flip, oldFlip, playerColor)
   end
+  if Pile then
+    Pile.onRotate(obj, spin, oldSpin, playerColor)
+  end
   if Actions and Actions.onRotate then
     Actions.onRotate(obj, spin, oldSpin, playerColor)
   end
@@ -187,6 +193,7 @@ end
 function onObjectPickUp(color, obj)
   Stack.onPickUp(color, obj)
   Zones.onPickUp(color, obj)
+  if Pile then Pile.onPickUp(color, obj) end
 end
 
 function onObjectDrop(color, obj)
@@ -385,6 +392,26 @@ function onChat(message, sender)
   if message == "!zzz on" or message == "!zzz off" then
     local on = Counters.setZzzAnimation(message == "!zzz on")
     broadcastToAll("MTG > Animated Zzz badge " .. (on and "ON" or "OFF (static badge, faster)"), { 0.75, 0.8, 0.9 })
+    return false
+  end
+
+  if message == "!stack on" or message == "!stack off" or message == "!stack merge" or message == "!stack unstack" then
+    if message == "!stack on" then
+      GameState.data.pileOn = true
+      local gone = Pile.mergeAll()
+      broadcastToAll("MTG > Token piles ON (by " .. sender.color .. "): identical plain tokens share one card with an xN badge. Touch one (pick it up, tap, right-click, target, attack) and it comes off the pile on its own."
+        .. (gone > 0 and (" Merged " .. gone .. " existing card(s).") or ""), { 0.55, 0.9, 0.6 })
+    elseif message == "!stack off" then
+      local n = Pile.unstackEverything()
+      GameState.data.pileOn = false
+      broadcastToAll("MTG > Token piles OFF: every token is its own card again" .. (n > 0 and (" (" .. n .. " tokens unstacked).") or "."), { 0.75, 0.8, 0.9 })
+    elseif message == "!stack merge" then
+      local gone = Pile.mergeAll()
+      broadcastToAll("MTG > Token piles: merged " .. gone .. " card(s)" .. (Pile.enabled() and "." or " (piles are off: !stack on)."), { 0.75, 0.8, 0.9 })
+    else
+      local n = Pile.unstackEverything()
+      broadcastToAll("MTG > Token piles: unstacked " .. n .. " token(s).", { 0.75, 0.8, 0.9 })
+    end
     return false
   end
 

@@ -1932,7 +1932,7 @@ local function apply(it, plan, target)
           for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
             if obj.type == "Card" and not obj.isDestroyed() and obj.hasTag("Token") and not Faces.unknown(obj)
                 and Effects.fieldSeat(obj) == seat then
-              n = n + 1
+              n = n + (Pile and Pile.count(obj) or 1)
             end
           end
           local mine = {}
@@ -1944,7 +1944,7 @@ local function apply(it, plan, target)
           end
           printToAll("MTG > " .. it.name .. ": copying " .. n .. " token(s) you control.", INFO)
           for _, obj in ipairs(mine) do
-            Effects.copyCard(obj, seat, {}, it.name)
+            Effects.copyCard(obj, seat, { pileCount = Pile and Pile.count(obj) or 1 }, it.name)
           end
         elseif a.what == "poison" then
           Trackers.changePoison(seat, a.fromTrigger and (it.amount or 0) or a.n, it.name)
@@ -2541,6 +2541,10 @@ function Effects.copyCard(obj, seat, a, srcName)
   c.addTag("Token")
   c.memo = ""
   Zones.presetFrom(c, seat)
+  local pc = a.pileCount or 1
+  if pc > 1 and Pile then
+    Pile.set(c, pc)
+  end
   -- Tell the table it arrived as soon as its card data is readable (enters triggers need the rules text).
   Wait.condition(function()
     if not c.isDestroyed() then
@@ -2562,6 +2566,10 @@ function Effects.copyCard(obj, seat, a, srcName)
       return
     end
     Zones.refresh(c)
+    if pc > 1 and Pile then
+      Pile.announceExtra(c, seat, pc)
+      Pile.mergeSoon(1.5)
+    end
     Counters.setup(c)
     if a.haste and Counters.addTempKeyword then
       Counters.addTempKeyword(c, "haste")
@@ -4307,7 +4315,7 @@ function Effects.countPermanents(seat, word, scope)
           end
         end
         if hit then
-          n = n + 1
+          n = n + (Pile and Pile.count(obj) or 1)
         end
       end
     end

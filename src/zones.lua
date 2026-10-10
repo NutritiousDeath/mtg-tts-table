@@ -189,6 +189,13 @@ end
 
 -- A card made by script (a token, a copy) has no earlier area: say it came
 -- from the stack, so "enters the battlefield" watchers see it arrive.
+-- A copy made in place (a token split off a pile) is where the original is, with no "enters".
+function Zones.inherit(old, new)
+  if old ~= nil and new ~= nil then
+    where[new.getGUID()] = where[old.getGUID()]
+  end
+end
+
 function Zones.presetFrom(obj, seat)
   if obj ~= nil and not obj.isDestroyed() and where[obj.getGUID()] == nil then
     where[obj.getGUID()] = { seat = seat, region = "stack" }

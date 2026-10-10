@@ -255,6 +255,10 @@ function Counters.render(obj)
   if ringBadge then
     table.insert(lines, ringBadge)
   end
+  local pileBadge = Pile and Pile.badge and Pile.badge(obj)
+  if pileBadge then
+    table.insert(lines, 1, pileBadge)
+  end
   local sbBadge = Soulbond and Soulbond.badge and Soulbond.badge(obj)
   if sbBadge then
     table.insert(lines, sbBadge)
@@ -615,7 +619,8 @@ function Counters.menuSig(obj)
   end
   local att = (Equip and Equip.isAttachment(obj) and Equip.hostOf(obj)) and "|attached" or ""
   local sb = (Soulbond and Soulbond.menuKey) and Soulbond.menuKey(obj) or ""
-  return region .. "|" .. step .. att .. sb
+  local pk = (Pile and Pile.menuKey) and Pile.menuKey(obj) or ""
+  return region .. "|" .. step .. att .. sb .. pk
 end
 
 -- Rebuild the menu if what it was built for has changed.
@@ -662,15 +667,18 @@ function Counters.setup(obj)
   if Library and Library.addRevealedMenu then Library.addRevealedMenu(obj) end
   if Equip and Equip.addMenu then Equip.addMenu(obj) end
   if onField and Soulbond and Soulbond.addMenu then Soulbond.addMenu(obj) end
+  if onField and Pile and Pile.addMenu then Pile.addMenu(obj) end
   if onField then
     for _, item in ipairs(menuFor(obj)) do
       obj.addContextMenuItem(item[1], function(playerColor)
+        if Pile then Pile.touch(obj) end
         Counters.change(obj, item[2], item[3], playerColor)
       end, true)
     end
-    obj.addContextMenuItem("Clear counters", function() Counters.clear(obj) end)
+    obj.addContextMenuItem("Clear counters", function() if Pile then Pile.touch(obj) end Counters.clear(obj) end)
     if cardData(obj).typeLine and cardData(obj).typeLine:find("Creature", 1, true) then
       obj.addContextMenuItem("Goad / remove goad", function(playerColor)
+        if Pile then Pile.touch(obj) end
         if Counters.goadedBy(obj) then
           Counters.setGoad(obj, nil)
           printToAll("MTG > " .. obj.getName() .. " isn't goaded any more.", { 0.75, 0.8, 0.9 })
@@ -682,6 +690,7 @@ function Counters.setup(obj)
       end)
     end
     obj.addContextMenuItem("Skip next untap / untap normally", function(playerColor)
+      if Pile then Pile.touch(obj) end
       local on = not Actions.skipsUntap(obj)
       Actions.setSkipUntap(obj, on, playerColor)
       printToAll("MTG > " .. obj.getName() .. (on and " won't untap in its next untap step." or " untaps normally again."),

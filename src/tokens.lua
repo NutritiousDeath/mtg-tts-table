@@ -258,12 +258,16 @@ function Tokens.spawn(color, r, n, opts)
   end
   local s = TableSetup.seat(color)
   local base = TableSetup.slot(color, "battlefield", 2)
-  for k = 1, n do
+  -- Token piles (pile.lua): one card standing for all n plain tokens.
+  local piled = Pile ~= nil and Pile.wantsPile(r, n, opts)
+  local made = piled and 1 or n
+  local pileOff = piled and Pile.spawnOffset(color) or 0
+  for k = 1, made do
     local id1, id2 = Importer.nextDeckId(), Importer.nextDeckId()
     local json = Importer.fillTemplate(r.tpl, id1, id2)
     json = Importer.replacePlain(json, '"Tags":["MTGCard"]', '"Tags":["MTGCard","Token"]')
     -- Spread copies sideways so they don't stack.
-    local off = (k - (n + 1) / 2) * 2.6
+    local off = piled and pileOff or (k - (n + 1) / 2) * 2.6
     local pos = { x = base.x + s.right.x * off, y = base.y + 0.5, z = base.z + s.right.z * off }
     spawnObjectJSON({
       json = json,
@@ -271,8 +275,15 @@ function Tokens.spawn(color, r, n, opts)
       rotation = { 0, opts and opts.tapped and (s.yaw + 90) % 360 or s.yaw, 0 },
       callback_function = function(obj)
         obj.setName(r.name)
+        if piled then
+          Pile.set(obj, n)
+        end
         Zones.presetFrom(obj, color)
         Zones.refresh(obj)
+        if piled then
+          Pile.announceExtra(obj, color, n)
+          Pile.mergeSoon(2.0)
+        end
         -- "create a 1/1 Goblin token with haste": no summoning sickness this turn.
         if opts and opts.haste and Counters and Counters.addTempKeyword then
           Wait.time(function()

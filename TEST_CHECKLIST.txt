@@ -141,5 +141,19 @@ BY HAND in the Xavier Sal deck: Living Death, Abundance, Rite of Replication kic
 [ ] Metalcraft: with three or more artifacts of yours, an Etched Champion gets +2/+2 by itself; a trigger saying "if you control three or more artifacts" decides on its own (no YES/NO).
 [ ] When it lags, type !perf watch, play normally for 15 seconds, and send me the chat line it prints.
 
+== v1.48: TOKEN PILES (OFF by default; try in !solo on first)
+[ ] !stack on: identical plain tokens (Saproling, Insect, Squirrel, Zombie...) become ONE card with an "xN" badge. Make 5 Squirrels: one card x5, and "enters" triggers still fire 5 times (Impact Tremors, Purphoros, Soul Warden style).
+[ ] Treasure / Clue / Food and any token with an ability (not just keywords) are NEVER piled.
+[ ] Pick a pile up: you take ONE token, the rest stay behind as a pile (badge drops by one).
+[ ] Tap a pile by hand: only one token taps, the rest stay untapped as a pile. Untap step untaps the whole pile.
+[ ] Put a +1/+1 counter on one token (right-click): it leaves the pile on its own, the counter token is single.
+[ ] Mass effects hit the whole pile: Avenger landfall / Kalonian Hydra / proliferate put the counter on every token of the pile (the pile shows the counter and keeps its xN).
+[ ] Attach Equipment to a pile / click ATTACK? / click BLOCK? / click a sacrifice or target button: one token comes off, the rest stay.
+[ ] "for each creature you control" and metalcraft count every token in a pile.
+[ ] Sweeper: drag a whole pile to the graveyard (or right-click > Pile: all die): every token dies (one dies event each: Blood Artist style drains N times).
+[ ] Second Harvest copies a pile as a pile of the same size.
+[ ] New plain tokens merge into a matching pile after ~2s and at cleanup/upkeep. Tapped, counter-ed, equipped or summoning-sick tokens stay separate from the others.
+[ ] Right-click a pile: split off 1 / split off 5 / unstack all / all die. !stack off turns everything back into single cards, !stack unstack just unstacks, !stack merge merges now.
+
 == NOTES / BUGS
 (write here)
