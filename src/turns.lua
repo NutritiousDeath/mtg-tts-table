@@ -249,6 +249,7 @@ function Turns.beginTurn(seat, number, newRound)
   t.pending = nil
   t.autoThrough = nil
   t.resume = nil
+  t.extraAfterMain, t.untapAttackers = 0, nil
   broadcastToAll("Turn " .. t.number .. ": " .. seat, { 0.55, 0.9, 0.6 })
   enterStep()
 end
@@ -277,6 +278,20 @@ end
 -- to Beginning of combat). peek = don't use up the extra combat.
 local function nextIndex(peek)
   local t = turn()
+  -- "After the first postcombat main phase, there's an additional combat phase followed by an
+  -- additional postcombat main phase" (World at War): Main 2 loops back to the combat, then
+  -- End of combat leads to Main 2 again.
+  if Turns.STEPS[t.stepIndex].id == "main2" and (t.extraAfterMain or 0) > 0 then
+    if not peek then
+      t.extraAfterMain = t.extraAfterMain - 1
+      broadcastToAll(t.activeSeat .. " gets an additional combat, then another postcombat main phase.", INFO)
+      if t.untapAttackers and Combat and Combat.untapAttacked then
+        pcall(Combat.untapAttacked, t.activeSeat)
+      end
+      t.untapAttackers = nil
+    end
+    return STEP_INDEX["combat"]
+  end
   if Turns.STEPS[t.stepIndex].id == "endcombat" and (t.extraCombats or 0) > 0 then
     if not peek then
       t.extraCombats = t.extraCombats - 1
@@ -794,6 +809,18 @@ function Turns.addExtraCombat(color)
   local t = turn()
   t.extraCombats = (t.extraCombats or 0) + 1
   broadcastToAll(color .. " gets an additional combat phase this turn.", INFO)
+end
+
+-- Extra combat that comes after the postcombat main phase (World at War): untapAttackers =
+-- also untap the creatures that attacked this turn when that combat begins.
+function Turns.addExtraCombatAfterMain(color, untapAttackers)
+  local t = turn()
+  t.extraAfterMain = (t.extraAfterMain or 0) + 1
+  if untapAttackers then
+    t.untapAttackers = true
+  end
+  broadcastToAll(color .. " will get an additional combat phase and postcombat main phase after this turn's postcombat main phase"
+    .. (untapAttackers and " (the creatures that attacked untap)." or "."), INFO)
 end
 
 function Turns.skipStep(color)

@@ -786,7 +786,7 @@ function Stack.activate(obj, playerColor, ab)
         end
         local c = Counters.get(src)
         local kinds = {}
-        for _, k in ipairs({ "plus", "minus", "loyalty", "other" }) do
+        for _, k in ipairs({ "plus", "minus", "loyalty", "other", "pc", "tc" }) do
           if (c[k] or 0) > 0 then
             table.insert(kinds, k)
           end
@@ -811,7 +811,7 @@ function Stack.activate(obj, playerColor, ab)
           return false
         end
         local c = Counters.get(o)
-        return (c.plus or 0) > 0 or (c.minus or 0) > 0 or (c.loyalty or 0) > 0 or (c.other or 0) > 0
+        return (c.plus or 0) > 0 or (c.minus or 0) > 0 or (c.loyalty or 0) > 0 or (c.other or 0) > 0 or (c.pc or 0) > 0 or (c.tc or 0) > 0
       end, label = "REMOVE", protect = false })
     return
   end

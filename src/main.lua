@@ -18,6 +18,7 @@
     !where       show which zones the card under your mouse is in
     !hover       show what is under your mouse (for alt-zoom problems)
     !zones       count the cards tracked in each of your areas
+    !unstick        clear stuck pop-ups / search panels / triggers (!unstick stack also empties the stack)
     !seat <Color>   take a free seat (after a disconnect); !resync refreshes your panels
     !stack on/off   token piles: identical plain tokens share one card (xN badge); !stack merge / !stack unstack
     !perf watch  counts what the script does for 15 seconds (send me the line if it lags)
@@ -108,7 +109,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.52 (mana pool badges; !resync prints to chat)"
+SCRIPT_VERSION = "1.53 (search zoom, +1/+0 counters, !unstick, card fixes)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -263,15 +264,19 @@ end
 -- A player finished searching a library (right-click > Search): shuffle it,
 -- as searching a library always ends with a shuffle.
 function onObjectSearchEnd(obj, playerColor)
-  if obj == nil or obj.isDestroyed() or obj.type ~= "Deck" then
-    return
-  end
-  local loc = Zones.regionAt(obj.getPosition())
-  if loc.region == "library" then
-    obj.shuffle()
-    broadcastToAll((loc.seat or "A") .. "'s library was shuffled after " .. tostring(playerColor) .. " searched it.",
-      { 0.75, 0.8, 0.9 })
-  end
+  -- Guarded: a deck that just changed size (a card was taken out) can throw
+  -- "index out of range" from the engine; that must never block anything.
+  pcall(function()
+    if obj == nil or obj.isDestroyed() or obj.type ~= "Deck" then
+      return
+    end
+    local loc = Zones.regionAt(obj.getPosition())
+    if loc.region == "library" then
+      obj.shuffle()
+      broadcastToAll((loc.seat or "A") .. "'s library was shuffled after " .. tostring(playerColor) .. " searched it.",
+        { 0.75, 0.8, 0.9 })
+    end
+  end)
 end
 
 function onObjectEnterContainer(container, obj)
@@ -458,6 +463,45 @@ function onChat(message, sender)
       and ", a seat in this game." or ", NOT a seat: pick a free color or type !seat <Color>.")
     printToColor(msg, sender.color, { 0.75, 0.8, 0.9 })
     broadcastToColor(msg, sender.color, { 0.75, 0.8, 0.9 })
+    return false
+  end
+
+  if message == "!unstick" or message == "!unstick stack" then
+    -- Clears whatever can leave the table waiting on a question nobody can answer.
+    local bits = {}
+    local function step(label, f)
+      local ok, n = pcall(f)
+      if ok and type(n) == "number" and n > 0 then
+        table.insert(bits, n .. " " .. label)
+      elseif not ok then
+        print("!unstick " .. label .. ": " .. tostring(n))
+      end
+    end
+    step("trigger(s) put on the stack", function() return Triggers.unstick() end)
+    step("pop-up question(s) dropped", function() return Effects.unstick() end)
+    step("search panel(s) closed", function() return LibSearch.unstick() end)
+    step("import reset", function() return Importer.reset() and 1 or 0 end)
+    if GameState.data.turn and GameState.data.turn.pending then
+      pcall(Turns.forcePass, sender.color)
+      table.insert(bits, "turn response skipped")
+    end
+    if message == "!unstick stack" then
+      local gone = 0
+      pcall(function()
+        while Stack.size() > 0 and gone < 60 do
+          gone = gone + 1
+          Stack.removeRow(1, sender.color)
+        end
+      end)
+      if gone > 0 then
+        table.insert(bits, gone .. " stack item(s) removed")
+      end
+    end
+    pcall(TableUI.refreshVisibility)
+    pcall(Counters.refreshMenus)
+    pcall(Stack.render)
+    broadcastToAll("MTG > " .. sender.color .. " ran !unstick: " .. (#bits > 0 and table.concat(bits, ", ") or "nothing was stuck")
+      .. ". Panels refreshed." .. (message == "!unstick" and "" or ""), { 1, 0.8, 0.3 })
     return false
   end
 

@@ -30,7 +30,15 @@ Counters = {}
 
 -- tp / tt: power / toughness changes until end of turn ("gets +2/+0 until
 -- end of turn", effects.lua); they can be negative and clear at cleanup.
-local KINDS = { "plus", "minus", "loyalty", "other", "tp", "tt" }
+-- pc / tc: "+1/+0" and "+0/+1" counters (they change power / toughness only).
+local KINDS = { "plus", "minus", "loyalty", "other", "tp", "tt", "pc", "tc" }
+
+-- The counter kind for the name on the card ("+1/+1", "+1/+0", "loyalty", "quest"...).
+function Counters.kindOf(label)
+  local l = tostring(label or "")
+  return (l == "+1/+1" and "plus") or (l == "-1/-1" and "minus") or (l == "+1/+0" and "pc")
+    or (l == "+0/+1" and "tc") or (l == "loyalty" and "loyalty") or "other"
+end
 
 local ON_BATTLEFIELD = { battlefield = true, lands = true }
 
@@ -57,7 +65,7 @@ function Counters.carry(old, obj)
 end
 
 function Counters.get(obj)
-  local c = { plus = 0, minus = 0, loyalty = 0, other = 0, tp = 0, tt = 0 }
+  local c = { plus = 0, minus = 0, loyalty = 0, other = 0, tp = 0, tt = 0, pc = 0, tc = 0 }
   local memo = obj and obj.memo
   if obj and memo then
     pcall(function() memoOf[obj.getGUID()] = memo end)
@@ -109,8 +117,8 @@ function Counters.stats(obj)
     return n and (n + bonus + extra) or v
   end
   return {
-    power = data.power and apply(data.power, c.tp + eqP + sP) or nil,
-    toughness = data.toughness and apply(data.toughness, c.tt + eqT + sT) or nil,
+    power = data.power and apply(data.power, c.tp + c.pc + eqP + sP) or nil,
+    toughness = data.toughness and apply(data.toughness, c.tt + c.tc + eqT + sT) or nil,
     loyalty = c.loyalty,
     counters = c,
   }
@@ -215,6 +223,9 @@ function Counters.render(obj)
     local sign = bonus > 0 and "+" or ""
     table.insert(lines, sign .. bonus .. "/" .. sign .. bonus)
   end
+  if c.pc ~= 0 or c.tc ~= 0 then
+    table.insert(lines, "+" .. c.pc .. "/+" .. c.tc .. " (ctr)")
+  end
   if c.tp ~= 0 or c.tt ~= 0 then
     local function sg(n)
       return (n >= 0 and "+" or "") .. n
@@ -231,7 +242,7 @@ function Counters.render(obj)
     end
     table.insert(lines, sg2(eqP) .. "/" .. sg2(eqT) .. " (equip)")
   end
-  if bonus ~= 0 or c.tp ~= 0 or c.tt ~= 0 or eqP ~= 0 or eqT ~= 0 then
+  if bonus ~= 0 or c.pc ~= 0 or c.tc ~= 0 or c.tp ~= 0 or c.tt ~= 0 or eqP ~= 0 or eqT ~= 0 then
     local st = Counters.stats(obj)
     if type(st.power) == "number" and type(st.toughness) == "number" then
       table.insert(lines, st.power .. "/" .. st.toughness)
@@ -416,7 +427,7 @@ function Counters.modAmount(obj, kind, n, byColor)
   if not ok or type(out) ~= "number" or out == n then
     return n
   end
-  local label = (kind == "plus" and "+1/+1") or (kind == "minus" and "-1/-1") or (kind == "loyalty" and "loyalty") or "counters"
+  local label = (kind == "plus" and "+1/+1") or (kind == "minus" and "-1/-1") or (kind == "pc" and "+1/+0") or (kind == "tc" and "+0/+1") or (kind == "loyalty" and "loyalty") or "counters"
   printToAll("MTG > " .. table.concat(names, " + ") .. ": " .. n .. " " .. label .. " -> " .. out .. " on " .. obj.getName()
     .. " (additions first, then doubling; adjust by hand if you order them differently).", { 0.35, 0.95, 1 })
   return out
@@ -532,7 +543,7 @@ end
 function Counters.remember(obj)
   if not isCard(obj) then return end
   local c = Counters.get(obj)
-  if c.plus ~= 0 or c.minus ~= 0 or c.loyalty ~= 0 or c.other ~= 0 then
+  if c.plus ~= 0 or c.minus ~= 0 or c.loyalty ~= 0 or c.other ~= 0 or c.pc ~= 0 or c.tc ~= 0 then
     Counters.lastKnown = Counters.lastKnown or {}
     Counters.lastKnown[obj.getGUID()] = c
   end
@@ -558,6 +569,10 @@ local MENU_CREATURE = {
   { "Remove +1/+1 counter", "plus", -1 },
   { "-1/-1 counter", "minus", 1 },
   { "Remove -1/-1 counter", "minus", -1 },
+  { "+1/+0 counter", "pc", 1 },
+  { "Remove +1/+0 counter", "pc", -1 },
+  { "+0/+1 counter", "tc", 1 },
+  { "Remove +0/+1 counter", "tc", -1 },
 }
 local MENU_PLANESWALKER = {
   { "Loyalty +1", "loyalty", 1 },

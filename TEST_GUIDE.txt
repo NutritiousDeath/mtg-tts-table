@@ -1,6 +1,6 @@
 MTG COMMANDER TABLE (TTS) - TEST GUIDE
-Version being tested: 1.51
-After loading, chat should say:  MTG > Scripts loaded: version 1.49 (...)
+Version being tested: 1.53
+After loading, chat should say:  MTG > Scripts loaded: version 1.53 (...)
 
 HOW TO USE THIS
 - One person can test alone: type  !solo on  in chat. You can then act for every seat.
@@ -8,7 +8,7 @@ HOW TO USE THIS
 - Go down the list ONE LINE AT A TIME. Each line is:   DO this  ->  EXPECT that.
 - Mark each line:  OK   or   WRONG (and write what actually happened).
 - "BY HAND" lists at the end of each deck are things the table does NOT automate. The test there is only that the table doesn't do something wrong; you play them yourself.
-- If something looks stuck, try these chat commands:  !triggers flush   !import reset   !resync   !order off
+- If something looks stuck, try these chat commands:  !unstick   !triggers flush   !import reset   !resync   !order off
 - When you report a bug, copy the chat lines from just before and after it. That's the most useful thing you can send.
 
 
@@ -107,6 +107,17 @@ TOKEN PILES (OFF by default - turn on with  !stack on  only when you want to tes
 [ ] 49. DO: "for each creature you control" or metalcraft with a pile out.  EXPECT: each token in the pile is counted.
 [ ] 50. DO: drag the whole pile to the graveyard (or right-click > Pile: all die).  EXPECT: every token dies, one death each (Blood Artist drains N times).
 [ ] 51. Right-click a pile: split off 1 / split off 5 / unstack all / all die.  Commands: !stack off (everything single), !stack unstack, !stack merge.
+[ ] 62. DO: open a library search (right-click your library > Search) and hover a card.  EXPECT: a big readable copy of it appears on the opposite side of the screen and disappears when the mouse leaves. Clicking a card still takes it.
+[ ] 63. DO: right-click a creature > "+1/+0 counter" (and "+0/+1 counter").  EXPECT: a "+1/+0 (ctr)" line on the card and its power/toughness change. "Remove +1/+0 counter" takes it off.
+[ ] 64. DO: cast Gamble (needs a library with cards).  EXPECT: search, click a card (it goes to your hand), CLOSE.  Then one random card is discarded from your hand. NO red "Index was out of range" error.
+[ ] 65. DO: something gets stuck (a pop-up nobody can answer, a search panel that won't close, triggers waiting).  Type  !unstick.  EXPECT: chat lists what it cleared. Type  !unstick stack  to also empty the stack.
+[ ] 66. DO: tap Cavern of Souls for mana.  EXPECT: the pop-up has C, W, U, B, R and G.
+[ ] 67. DO: cast The Unbeatable Squirrel Girl.  EXPECT: a plain 1/1 green Squirrel token (not a "Busy" / special Squirrel).
+[ ] 68. DO: have your opponents tap some lands, then cast Mana Geyser.  EXPECT: that many {R} in your mana pool (chat says how many).
+[ ] 69. DO: attack with Utvara Hellkite (or another Dragon).  EXPECT: a "Whenever a Dragon you control attacks" trigger on the stack per Dragon, then a 6/6 red flying Dragon token.
+[ ] 70. DO: cast World at War in your first main phase.  EXPECT: it is exiled (rebound); after your post-combat main phase the table loops to a second combat, the creatures that attacked untap, then another post-combat main phase.  At your NEXT upkeep: a pop-up offers to cast it free.
+[ ] 71. DO: cast Wheel of Misfortune.  EXPECT: each player gets a number pop-up in turn (nobody sees the others' choices), then chat reveals them: highest number takes that much damage, everyone who did not pick the lowest discards their hand and draws 7.
+
 
 
 =====================================================================

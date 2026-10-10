@@ -442,6 +442,13 @@ local function parseCombat(p)
     end
   elseif plainFind(p, "whenever a creature you control attacks") or plainFind(p, "whenever a nontoken creature you control attacks") then
     add({ kind = "attacks", mine = true })
+  elseif between(p, "whenever a", " you control attacks,") or between(p, "whenever an", " you control attacks,") then
+    -- Utvara Hellkite: "Whenever a Dragon you control attacks, ..." (only that creature type).
+    local word = between(p, "whenever an", " you control attacks,") or between(p, "whenever a", " you control attacks,")
+    word = tostring(word or ""):gsub("^n? ", ""):gsub("^%s+", "")
+    if word ~= "" and not word:find(" ", 1, true) and #word < 20 then
+      add({ kind = "attacks", mine = true, onlyType = word })
+    end
   elseif plainFind(p, "whenever one or more creatures you control attack") or plainFind(p, "whenever you attack") then
     add({ kind = "attacks", mine = true, once = true })
   end
@@ -856,6 +863,23 @@ finishOrdering = function(resolveOrder)
 end
 
 -- !triggers flush: put anything waiting on the stack now (a stuck ordering panel).
+-- !unstick: put whatever is waiting to be ordered onto the stack, then clear the panels.
+function Triggers.unstick()
+  local n = #queue + (ordering and 1 or 0)
+  local guard = 0
+  while (ordering or #queue > 0) and guard < 20 do
+    guard = guard + 1
+    local ok = pcall(Triggers.flush)
+    if not ok then
+      break
+    end
+  end
+  queue = {}
+  ordering = nil
+  pcall(renderOrder)
+  return n
+end
+
 function Triggers.flush()
   if ordering then
     finishOrdering(ordering.list)
@@ -1436,6 +1460,10 @@ function Triggers.onAttack(list)
           if t.nonType then
             local dd = cardData(at.obj)
             okType = not tostring(dd and dd.typeLine or ""):lower():find(t.nonType, 1, true)
+          end
+          if t.onlyType then
+            local dd = cardData(at.obj)
+            okType = tostring(dd and dd.typeLine or ""):lower():find(t.onlyType, 1, true) ~= nil
           end
           if at.controller == p.controller and okType then
             mineCount = mineCount + 1

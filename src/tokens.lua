@@ -356,6 +356,14 @@ local function score(r, spec)
   if same then
     s = s + 3
   end
+  -- A token named exactly what the card says ("Squirrel") beats a special one that only contains
+  -- the word ("Busy Squirrel", "Squirrel Girl" ...).
+  local nm = tostring(r.name or ""):lower():gsub("%s+token$", "")
+  if nm == table.concat(spec.words, " ") then
+    s = s + 4
+  elseif #nm > 0 then
+    s = s - math.min(1.5, #nm / 40)
+  end
   return s
 end
 

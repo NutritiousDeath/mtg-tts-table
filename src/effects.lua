@@ -22,7 +22,7 @@ Effects = {}
 
 local INFO = { 0.75, 0.8, 0.9 }
 local GOOD = { 0.55, 0.9, 0.6 }
-local MAX_CHOICES = 5
+local MAX_CHOICES = 7   -- Cavern of Souls: C + five colors needs six; the panel fits seven
 
 local function enabled()
   return not (GameState.data and GameState.data.autoOff)
@@ -384,6 +384,16 @@ function Effects.parse(text, sourceName)
       return { optional = false, notes = {}, conds = {}, actions = { { what = "windfall", who = "all", n = 1, fixed = wn } } }
     end
   end
+  -- Wheel of Misfortune: secret numbers, highest takes damage, everyone but the lowest wheels.
+  if t:find("each player secretly chooses a number 0 or greater", 1, true) and t:find("highest number", 1, true) then
+    return { optional = false, notes = {}, conds = {}, actions = { { what = "wheelMisfortune", who = "you", n = 1 } } }
+  end
+  -- World at War: an additional combat phase after the postcombat main phase (and untap the attackers).
+  if (t:find("there's an additional combat phase", 1, true) or t:find("there is an additional combat phase", 1, true))
+      and t:find("after the first postcombat main phase", 1, true) then
+    return { optional = false, notes = {}, conds = {}, actions = { { what = "extraCombat", who = "you", n = 1,
+      untap = t:find("untap all creatures that attacked this turn", 1, true) ~= nil } } }
+  end
   -- Windfall: everyone discards their hand, then draws as many as the most anyone discarded.
   if t:find("each player discards their hand, then draws cards equal to the greatest number of cards a player discarded this way", 1, true) then
     return { optional = false, notes = {}, conds = {}, actions = { { what = "windfall", who = "all", n = 1 } } }
@@ -391,6 +401,26 @@ function Effects.parse(text, sourceName)
   -- Warstorm Surge: the creature that entered deals damage equal to its power to any target.
   if t:find("it deals damage equal to its power to any target", 1, true) then
     return { optional = false, notes = {}, conds = {}, actions = { { what = "powerHit", who = "you", n = 1 } } }
+  end
+  -- Mana Geyser: "Add {R} for each tapped land your opponents control." Counted from the table.
+  do
+    local sym, word, who = t:match("add ({%a}) for each tapped (%a+) (your opponents control)")
+    local tp = sym ~= nil
+    if not sym then
+      sym, word, who = t:match("add ({%a}) for each (%a+) (your opponents control)")
+    end
+    if not sym then
+      sym, word, who = t:match("add ({%a}) for each tapped (%a+) (you control)")
+      tp = sym ~= nil
+    end
+    if not sym then
+      sym, word, who = t:match("add ({%a}) for each (%a+) (you control)")
+    end
+    if sym and word ~= "card" then
+      return { optional = false, notes = {}, conds = {},
+        actions = { { what = "manaCount", who = "you", n = 1, color = sym:sub(2, 2):upper(), word = word,
+          scope = who == "you control" and "mine" or "opponents", tapped = tp } } }
+    end
   end
   -- Metalworker / Nykthos: the player says how many ("for each card revealed", devotion), the table adds the mana.
   do
@@ -1275,8 +1305,7 @@ function Effects.parse(text, sourceName)
     onIt = cn ~= nil
   end
   if cn and num(cn) then
-    local kind = (ckind == "+1/+1" and "plus") or (ckind == "-1/-1" and "minus") or (ckind == "loyalty" and "loyalty")
-      or "other"
+    local kind = Counters.kindOf(ckind)
     table.insert(actions, { what = "counter", who = "you", n = num(cn), kind = kind, label = ckind, onThat = onIt })
   end
   -- "put three +1/+1 counters on target creature (you control)": pick it on the table.
@@ -1286,8 +1315,7 @@ function Effects.parse(text, sourceName)
     local pn, pk, pty = t2:match("put (%w+) ([%w%+/%-]+) counters? on target (%a+)")
     if pn and num(pn) and pty and (pty == "creature" or pty == "permanent" or pty == "artifact" or pty == "planeswalker" or pty == "land") then
       local after = t2:match("put %w+ [%w%+/%-]+ counters? on target %a+ ([%a ]*)") or ""
-      table.insert(actions, { what = "counterOn", who = "you", n = num(pn), kind = (pk == "+1/+1" and "plus") or (pk == "-1/-1" and "minus")
-        or (pk == "loyalty" and "loyalty") or "other", label = pk, ty = pty, mine = after:find("you control", 1, true) ~= nil,
+      table.insert(actions, { what = "counterOn", who = "you", n = num(pn), kind = Counters.kindOf(pk), label = pk, ty = pty, mine = after:find("you control", 1, true) ~= nil,
         upTo = upTo })
     end
   end
@@ -1295,7 +1323,7 @@ function Effects.parse(text, sourceName)
   do
     local rn, rk = t:match("remove (%w+) ([%w%+/%-]+) counters? from ~")
     if rn and num(rn) and not t:find("^[^:]*remove [^:]*:") then
-      local kind = (rk == "+1/+1" and "plus") or (rk == "-1/-1" and "minus") or (rk == "loyalty" and "loyalty") or "other"
+      local kind = Counters.kindOf(rk)
       table.insert(actions, { what = "counter", who = "you", n = -num(rn), kind = kind, label = rk })
     end
   end
@@ -1404,6 +1432,12 @@ local function describe(a, target, controller)
     return "draw a card, then lose life equal to the cards in your hand"
   elseif a.what == "addMana" then
     return "add mana to the mana pool"
+  elseif a.what == "wheelMisfortune" then
+    return "every player secretly picks a number; highest takes that much damage, everyone but the lowest discards their hand and draws seven"
+  elseif a.what == "extraCombat" then
+    return "an additional combat phase and postcombat main phase follow this turn's postcombat main phase"
+  elseif a.what == "manaCount" then
+    return "add {" .. tostring(a.color) .. "} for each " .. (a.tapped and "tapped " or "") .. tostring(a.word) .. " " .. (a.scope == "mine" and "you control" or "your opponents control")
   elseif a.what == "reanimate" then
     return "a creature card from any graveyard comes back under your control" .. (a.loseMV and ", you lose life equal to its mana value" or "")
   elseif a.what == "palantir" then
@@ -1992,6 +2026,17 @@ local function apply(it, plan, target)
           end
           table.sort(parts)
           printToAll("MTG > " .. it.name .. ": " .. seat .. " adds " .. table.concat(parts, ", ") .. " to their mana pool.", GOOD)
+        elseif a.what == "wheelMisfortune" then
+          Effects.wheelMisfortune(controller, it)
+        elseif a.what == "extraCombat" then
+          Turns.addExtraCombatAfterMain(seat, a.untap)
+        elseif a.what == "manaCount" then
+          local k = Effects.countPermanents(seat, a.word, a.scope, a.tapped)
+          if k > 0 then
+            ManaChips.add(seat, a.color, k)
+          end
+          printToAll("MTG > " .. it.name .. ": " .. seat .. " adds " .. k .. " {" .. a.color .. "} ("
+            .. (a.tapped and "tapped " or "") .. a.word .. "s " .. (a.scope == "mine" and "you control" or "your opponents control") .. ").", GOOD)
         elseif a.what == "reanimate" then
           Effects.reanimate(seat, a, it)
         elseif a.what == "palantir" then
@@ -2217,6 +2262,16 @@ function Effects.askAmount(seat, title, text, keepLabel, onPick)
   ask(seat, title, text, { { label = keepLabel, value = "keep" } }, function(v)
     onPick(v)
   end, nil, true)
+end
+
+-- !unstick: drop every waiting question (a stuck pop-up that nobody can answer).
+function Effects.unstick()
+  local n = #queue + (current and 1 or 0)
+  queue = {}
+  current = nil
+  numTyped = {}
+  pcall(render)
+  return n
 end
 
 function Effects.askNumber(seat, title, text, onPick)
@@ -2784,14 +2839,14 @@ function Effects.proliferate(seat, it)
   local chosen = {}
   local function hasAny(obj)
     local c = Counters.get(obj)
-    return (c.plus or 0) > 0 or (c.minus or 0) > 0 or (c.loyalty or 0) > 0 or (c.other or 0) > 0
+    return (c.plus or 0) > 0 or (c.minus or 0) > 0 or (c.loyalty or 0) > 0 or (c.other or 0) > 0 or (c.pc or 0) > 0 or (c.tc or 0) > 0
   end
   local function step()
     ask(seat, it.name .. ": proliferate", "Click PROLIFERATE on each permanent with counters you want another counter on, then DONE."
       .. " (Players with poison or other counters: do those by hand.)", { { label = "DONE", value = false } }, function(obj)
       if obj then
         chosen[obj.getGUID()] = true
-        for _, kind in ipairs({ "plus", "minus", "loyalty", "other" }) do
+        for _, kind in ipairs({ "plus", "minus", "loyalty", "other", "pc", "tc" }) do
           if (Counters.get(obj)[kind] or 0) > 0 then
             Counters.place(obj, kind, 1, seat)
           end
@@ -3077,6 +3132,57 @@ function Effects.windfall(it, fixed)
       end
     end, 1.2)
   end
+end
+
+-- Wheel of Misfortune: everyone secretly picks a number (each player's own pop-up, in turn), then the
+-- numbers are revealed: the highest takes that much damage, everyone who didn't pick the lowest
+-- discards their hand and draws seven.
+function Effects.wheelMisfortune(controller, it)
+  local order = Effects.orderFrom(controller)
+  local picks = {}
+  local function reveal()
+    local hi, lo
+    local parts = {}
+    for _, c in ipairs(order) do
+      local n = picks[c] or 0
+      table.insert(parts, c .. " " .. n)
+      hi = (hi == nil or n > hi) and n or hi
+      lo = (lo == nil or n < lo) and n or lo
+    end
+    printToAll("MTG > " .. it.name .. " reveals: " .. table.concat(parts, ", ") .. ". Highest " .. tostring(hi) .. ", lowest " .. tostring(lo) .. ".", GOOD)
+    for _, c in ipairs(order) do
+      if (picks[c] or 0) == hi and hi > 0 then
+        Trackers.changeLife(c, -hi, it.name)
+        printToAll("MTG > " .. it.name .. " deals " .. hi .. " damage to " .. c .. ".", GOOD)
+      end
+    end
+    for _, c in ipairs(order) do
+      if (picks[c] or 0) ~= lo then
+        Actions.discardHand(c, it.name)
+      end
+    end
+    Wait.time(function()
+      for _, c in ipairs(order) do
+        if (picks[c] or 0) ~= lo then
+          Actions.draw(c, 7, it.name)
+        end
+      end
+    end, 1.2)
+  end
+  local function nextPlayer(i)
+    if i > #order then
+      reveal()
+      return
+    end
+    local c = order[i]
+    ask(c, it.name .. ": secret number", "Type a number (0 or greater), then OK. Nobody else sees it until everyone has chosen.",
+      { { label = "0", value = 0 } }, function(v)
+        picks[c] = math.max(0, math.floor(tonumber(v) or 0))
+        printToAll("MTG > " .. c .. " has chosen a number (" .. it.name .. ").", INFO)
+        nextPlayer(i + 1)
+      end, nil, true)
+  end
+  nextPlayer(1)
 end
 
 -- Warstorm Surge: damage equal to the entering creature's power, to any target.
@@ -3488,6 +3594,36 @@ Events.on("stepStarted", function(d)
   end
 end)
 
+-- Rebound: at the beginning of the owner's next upkeep they may cast the exiled spell free.
+Events.on("stepStarted", function(d)
+  local list = GameState.data and GameState.data.rebound
+  if d.step ~= "upkeep" or not list or #list == 0 then
+    return
+  end
+  local keep = {}
+  for _, r in ipairs(list) do
+    if r.seat == d.seat then
+      local card = getObjectFromGUID(r.guid)
+      if card and not card.isDestroyed() then
+        ask(r.seat, r.name .. ": rebound", "Cast " .. r.name .. " from exile without paying its mana cost?",
+          { { label = "CAST", value = "cast" }, { label = "NO", value = false } }, function(pick)
+            if pick == "cast" and not card.isDestroyed() then
+              printToAll("MTG > " .. r.seat .. " casts " .. r.name .. " from exile (rebound).", GOOD)
+              GameState.data.reboundCast = GameState.data.reboundCast or {}
+              GameState.data.reboundCast[card.getGUID()] = true
+              Stack.pushCard(card, r.seat)
+            else
+              printToAll("MTG > " .. r.seat .. " doesn't cast " .. r.name .. " (rebound lost).", INFO)
+            end
+          end)
+      end
+    else
+      table.insert(keep, r)
+    end
+  end
+  GameState.data.rebound = keep
+end)
+
 -- Put an exiled card back onto the battlefield (a real move, so enters triggers fire).
 function Effects.returnFromExile(guid, owner, why)
   local obj = getObjectFromGUID(guid)
@@ -3645,13 +3781,13 @@ function Effects.xml()
   for _, c in ipairs(TableSetup.activeSeats()) do
     local choices = {}
     for i = 1, MAX_CHOICES do
-      table.insert(choices, ('<Panel id="effChoice_%s_%d" active="false" preferredWidth="96" preferredHeight="40">'
+      table.insert(choices, ('<Panel id="effChoice_%s_%d" active="false" preferredWidth="80" preferredHeight="40">'
         .. '<Button onClick="ui_effPick(%s_%d)" color="#1B2333" />'
         .. '<Text id="effChoiceTxt_%s_%d" raycastTarget="false" fontSize="14" fontStyle="Bold" color="#E6F1FF">-</Text></Panel>')
         :format(c, i, c, i, c, i))
     end
     table.insert(parts, ([[
-<Panel id="effAsk_%s" visibility="%s" active="false" rectAlignment="MiddleCenter" offsetXY="0 -60" width="560" height="236"
+<Panel id="effAsk_%s" visibility="%s" active="false" rectAlignment="MiddleCenter" offsetXY="0 -60" width="640" height="236"
        color="#0B0F17F5" outline="#5AF0FF" outlineSize="2 2" allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="14 14 12 12" spacing="8" childForceExpandHeight="false">
     <Text id="effTitle_%s" fontSize="17" fontStyle="Bold" color="#5AF0FF" alignment="MiddleLeft" preferredHeight="24">-</Text>
@@ -3883,7 +4019,7 @@ function Effects.resolve(it)
       local kindWord = low:sub(a1 + #" for each ", a2 - 1)
       local stopAt = raw:find("[%.,]", a2 + #" counter on ") or (#raw + 1)
       local c = (lk and it.trigger) and lk or Counters.get(src)
-      local n = (kindWord == "+1/+1" and c.plus) or (kindWord == "-1/-1" and c.minus) or (kindWord == "loyalty" and c.loyalty) or c.other
+      local n = (kindWord == "+1/+1" and c.plus) or (kindWord == "-1/-1" and c.minus) or (kindWord == "loyalty" and c.loyalty) or (kindWord == "+1/+0" and c.pc) or (kindWord == "+0/+1" and c.tc) or c.other
       -- Counters this very ability puts on first ("put a burden counter on it, then draw a card for each").
       local added = low:sub(1, a1):match("put (%w+) " .. kindWord:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1") .. " counters? on ")
       if added and num(added) then
@@ -4217,6 +4353,31 @@ function Effects.resolveSpell(obj, controller)
   end
   Effects.resolve({ name = obj.getName(), controller = controller, text = text, auto = true, manaCost = cost,
     card = obj.getGUID() })
+  -- Rebound: exiled as it resolves; its owner may cast it free at their next upkeep.
+  local low = text:lower()
+  local rc = GameState.data.reboundCast
+  if rc and rc[obj.getGUID()] then
+    rc[obj.getGUID()] = nil      -- cast from exile by rebound: it goes to the graveyard this time
+    low = ""
+  end
+  if (low:find("rebound (", 1, true) or low:find("\nrebound", 1, true) or low:sub(1, 7) == "rebound") and controller then
+    local seat = controller
+    obj.setLock(false)
+    local s = TableSetup.seat(seat)
+    obj.setPositionSmooth(TableSetup.slot(seat, "exile", 2), false, true)
+    if s then
+      obj.setRotationSmooth({ 0, s.yaw, 0 }, false, true)
+    end
+    GameState.data.rebound = GameState.data.rebound or {}
+    table.insert(GameState.data.rebound, { seat = seat, guid = obj.getGUID(), name = obj.getName() })
+    Wait.time(function()
+      if not obj.isDestroyed() then
+        Zones.refresh(obj)
+      end
+    end, 1.2)
+    printToAll("MTG > " .. obj.getName() .. " rebounds: exiled, " .. seat .. " may cast it free at their next upkeep.", GOOD)
+    return true
+  end
   -- "Put ~ into its owner's library seventh from the top": the effect moves
   -- the card, so the stack shouldn't send it to the graveyard.
   return text:lower():find("into its owner's library", 1, true) ~= nil
@@ -4292,7 +4453,7 @@ Effects.fieldSeat = fieldSeat
 local ARTIFACT_TOKENS = { treasure = true, clue = true, food = true, blood = true, powerstone = true, gold = true,
   junk = true, map = true, incubator = true, shard = true }
 
-function Effects.countPermanents(seat, word, scope)
+function Effects.countPermanents(seat, word, scope, tappedOnly)
   word = tostring(word or ""):lower():gsub("ies$", "y"):gsub("s$", "")
   local n = 0
   for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
@@ -4313,6 +4474,10 @@ function Effects.countPermanents(seat, word, scope)
           if not hit then
             pcall(function() hit = tostring(obj.getDescription()):lower():find("artifact", 1, true) ~= nil end)
           end
+        end
+        if hit and tappedOnly then
+          local st = TableSetup.seat(owner)
+          hit = st ~= nil and math.abs(((obj.getRotation().y - st.yaw + 540) % 360) - 180) > 30
         end
         if hit then
           n = n + (Pile and Pile.count(obj) or 1)
@@ -4905,7 +5070,7 @@ Events.on("cardMoved", function(d)
     or t:match("enters with a number of ([%w%+/%-]+) counters on it equal to the mana value")
   if n == nil and (ask_kind or mana_kind) and d.to.seat then
     local k2 = ask_kind or mana_kind
-    local key2 = (k2 == "+1/+1" and "plus") or (k2 == "-1/-1" and "minus") or (k2 == "loyalty" and "loyalty") or "other"
+    local key2 = Counters.kindOf(k2)
     local seat2 = d.to.seat
     local mv = 0
     pcall(function() mv = tonumber(JSON.decode(card.getGMNotes()).cmc) or 0 end)
@@ -4965,7 +5130,7 @@ Events.on("cardMoved", function(d)
   if clause:find(" if ", 1, true) or clause:find("for each", 1, true) then
     return
   end
-  local key = (kind == "+1/+1" and "plus") or (kind == "-1/-1" and "minus") or (kind == "loyalty" and "loyalty") or "other"
+  local key = Counters.kindOf(kind)
   Wait.time(function()
     if not card.isDestroyed() then
       local placed = Counters.place(card, key, n, d.to.seat)

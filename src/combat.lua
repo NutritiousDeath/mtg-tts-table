@@ -547,6 +547,28 @@ function Combat.attackClick(card, color, alt)
   redraw(card)
 end
 
+-- Untap every creature that attacked this turn (World at War's extra combat).
+function Combat.untapAttacked(seat)
+  local rec = GameState.data.attackedThisTurn
+  if rec == nil or rec.turn ~= ((GameState.data.turn or {}).taken or 0) then
+    return 0
+  end
+  local n = 0
+  for g in pairs(rec.guids) do
+    local o = getObjectFromGUID(g)
+    if o and not o.isDestroyed() then
+      local s = TableSetup.seat(controller(o) or seat)
+      if s and isTapped(o) then
+        local r = o.getRotation()
+        o.setRotationSmooth({ r.x, s.yaw, r.z }, false, true)
+        n = n + 1
+      end
+    end
+  end
+  printToAll("MTG > " .. n .. " creature(s) that attacked untap for the extra combat.", { 0.55, 0.9, 0.6 })
+  return n
+end
+
 local function declare(color)
   local c = state()
   c.declared = true
@@ -566,6 +588,18 @@ local function declare(color)
     end
   end
   c.order = keep
+  -- Remember who attacked this turn (World at War untaps them).
+  do
+    local tn = (GameState.data.turn or {}).taken or 0
+    local rec = GameState.data.attackedThisTurn
+    if rec == nil or rec.turn ~= tn then
+      rec = { turn = tn, guids = {} }
+      GameState.data.attackedThisTurn = rec
+    end
+    for _, g in ipairs(keep) do
+      rec.guids[g] = true
+    end
+  end
   if #list == 0 then
     return
   end
