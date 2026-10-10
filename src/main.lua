@@ -109,7 +109,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.53 (search zoom, +1/+0 counters, !unstick, card fixes)"
+SCRIPT_VERSION = "1.54 (mana pool tile left of the lands row)"
 
 function onLoad(saved)
   GameLog.setup()
