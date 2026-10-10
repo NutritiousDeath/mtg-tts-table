@@ -182,8 +182,13 @@ function Actions.onRotate(obj, spin, oldSpin, color)
       end
     end)
     if not isLand and (not isArtifact or isCreature) then
+      -- A mana creature (Llanowar Elves...): its mana goes into the pool.
+      if ManaChips and ManaChips.onTap then
+        ManaChips.onTap(obj, loc.seat)
+      end
       return
     end
+    local painAsked = false
     text = text:gsub(nm:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "~")
     local function hurt(n)
       if n and n > 0 and Trackers and Trackers.changeLife then
@@ -201,11 +206,23 @@ function Actions.onRotate(obj, spin, oldSpin, color)
       -- Painlands and Talismans: the colorless mana is free, the colored mana costs life.
       local dmg = tonumber(text:match("~ deals (%d+) damage to you") or "")
       if dmg and text:find("{t}: add {c}", 1, true) and text:find("{t}: add {", 1, true) then
+        painAsked = true
         Effects.askChoice(loc.seat, obj.getName() .. ": which mana?", "Colorless mana is free. Colored mana: " .. obj.getName() .. " deals " .. dmg .. " damage to you.",
           { { label = "COLORLESS", value = false }, { label = "COLORED (" .. dmg .. " dmg)", value = true } }, function(colored)
-            if colored then hurt(dmg) end
+            if colored then
+              hurt(dmg)
+              if ManaChips and ManaChips.offer then
+                ManaChips.offer(loc.seat, obj.getName(), ManaChips.coloredOptions(obj))
+              end
+            elseif ManaChips and ManaChips.add then
+              ManaChips.add(loc.seat, "C", 1)
+            end
           end)
       end
+    end
+    -- Everything else that makes mana: into the pool.
+    if not painAsked and ManaChips and ManaChips.onTap then
+      ManaChips.onTap(obj, loc.seat)
     end
   end
   if not isLand then

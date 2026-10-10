@@ -869,7 +869,14 @@ function Stack.activate(obj, playerColor, ab)
     table.insert(paid, "removed a counter from " .. tostring(ab.remName))
   end
   if rest:find("{", 1, true) then
-    table.insert(yours, "the mana")
+    -- Mana in the pool pays for it; anything the pool can't cover is still yours to pay.
+    local _, covered
+    if ManaChips and ManaChips.pay then
+      _, covered = ManaChips.pay(seat, rest, obj.getName())
+    end
+    if not covered then
+      table.insert(yours, "the mana")
+    end
   end
   for _, word in ipairs({ "discard", "sacrifice", "exile", "remove" }) do
     if rest:find(word, 1, true) then

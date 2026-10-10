@@ -507,7 +507,7 @@ function Effects.parse(text, sourceName)
   if t:find("draw a card, then you lose life equal to the number of cards in your hand", 1, true) then
     return { optional = false, notes = {}, conds = {}, actions = { { what = "drawHandLife", who = "you", n = 1 } } }
   end
-  -- "Add {B}{B}{B}." (Dark Ritual, Ugin's 0): the mana goes on your mana chips.
+  -- "Add {B}{B}{B}." (Dark Ritual, Ugin's 0): the mana goes on your mana pool.
   do
     local syms = t:match("^%s*add ([{}%a]+)%s*%.?%s*$")
     if syms and syms:find("{", 1, true) and syms:gsub("{%a}", "") == "" then
@@ -1403,7 +1403,7 @@ local function describe(a, target, controller)
   elseif a.what == "drawHandLife" then
     return "draw a card, then lose life equal to the cards in your hand"
   elseif a.what == "addMana" then
-    return "add mana to the mana chips"
+    return "add mana to the mana pool"
   elseif a.what == "reanimate" then
     return "a creature card from any graveyard comes back under your control" .. (a.loseMV and ", you lose life equal to its mana value" or "")
   elseif a.what == "palantir" then
@@ -1902,11 +1902,11 @@ local function apply(it, plan, target)
               return owner == seat and Effects.cardTypes(obj).creature == true
             end, label = "SACRIFICE", protect = false })
         elseif a.what == "addManaAny" then
-          Effects.askChoice(seat, it.name .. ": which color?", "Pick the color of mana to add to your mana chips.",
+          Effects.askChoice(seat, it.name .. ": which color?", "Pick the color of mana to add to your mana pool.",
             { { label = "W", value = "W" }, { label = "U", value = "U" }, { label = "B", value = "B" },
               { label = "R", value = "R" }, { label = "G", value = "G" } }, function(k)
               ManaChips.add(seat, k, 1)
-              printToAll("MTG > " .. it.name .. ": " .. seat .. " adds " .. k .. " to their mana chips.", GOOD)
+              printToAll("MTG > " .. it.name .. ": " .. seat .. " adds " .. k .. " to their mana pool.", GOOD)
             end)
         elseif a.what == "counterAll" then
           Effects.counterAll(seat, a, it)
@@ -1991,7 +1991,7 @@ local function apply(it, plan, target)
             table.insert(parts, n .. " " .. key)
           end
           table.sort(parts)
-          printToAll("MTG > " .. it.name .. ": " .. seat .. " adds " .. table.concat(parts, ", ") .. " to their mana chips.", GOOD)
+          printToAll("MTG > " .. it.name .. ": " .. seat .. " adds " .. table.concat(parts, ", ") .. " to their mana pool.", GOOD)
         elseif a.what == "reanimate" then
           Effects.reanimate(seat, a, it)
         elseif a.what == "palantir" then

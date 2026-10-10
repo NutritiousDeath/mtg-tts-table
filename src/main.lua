@@ -108,7 +108,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.49 (library search reads card data from the deck, reconnect puts you back in your seat, !seat, !resync)"
+SCRIPT_VERSION = "1.50 (mana pool counted on the MANA tile: taps, spell costs, no chips)"
 
 function onLoad(saved)
   GameLog.setup()

@@ -1,0 +1,260 @@
+MTG COMMANDER TABLE (TTS) - TEST GUIDE
+Version being tested: 1.50
+After loading, chat should say:  MTG > Scripts loaded: version 1.49 (...)
+
+HOW TO USE THIS
+- One person can test alone: type  !solo on  in chat. You can then act for every seat.
+- Load a deck, start the game, put the cards you're testing into your hand (or drag them to the battlefield).
+- Go down the list ONE LINE AT A TIME. Each line is:   DO this  ->  EXPECT that.
+- Mark each line:  OK   or   WRONG (and write what actually happened).
+- "BY HAND" lists at the end of each deck are things the table does NOT automate. The test there is only that the table doesn't do something wrong; you play them yourself.
+- If something looks stuck, try these chat commands:  !triggers flush   !import reset   !resync   !order off
+- When you report a bug, copy the chat lines from just before and after it. That's the most useful thing you can send.
+
+
+=====================================================================
+PART 1 - EVERY GAME (any deck, do these once)
+=====================================================================
+
+JOINING AND SEATS
+[ ] 1.  DO: sit in a seat.  EXPECT: you can use your own panels; you can't use another seat's.
+[ ] 2.  DO: close TTS and rejoin.  EXPECT: chat says your seat is kept, and you are put back in your color automatically.
+[ ] 3.  DO: as a spectator (Grey) type  !seat Red  (use a free color).  EXPECT: you move to Red. If the color is taken it says so.
+[ ] 4.  DO: type  !resync.  EXPECT: chat tells you what color you are and that your panels were refreshed.
+
+IMPORTING A DECK
+[ ] 5.  DO: paste a decklist (or  !import <Archidekt/Moxfield link>) and import.  EXPECT: chat shows timed lines like [3.2s] ... and a finished message, deck appears in your library and your commander in the command zone.
+[ ] 6.  DO: have a SECOND person import a deck at the same time as you.  EXPECT: one of you is told an import is already running (with how long ago it last made progress).
+[ ] 7.  DO: type  !import reset.  EXPECT: chat says the importer was reset.
+[ ] 8.  If any import fails: copy every chat line that starts with [ and send them to the developer.
+
+STARTING THE GAME
+[ ] 9.  DO: pick first player, press Start.  EXPECT: everyone draws 7, mulligan panels appear.
+[ ] 10. DO: in the mulligan panel click the FRIENDLY / UNFRIENDLY line.  EXPECT: it switches for everyone; it locks once anyone has mulliganed.
+[ ] 11. DO: mulligan once, then keep.  EXPECT: the right number of cards go to the bottom.
+
+TURNS
+[ ] 12. DO: pass through untap, upkeep, draw, main, combat, end.  EXPECT: untap step untaps your stuff; you draw one card on the draw step; turn passes to the next seat.
+[ ] 13. DO: put a creature onto the battlefield this turn.  EXPECT: it shows a Zzz badge (summoning sick) until your next turn.
+
+COUNTERS, TAP, MENUS
+[ ] 14. DO: right-click a creature > add +1/+1 counter.  EXPECT: the card shows +1/+1 and its total power/toughness.
+[ ] 15. DO: right-click > Clear counters.  EXPECT: counters gone.
+[ ] 16. DO: right-click > Goad.  EXPECT: GOADED badge on the card.
+[ ] 17. DO: tap a land yourself.  EXPECT: nothing breaks; the MANA tile shows +1 of the land's color (a land that makes one of several colors asks which).
+[ ] 18. DO: right-click > Delete card.  EXPECT: the card disappears.
+
+COMBAT
+[ ] 19. DO: go to combat, click ATTACK? on a creature.  EXPECT: it shows ATTACKING with a target; click again to change the target.
+[ ] 20. DO: finish attackers.  EXPECT: other seats get BLOCK? buttons on their creatures.
+[ ] 21. DO: deal damage.  EXPECT: life totals change; a creature with lethal damage goes to the graveyard.
+[ ] 22. DO: send a token to the graveyard.  EXPECT: it disappears (tokens aren't real cards).
+[ ] 23. DO: a commander dies.  EXPECT: you are asked about the command zone.
+
+LIBRARY SEARCH
+[ ] 24. DO: right-click your library > Search. Type  creature  and press SEARCH.  EXPECT: all your creature cards show up.
+[ ] 25. DO: type  instant,  then  elf creature,  then  scry.  EXPECT: matching cards each time. If it says "Nothing matches ... (N of M cards had readable type/rules text)", send that exact line.
+[ ] 26. DO: click a card.  EXPECT: it goes where the TO: button says (hand or battlefield). Close with CLOSE + SHUFFLE: library shuffles.
+
+TRIGGER QUEUE
+[ ] 27. DO: make two triggers happen at once.  EXPECT: you're asked what order to put them on the stack. If nobody answers for 25 seconds they go on in the shown order.
+[ ] 28. DO: type  !order off.  EXPECT: you're never asked, they go on automatically. Type  !order on  to turn asking back on.
+[ ] 29. If a trigger didn't go on the stack:  type  !triggers flush  and note what chat says.
+
+SPEED / LAG
+[ ] 30. DO: type  !perf.  EXPECT: one line with cards, tokens, buttons, and a scan time in ms.
+DO: type  !perf watch,  play normally for 15 seconds.  EXPECT: one line listing how many times things were called. Send it to the developer if the table lags.
+[ ] 32. Tip: lag while streaming is usually graphics settings / the stream encoder / other programs, not the script. Lower TTS graphics quality first.
+
+
+=====================================================================
+PART 2 - EXTRA FEATURES (any deck that has the cards)
+=====================================================================
+
+SOULBOND (Deadeye Navigator, Wolfir Silverheart, etc.)
+[ ] 33. DO: play a soulbond creature with another creature of yours out.  EXPECT: popup "pair?" - click PAIR on the other creature (or SKIP).
+[ ] 34. DO: play a different creature while a soulbond creature is unpaired.  EXPECT: YES / NO popup to pair them.
+[ ] 35. EXPECT: both paired creatures show  PAIRED: <partner name>.
+[ ] 36. Wolfir Silverheart paired: both creatures get +4/+4 shown on the card.
+[ ] 37. Deadeye Navigator paired: BOTH creatures get a right-click Activate "{1}{U}: Exile this creature, then return it to the battlefield". Using it blinks the creature (ETB triggers again).
+[ ] 38. DO: one of the pair leaves the battlefield.  EXPECT: chat says the pair ended; the bonus goes away.
+[ ] 39. DO: right-click a soulbond creature > Soulbond: pair with... / unpair.  EXPECT: fixes a mistake by hand.
+
+METALCRAFT (Etched Champion, Mox Opal style text)
+[ ] 40. DO: control three artifacts, then check an Etched Champion.  EXPECT: +2/+2 automatically. Lose an artifact: the bonus goes away.
+[ ] 41. A trigger that says "if you control three or more artifacts": EXPECT it decides by itself (no YES/NO).
+
+MANA POOL (the MANA tile left of your command zones - no more chips)
+[ ] 52. DO: tap a basic land by hand.  EXPECT: a number appears beside that color's circle on the MANA tile (nothing shows at 0).
+[ ] 53. DO: tap a dual land / Command Tower.  EXPECT: a popup asks which color; the pool gets that color.
+[ ] 54. DO: tap a pain land (Adarkar Wastes) or Talisman.  EXPECT: asks COLORLESS (free) or COLORED (you lose 1 life), then which color.
+[ ] 55. DO: tap Ancient Tomb / a Treasure / a mana creature (Llanowar Elves).  EXPECT: the right mana is added (Tomb: 2 colorless and you lose 2 life; Treasure: asks which color).
+[ ] 56. DO: tap Gaea's Cradle or a creature with another tap ability.  EXPECT: nothing is added (the table can't tell what you used it for): click the tile yourself.
+[ ] 57. DO: cast a spell from hand with mana in the pool.  EXPECT: chat says "pays <spell> from the mana pool (...)" and the numbers drop. Not enough in the pool: it takes what's there and says how many are short.
+[ ] 58. DO: activate an ability with a mana cost ({1}{U}).  EXPECT: paid from the pool the same way; if the pool is short you're told to pay the rest.
+[ ] 59. DO: click a color on the tile (+1), right-click (-1).  EXPECT: the number changes. Dark Ritual / Lotus Cobra / Spirit Guides add to the pool too.
+[ ] 60. DO: move to the next step.  EXPECT: chat says mana pools emptied, the tile numbers vanish.
+[ ] 61. Commander tax and cost reducers aren't known to the table: it takes the printed cost. Fix any leftover with right-click on the tile.
+
+TOKEN PILES (OFF by default - turn on with  !stack on  only when you want to test)
+[ ] 42. DO: type !stack on, make 5 Saprolings / Squirrels / Insects.  EXPECT: ONE card with an "x5" badge. "Whenever a creature enters" triggers still fire 5 times.
+[ ] 43. EXPECT: Treasure / Clue / Food and tokens with abilities are NEVER put in a pile.
+[ ] 44. DO: pick a pile up.  EXPECT: you take ONE token; the rest stay as a pile with the badge one lower.
+[ ] 45. DO: tap a pile by hand.  EXPECT: only one token taps. The untap step untaps the whole pile.
+[ ] 46. DO: right-click one token > add a +1/+1 counter.  EXPECT: that token leaves the pile alone.
+[ ] 47. DO: a mass effect (counter on each creature, proliferate).  EXPECT: the whole pile gets it and keeps its xN.
+[ ] 48. DO: click ATTACK? / BLOCK? / a target button / attach Equipment on a pile.  EXPECT: one token comes off, the rest stay.
+[ ] 49. DO: "for each creature you control" or metalcraft with a pile out.  EXPECT: each token in the pile is counted.
+[ ] 50. DO: drag the whole pile to the graveyard (or right-click > Pile: all die).  EXPECT: every token dies, one death each (Blood Artist drains N times).
+[ ] 51. Right-click a pile: split off 1 / split off 5 / unstack all / all die.  Commands: !stack off (everything single), !stack unstack, !stack merge.
+
+
+=====================================================================
+PART 3 - DECK BY DECK
+=====================================================================
+
+---------------------------------------------------------------------
+DECK A: ARTIFACT / BLINK DECKS (Kasla, Urza, Arcum)
+---------------------------------------------------------------------
+TOKENS AND STATIC BONUSES
+[ ] A1.  DO: Anointed Procession on the battlefield, then make a token (Hero of Bladehold, Krenko).  EXPECT: you get double.
+[ ] A2.  DO: Academy Manufactor out, make a Treasure / Food / Clue.  EXPECT: you get one of each.
+[ ] A3.  DO: Karn the Great Creator -2 or Urza ETB.  EXPECT: a Construct token that shows +1/+1 for each artifact you control. Add an artifact and check the P/T changes.
+[ ] A4.  DO: Intangible Virtue out.  EXPECT: your creature tokens get +1/+1.
+[ ] A5.  DO: Hangarback Walker with 3 counters, send it to the graveyard.  EXPECT: 3 Thopters (if not, use the TOKENS tile and report).
+
+TRIGGERS
+[ ] A6.  DO: cast two spells in one turn with Clarion Spirit out.  EXPECT: a Spirit token on the second.
+[ ] A7.  DO: Faerie Mastermind out, an opponent draws their second card in a turn.  EXPECT: you draw.
+[ ] A8.  DO: The Endstone out, play a land / cast a spell.  EXPECT: you draw.
+[ ] A9.  DO: Ugin, Eye of the Storms, cast a colorless spell.  EXPECT: exile prompt.
+[ ] A10. DO: Crested Sunmare, another creature enters.  EXPECT: the trigger asks properly.
+[ ] A11. DO: Resplendent Angel trigger.  EXPECT: "+2/+2 and lifelink until end of turn" resolves on its own.
+
+SPELLS AND EFFECTS
+[ ] A12. Windfall: everyone discards and draws the biggest count.
+[ ] A13. Finale of Glory / Increasing Devotion: asks X; the "instead" version (10+ / flashback) works.
+[ ] A14. Martial Coup: X=5 or more gives Soldiers and wipes the other creatures.
+[ ] A15. Cyclonic Rift, normal and overloaded.
+[ ] A16. Mind Over Matter: modal choice works.
+[ ] A17. Tezzeret the Seeker: +1 untaps; -X searches only artifacts of that mana value or less.
+[ ] A18. Portal to Phyrexia: each opponent gets a sacrifice prompt (none if they have no creatures).
+[ ] A19. Metalworker / Nykthos: asks for the number / color, adds the mana.
+
+BLINK, CLONES, COPIES
+[ ] A20. Thassa, Displacer Kitten, Ghostly Flicker: pick a permanent, it leaves and returns, ETB fires again.
+[ ] A21. Phyrexian Metamorph / Copy Artifact: COPY prompt, a token copy appears, the real card is parked; destroy the copy and the real card goes to the graveyard.
+[ ] A22. Mirrorworks: a nontoken artifact enters -> PAY {2}? -> token copy.
+[ ] A23. Helm of the Host: equip a creature, beginning of combat -> hasty token copy. (If it says "make it yourself", report it.)
+[ ] A24. Altered Ego / Clone copying a creature: the copy lands on your battlefield and its enters triggers go on the stack.
+
+ARCUM AND URZA
+[ ] A25. Arcum Dagsson: click SACRIFICE on an artifact creature -> library search for mana value +1 opens for its controller (noncreature only).
+[ ] A26. Urza {5}: shuffles, exiles the top card, asks "play it free?". Test a land on top (lands drop on your lands) and a spell (goes to the stack).
+[ ] A27. Discover N (Geological Appraiser etc.): exiles until a nonland of mana value N or less; CAST or TO HAND; rest go to the bottom.
+
+BY HAND in these decks (the table should SAY to do it by hand): Illusionist's Bracers, Lithoform Engine, Isochron Scepter, Mystic Forge, Chrome Mox / Semblance Anvil imprint, Mindslaver, Memory Jar, Spellskite, Emry, Portal reanimation from any graveyard, Baird's tax, Goblin Warchief discount, Purphoros devotion, Sunmare indestructible, Urza's tap-artifact mana, Endstone life halving, Basri emblem.
+
+
+---------------------------------------------------------------------
+DECK B: ZOO (Marath)
+---------------------------------------------------------------------
+[ ] B1.  Wheel of Fortune: everyone discards and draws 7, no questions.
+[ ] B2.  Birthing Pod / Eldritch Evolution: asks "sacrificed creature's mana value?", type it, search opens at that +1 (exactly) / +2 (or less). Sacrifice the creature yourself first.
+[ ] B3.  Chord of Calling / Finale of Devastation / Green Sun's Zenith: asks X; search opens with that mana value limit.
+[ ] B4.  Tutors (Worldly, Enlightened, Gamble, Eladamri's Call, Shared Summons, Crop Rotation, Imperial Recruiter, Ranger-Captain, Recruiter of the Guard): the search window opens with the right destination.
+[ ] B5.  Worldly / Enlightened Tutor: the card shows revealed next to the library and goes on top (not hand). Its PUT ON TOP button vanishes once the card moves.
+[ ] B6.  Gamble: search, take a card, CLOSE: library shuffles AND you discard a random card (chat says which).
+[ ] B7.  Winota: attack with a non-Human -> look at the top six, take a Human; put it attacking BY HAND.
+[ ] B8.  Eternal Witness, Sevinne's Reclamation, Auriok Salvagers: graveyard pick works.
+[ ] B9.  Grenzo: combat damage -> goad / exile prompt.   Toski: combat damage -> draw.
+[ ] B10. Emiel {3} blink.  Marath {X}: Elemental token.  Lukka +1: Dinosaur.
+[ ] B11. Emiel: pay yes -> the entering creature gets a +1/+1 counter.
+[ ] B12. Tibalt's Trickery: counter prompt.  Turntimber Symbiosis: top 7 panel.
+[ ] B13. Faithless Looting, Llanowar Visionary: draw / discard work.
+[ ] B14. Sylvan Library: at the draw step -> DRAW 2? -> pay for how many -> pick cards to put on top. The panel says Sylvan Library.
+[ ] B15. Jeska's Will: pick a mode (BOTH only if you control a commander). Mana: pick an opponent, confirm card count, {R} in the mana pool. Exile: top 3 exiled, play them this turn.
+[ ] B16. Spirit Guides: right-click the card IN HAND -> "Exile for {G}/{R} mana" -> exiled, mana added to the pool.
+[ ] B17. City of Brass / Mana Confluence / Ancient Tomb: TAP the land yourself -> you lose 1 / 1 / 2 life automatically. A land that enters tapped doesn't count.
+[ ] B18. Painlands (Adarkar Wastes etc.) and Talismans: tap -> asks COLORLESS (free) or COLORED (take 1).
+[ ] B19. Planeswalkers (Lukka etc.): loyalty buttons show right after the spell resolves and work the same turn.
+[ ] B20. Doubling Season: a +1/+1 counter effect puts TWO; a planeswalker enters with double loyalty and plus abilities add double.
+[ ] B21. Hardened Scales: +1/+1 counters get one extra. Winding Constrictor: any counters on your artifacts / creatures get one extra.
+[ ] B22. Doubling Season + Hardened Scales together: 1 counter becomes 4. An OPPONENT'S Doubling Season doesn't touch your permanents. Clicking a counter button by hand is never changed.
+[ ] B23. Rhox Faithmender / Tainted Remedy / Boon Reflection out, then gain life: a box asks for the real amount (KEEP button).
+[ ] B24. Thought Reflection / Furnace of Rath / Torbran: draw / damage effects ask the same way.
+
+BY HAND in the Zoo: Esper Sentinel draw / tax, Cavern-Hoard Dragon Treasures, Chrome Mox / Mox Diamond, Dualcaster Mage copy, Ragavan, Sanctifier en-Vec, Shatterskull Smashing, Silence, Survival of the Fittest, Wheel of Misfortune, Sanctum Prelate, Conspiracy Theorist, Flamescroll Celebrant ping, Gaea's Cradle, Utopia Sprawl, Mana Vault, LED, and the stax pieces (Deafening Silence, Drannith, Dryad Militant, Samurai, Grand Abolisher: nothing enforces them).
+
+
+---------------------------------------------------------------------
+DECK C: SEPHIROTH (black)
+---------------------------------------------------------------------
+[ ] C1.  Dark Confidant upkeep: the top card goes to hand, chat names it, you lose its mana value.
+[ ] C2.  Castle Locthwain ability: you draw, then lose life equal to cards in hand.
+[ ] C3.  Dark Ritual: three B show on the MANA tile. Ugin, Eye of the Storms 0: three C.
+[ ] C4.  Reanimate / Virtue of Persistence: asks which graveyard, pick a creature, it enters under your control (Reanimate also costs life equal to its mana value).
+[ ] C5.  Thoughtseize / Inquisition / Duress: you see their hand, only legal cards can be picked, the card goes to THEIR graveyard.
+[ ] C6.  Invoke Despair: the opponent sacrifices a creature, enchantment, planeswalker, or loses 2 life and you draw for each they can't.
+[ ] C7.  Accursed Marauder: each player picks a nontoken creature. Sheoldred's Edict: nontoken / token / planeswalker modes.
+[ ] C8.  Black Market Connections and Rankle: YES / NO per mode, every chosen mode happens. Insatiable Avarice (Spree) the same.
+[ ] C9.  Palantir of Orthanc end step: counter, scry 2, opponent picks draw or mill.
+[ ] C10. The Soul Stone: nothing at upkeep until you activate the Harness ability, then it reanimates each upkeep.
+[ ] C11. Lolth: her -8 emblem text does NOT trigger anything by itself. Hive of the Eye Tyrant: no attack trigger while it is a land.
+[ ] C12. Case of the Stashed Skeleton: makes the Skeleton; chat tells you to suspect it yourself.
+[ ] C13. Rat King / Elegy Acolyte end step: asks "did a permanent leave the battlefield?", then makes the token.
+[ ] C14. Death-Priest of Myrkul: your Skeletons, Vampires and Zombies get +1/+1.
+[ ] C15. Consuming Corruption: you gain life equal to the Swamps you control (dual lands with the Swamp type count); chat reminds you to deal the damage by hand.
+[ ] C16. Sephiroth enters or attacks: asks to sacrifice another creature (NO skips), draws 1. His back face: sacrifice any number, press DONE, draw that many.
+[ ] C17. Sephiroth drain: each creature death drains 1; the 4th resolution in one turn transforms him. Chat counts "resolved N time(s)".
+[ ] C18. Takenuma channel: mills 3 first, then you pick the creature or planeswalker to return.
+
+BY HAND in the Sephiroth deck: Meathook Massacre and Toxic Deluge -X/-X, Consuming Corruption damage (life is automatic), Agadeem's Awakening, Hive of the Eye Tyrant becoming a creature, Spymaster's Vault connive, Umbral Collar Zealot sacrifice, Forsaken Miner crime, Eyetwitch learn, Lord Skitter exile, Sothera end-step sacrifice and return, Sephiroth's Super Nova emblem, Takenuma channel counts, Lolth emblem.
+
+
+---------------------------------------------------------------------
+DECK D: XAVIER SAL (tokens, green/black)
+---------------------------------------------------------------------
+TOKEN MAKERS
+[ ] D1.  Chatterfang out: every token you make ALSO makes as many 1/1 Squirrels (chat says so). Doubling Season / Parallel Lives double both.
+[ ] D2.  Panharmonicon out: Hornet Queen / Grave Titan / Bastion entering = chat says an extra trigger and you order two triggers.
+[ ] D3.  Avenger of Zendikar: a Plant per land you control; on landfall it asks, then +1/+1 counter on each Plant.
+[ ] D4.  Mycoloth: when it enters you can click creatures to devour (press DONE); upkeep makes Saprolings equal to its +1/+1 counters.
+[ ] D5.  Scute Swarm landfall: an Insect, or a copy of itself if you control six or more lands.
+[ ] D6.  Springheart Nantuko landfall: if bestowed on your creature, asks to pay {1} for a copy; otherwise (or NO) a 1/1 Insect.
+[ ] D7.  Sporemound: play a land -> a Saproling token. (If not, type !triggers flush and send the developer what chat says.)
+[ ] D8.  Second Harvest: a copy of each token you control (a pile copies as a pile of the same size). Myr Propagator ability: a copy of itself.
+[ ] D9.  Garruk, Primal Hunter: -3 draws cards equal to your greatest power. -6 makes a Wurm per land.
+[ ] D10. Tireless Tracker landfall: makes a Clue. Lotus Cobra landfall: asks a color, adds it to your mana pool.
+
+COUNTERS AND SACRIFICE
+[ ] D11. Kalonian Hydra attack: doubles +1/+1 counters on every creature you control (with Doubling Season it triples).
+[ ] D12. Sly Requisitioner: a nontoken artifact of yours going to the graveyard makes a Servo.
+[ ] D13. Kodama of the West Tree: a creature of yours with a counter or Equipment / Aura on it that hits a player triggers the land search (a plain creature does not).
+[ ] D14. Greater Good / Altar of Dementia / Viscera Seer: right-click > Activate asks which creature to sacrifice (click it), reads its power, then draws / mills that many.
+[ ] D15. Xavier Sal: Activate asks for a permanent to take a counter from (populate: click a creature token to copy), or a creature to sacrifice (proliferate: click each permanent, then DONE).
+[ ] D16. Victimize: asks which creature to sacrifice, then lets you click two creature cards in your graveyard (they return tapped).
+
+BY HAND in the Xavier Sal deck: Living Death, Abundance, Rite of Replication kicker (five copies), Sekki's damage prevention into Spirits and its return from the graveyard, Worldspine Wurm's shuffle clause, Tireless Tracker's Clue-sacrifice counter, Kodama's trample for modified creatures, Deep Forest Hermit vanishing, Cabal Coffers / Circle of Dreams Druid / Cryptolith Rite / Bloom Tender mana, Urborg and Yavimaya land types, Chatterfang's +X/-X ability, Liliana -9, Liliana Death's Majesty's Zombie type, Myr Battlesphere attack tapping.
+
+
+=====================================================================
+PART 4 - 4-PLAYER TABLE TEST (do once with real people)
+=====================================================================
+[ ] E1.  All four sit in four seats, each imports a deck. EXPECT: every deck imports; nobody is blocked.
+[ ] E2.  Play two full rounds. EXPECT: turn order is right, each person can only act in their own seat, nobody sees another player's hand.
+[ ] E3.  One person disconnects and rejoins mid-game. EXPECT: put back in their seat, hand intact.
+[ ] E4.  A combat with an attacker and a blocker from different seats. EXPECT: damage, life and deaths are correct.
+[ ] E5.  Commander damage, poison, and life loss track correctly on the player panels.
+[ ] E6.  Someone is idle during a response window. EXPECT: the AFK timer passes for them (if you turned it on with !afk <seconds>).
+[ ] E7.  Everyone types  !perf  at the same moment. EXPECT: nobody's table freezes; report any line with a high ms.
+
+
+=====================================================================
+NOTES / BUGS (write here)
+=====================================================================
+Card or deck:
+What I did:
+What I expected:
+What happened:
+Chat lines before and after:
