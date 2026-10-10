@@ -155,5 +155,10 @@ BY HAND in the Xavier Sal deck: Living Death, Abundance, Rite of Replication kic
 [ ] New plain tokens merge into a matching pile after ~2s and at cleanup/upkeep. Tapped, counter-ed, equipped or summoning-sick tokens stay separate from the others.
 [ ] Right-click a pile: split off 1 / split off 5 / unstack all / all die. !stack off turns everything back into single cards, !stack unstack just unstacks, !stack merge merges now.
 
+== v1.49: SEARCH + RECONNECT
+[ ] Right-click library > Search, type "creature" > SEARCH: lists the creature cards. Try "instant", "elf creature", "scry". If it says "Nothing matches ... (N of M cards had readable type/rules text)", send me that line.
+[ ] Someone closes TTS and rejoins: chat says "<name> (<Color>) disconnected. Their seat is kept", and when they come back they're seated at the same color automatically.
+[ ] A spectator (Grey) can type !seat <Color> to take a FREE seat; !resync refreshes their panels and tells them what they are.
+
 == NOTES / BUGS
 (write here)

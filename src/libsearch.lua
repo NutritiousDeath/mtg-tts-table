@@ -159,11 +159,27 @@ function LibSearch.run(color)
   local entries = lib.type == "Deck" and lib.getObjects() or {
     { guid = lib.getGUID(), name = lib.getName(), description = lib.getDescription(), gm_notes = lib.getGMNotes() } }
   local want = words(query[color])
+  -- getObjects() can leave the type line / rules text out of its entries, so the card data
+  -- inside the deck (getData, matched by POSITION) is read as well.
+  local dataAll = lib.getData()
+  local inside = lib.type == "Deck" and (dataAll.ContainedObjects or {}) or { dataAll }
   local matches = {}
   local f = filters[color]
   local lk = look[color]
   for n, e in ipairs(entries) do
     e.index = e.index or (n - 1)
+    local cd = inside[n]
+    if cd then
+      if (e.description or "") == "" then
+        e.description = cd.Description
+      end
+      if (e.gm_notes or "") == "" then
+        e.gm_notes = cd.GMNotes
+      end
+      if (e.name or "") == "" then
+        e.name = cd.Nickname
+      end
+    end
     local hay = haystack(e)
     if f and f.typeOnly then
       hay = tostring(gmField(e.gm_notes, "typeLine") or e.description or ""):lower()
@@ -203,8 +219,7 @@ function LibSearch.run(color)
   -- inside a deck can share a GUID, so a GUID lookup showed one card's
   -- picture for every match (and could take the wrong card).
   local faces, guids = {}, {}
-  local data = lib.getData()
-  local contained = lib.type == "Deck" and (data.ContainedObjects or {}) or { data }
+  local contained = inside
   for i = 1, math.min(MAX_SHOWN, #matches) do
     local e = matches[i]
     local pos = (e.index or 0) + 1        -- getObjects() index is 0-based
@@ -221,6 +236,17 @@ function LibSearch.run(color)
   end
   shown[color] = guids
   render(color, guids, faces, #entries, #matches)
+  if #matches == 0 and #want > 0 then
+    -- Help work out why: how many cards had a readable type line?
+    local readable = 0
+    for _, e in ipairs(entries) do
+      if gmField(e.gm_notes, "typeLine") or (e.description or "") ~= "" then
+        readable = readable + 1
+      end
+    end
+    status(color, "Nothing matches \"" .. table.concat(want, " ") .. "\". (" .. readable .. " of " .. #entries
+      .. " cards had readable type/rules text.)")
+  end
 end
 
 local held = {}   -- [color] = card taken to go on top of the library after the shuffle

@@ -18,6 +18,7 @@
     !where       show which zones the card under your mouse is in
     !hover       show what is under your mouse (for alt-zoom problems)
     !zones       count the cards tracked in each of your areas
+    !seat <Color>   take a free seat (after a disconnect); !resync refreshes your panels
     !stack on/off   token piles: identical plain tokens share one card (xN badge); !stack merge / !stack unstack
     !perf watch  counts what the script does for 15 seconds (send me the line if it lags)
     !perf        how heavy the table is right now (objects, buttons, how long the board scan takes)
@@ -107,7 +108,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.48 (token piles, off by default: !stack on)"
+SCRIPT_VERSION = "1.49 (library search reads card data from the deck, reconnect puts you back in your seat, !seat, !resync)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -178,8 +179,56 @@ function onObjectStateChange(obj, oldGuid)
 end
 
 -- Someone joined the game: make sure they get their seat-only panels.
+-- Who sat where (by Steam id), so someone who drops and comes back can be put back in their seat.
+local function seatMemory()
+  GameState.data.seatOf = GameState.data.seatOf or {}
+  return GameState.data.seatOf
+end
+
+local function takenBy(color)
+  local ok, p = pcall(function() return Player[color] end)
+  return ok and p ~= nil and p.seated == true
+end
+
+-- Put `player` back in the seat they had, if it is free. Returns the color or nil.
+local function restoreSeat(player)
+  local want = seatMemory()[player.steam_id]
+  if want == nil or player.color == want or not TableSetup.isActive(want) or takenBy(want) then
+    return nil
+  end
+  local ok = pcall(function() player.changeColor(want) end)
+  return ok and want or nil
+end
+
 function onPlayerConnect(player)
   Wait.time(function() TableUI.refreshVisibility() end, 1)
+  -- A returning player lands as a spectator (Grey) and can't touch anything: sit them back down.
+  Wait.time(function()
+    local ok, color = pcall(function() return player.color end)
+    if not ok then
+      return
+    end
+    if color == "Grey" or color == "Black" or color == "" or color == nil then
+      local back = restoreSeat(player)
+      if back then
+        broadcastToAll("MTG > " .. tostring(player.steam_name) .. " is back: seated at " .. back
+          .. " again. (Change color in the player list if you wanted a different seat.)", { 0.55, 0.9, 0.6 })
+      else
+        printToColor("MTG > You're a spectator. Pick a free color in the player list, or type !seat <Color> (e.g. !seat Red).",
+          color or "Grey", { 1, 0.8, 0.3 })
+      end
+    end
+    TableUI.refreshVisibility()
+  end, 2.5)
+end
+
+function onPlayerDisconnect(player)
+  local color = player.color
+  if color and color ~= "Grey" and color ~= "Black" and color ~= "" and TableSetup.isActive(color) then
+    seatMemory()[player.steam_id] = color
+    broadcastToAll("MTG > " .. tostring(player.steam_name) .. " (" .. color .. ") disconnected. Their seat is kept: when they rejoin they're put back at "
+      .. color .. " (or they can type !seat " .. color .. ").", { 1, 0.8, 0.3 })
+  end
 end
 
 -- Someone rolled a die: the planar die is handled by planechase.lua.
@@ -232,6 +281,12 @@ end
 -- Someone sat down or switched seats: only the layout's seats are allowed;
 -- otherwise face their camera toward their seat.
 function onPlayerChangeColor(color)
+  if color and color ~= "Grey" and color ~= "Black" and TableSetup.isActive(color) then
+    local ok, p = pcall(function() return Player[color] end)
+    if ok and p and p.steam_id then
+      seatMemory()[p.steam_id] = color
+    end
+  end
   -- Seat-only panels (import etc.) for someone who just sat down.
   Wait.time(function() TableUI.refreshVisibility() end, 0.5)
   if color == "Grey" or color == "Black" then
@@ -392,6 +447,28 @@ function onChat(message, sender)
   if message == "!zzz on" or message == "!zzz off" then
     local on = Counters.setZzzAnimation(message == "!zzz on")
     broadcastToAll("MTG > Animated Zzz badge " .. (on and "ON" or "OFF (static badge, faster)"), { 0.75, 0.8, 0.9 })
+    return false
+  end
+
+  if message == "!resync" then
+    TableUI.refreshVisibility()
+    Counters.refreshMenus()
+    broadcastToColor("MTG > Refreshed your panels. You are " .. tostring(sender.color) .. (TableSetup.isActive(sender.color)
+      and ", a seat in this game." or ", NOT a seat: pick a free color or type !seat <Color>."), sender.color, { 0.75, 0.8, 0.9 })
+    return false
+  end
+
+  local seatWant = message:match("^!seat (%a+)$")
+  if seatWant then
+    local want = seatWant:sub(1, 1):upper() .. seatWant:sub(2):lower()
+    if not TableSetup.isActive(want) then
+      printToColor("MTG > " .. want .. " isn't a seat here: " .. table.concat(TableSetup.activeSeats(), ", "), sender.color, { 1, 0.6, 0.2 })
+    elseif takenBy(want) and sender.color ~= want then
+      printToColor("MTG > " .. want .. " is taken by someone else right now.", sender.color, { 1, 0.6, 0.2 })
+    else
+      sender.changeColor(want)
+      printToColor("MTG > Moved you to " .. want .. ".", want, { 0.55, 0.9, 0.6 })
+    end
     return false
   end
 
