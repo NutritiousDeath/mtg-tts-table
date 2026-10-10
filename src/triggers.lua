@@ -176,6 +176,10 @@ local function parseTrigger(p)
   if plainFind(p, "cumulative upkeep") then
     return { kind = "step", step = "upkeep", who = "you" }
   end
+  -- Sly Requisitioner: "whenever a nontoken artifact you control is put into a graveyard from the battlefield".
+  if plainFind(p, "whenever a nontoken artifact you control is put into a graveyard from the battlefield") then
+    return { kind = "dies", subject = "artifact", subjects = { "artifact" }, nontoken = true, mine = true }
+  end
   -- Baeloth: "whenever a goaded attacking or blocking creature dies".
   if plainFind(p, "whenever a goaded attacking or blocking creature dies") then
     return { kind = "dies", subject = "creature", subjects = { "creature" }, goaded = true }
@@ -462,7 +466,9 @@ local function parseCombat(p)
       add({ kind = "blocks", equipped = true })
     end
   end
-  if plainFind(p, "whenever ~ deals combat damage to a player") or plainFind(p, "whenever ~ deals combat damage to an opponent") then
+  if plainFind(p, "whenever a modified creature you control deals combat damage to a player") then
+    add({ kind = "combatDamage", mine = true, modified = true })
+  elseif plainFind(p, "whenever ~ deals combat damage to a player") or plainFind(p, "whenever ~ deals combat damage to an opponent") then
     add({ kind = "combatDamage", self = true })
   elseif plainFind(p, "whenever a creature you control deals combat damage to a player")
       or plainFind(p, "whenever a creature you control deals combat damage to an opponent") then
@@ -1061,7 +1067,7 @@ Events.on("cardMoved", function(d)
     return
   end
   local entering = IN_PLAY[d.to.region] and not IN_PLAY[d.from.region]
-  local dying = IN_PLAY[d.from.region] and d.to.region == "graveyard" and typesOf(card).creature
+  local dying = IN_PLAY[d.from.region] and d.to.region == "graveyard" and (typesOf(card).creature or typesOf(card).artifact)
   if not entering and not dying then
     return
   end
@@ -1512,7 +1518,16 @@ function Triggers.onCombatDamage(list)
       if t.kind == "combatDamage" and t.mine then
         local n = 0
         for _, h in ipairs(list) do
-          if h.controller == p.controller and (t.subjects == nil or (not h.obj.isDestroyed() and matchesSubject(h.obj, t))) then
+          local modOk = true
+          if t.modified then
+            modOk = false
+            if not h.obj.isDestroyed() then
+              local cc = Counters.get(h.obj)
+              modOk = (cc.plus or 0) > 0 or (cc.minus or 0) > 0 or (cc.other or 0) > 0
+                or (Equip ~= nil and #Equip.attachments(h.obj) > 0)
+            end
+          end
+          if modOk and h.controller == p.controller and (t.subjects == nil or (not h.obj.isDestroyed() and matchesSubject(h.obj, t))) then
             n = n + 1
           end
         end

@@ -1,5 +1,5 @@
-MTG TABLE - SOLO TEST CHECKLIST (v1.44)
-Chat should say: MTG > Scripts loaded: version 1.44 (Xavier Sal token deck: Chatterfang, Panharmonicon, Clues, landfall, counters on tokens)
+MTG TABLE - SOLO TEST CHECKLIST (v1.45)
+Chat should say: MTG > Scripts loaded: version 1.45 (Xavier Sal deck, Oracle-checked: sacrifice costs, Kodama, Sly Requisitioner, proliferate, populate, devour)
 
 HOW: load a deck, solo, drag cards from hand to the battlefield (or cast from hand), then watch chat + the ask popups.
 Mark each: OK / WRONG (write what happened).
@@ -108,16 +108,23 @@ BY HAND in the Sephiroth deck: Meathook Massacre and Toxic Deluge -X/-X, Consumi
 
 BY HAND in the Zoo (table will tell you, not do it): Esper Sentinel draw/tax, Cavern-Hoard Dragon Treasures, Chrome Mox / Mox Diamond, Dualcaster Mage copy, Ragavan, Sanctifier en-Vec, Shatterskull Smashing, Silence, Survival of the Fittest, Wheel of Misfortune, Sanctum Prelate, Conspiracy Theorist, Flamescroll Celebrant ping, City of Brass / Ancient Tomb / Mana Confluence damage, Gaea's Cradle, Utopia Sprawl, Mana Vault, LED, plus the stax pieces (Deafening Silence, Drannith, Dryad Militant, Samurai, Grand Abolisher: nothing enforces them).
 
-== XAVIER SAL TOKEN DECK (v1.44) - texts written from memory, verify
+== XAVIER SAL TOKEN DECK (v1.45) - texts checked against Oracle
 [ ] Chatterfang in play: every token you make also makes as many 1/1 Squirrels (chat says so). Doubling Season / Parallel Lives double both.
 [ ] Panharmonicon: Hornet Queen / Grave Titan / Bastion enters = chat says an extra trigger, two triggers to order.
 [ ] Tireless Tracker landfall: makes a Clue. Lotus Cobra landfall: asks a color, adds it to your mana chips.
 [ ] Avenger of Zendikar: a Plant per land you control; landfall asks, then +1/+1 counter on each Plant.
-[ ] Mycoloth / Sekki upkeep: tokens equal to the +1/+1 counters on them (chat shows the count).
+[ ] Mycoloth: when it enters you can click creatures to devour (DONE); upkeep makes Saprolings equal to its +1/+1 counters.
 [ ] Kalonian Hydra attack: doubles +1/+1 counters on every creature you control (Doubling Season makes it triple).
 [ ] Scute Swarm landfall: Insect, or a copy of itself with six or more lands.
-[ ] Sly Requisitioner: every player gets a Treasure. Second Harvest: a copy of each token you control.
-BY HAND in the Xavier Sal deck: Xavier Sal and Kodama of the West Tree (texts not checked yet), Garruk -3 draw, Greater Good, Altar of Dementia, Victimize, Living Death, Abundance, Worldspine Wurm shuffle, Sekki damage prevention, Tireless Tracker's Clue-sacrifice counter, Cabal Coffers / Circle of Dreams Druid mana, Urborg and Yavimaya land types, Chatterfang's sacrifice ability.
+[ ] Springheart Nantuko landfall: if bestowed on your creature asks to pay {1} for a copy, otherwise (or if you say NO) a 1/1 Insect.
+[ ] Sly Requisitioner: a nontoken artifact of yours going to the graveyard makes a Servo.
+[ ] Kodama of the West Tree: a creature of yours with a counter or Equipment/Aura on it that hits a player triggers the land search (a plain creature does not).
+[ ] Second Harvest: a copy of each token you control. Myr Propagator ability: a copy of itself.
+[ ] Greater Good / Altar of Dementia / Viscera Seer: right-click > Activate asks which creature to sacrifice (click it), reads its power, then draws / mills that many.
+[ ] Xavier Sal: Activate asks for a permanent to take a counter from (populate: click a creature token to copy), or a creature to sacrifice (proliferate: click each permanent, then DONE).
+[ ] Garruk -3: draws cards equal to your greatest power. Garruk -6: a Wurm per land.
+[ ] Victimize: asks which creature to sacrifice, then lets you click two creature cards in your graveyard (they return tapped).
+BY HAND in the Xavier Sal deck: Living Death, Abundance, Rite of Replication kicker (five copies), Sekki's damage prevention into Spirits and its return from the graveyard, Worldspine Wurm's shuffle clause, Tireless Tracker's Clue-sacrifice counter, Kodama's trample for modified creatures, Deep Forest Hermit vanishing, Cabal Coffers / Circle of Dreams Druid / Cryptolith Rite / Bloom Tender mana, Urborg and Yavimaya land types, Chatterfang's +X/-X ability, Liliana -9, Liliana Death's Majesty's Zombie type, Myr Battlesphere attack tapping.
 
 == NOTES / BUGS
 (write here)

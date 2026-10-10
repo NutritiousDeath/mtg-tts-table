@@ -97,7 +97,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.44 (Xavier Sal token deck: Chatterfang, Panharmonicon, Clues, landfall, counters on tokens)"
+SCRIPT_VERSION = "1.45 (Xavier Sal deck, Oracle-checked: sacrifice costs, Kodama, Sly Requisitioner, proliferate, populate, devour)"
 
 function onLoad(saved)
   GameLog.setup()

@@ -249,6 +249,38 @@ function Effects.parse(text, sourceName)
   end
   -- Token deck helpers (Xavier Sal deck).
   do
+    -- "Activate only as a sorcery." is a timing note, not an effect.
+    local sa, sb = t:find(" activate only as a sorcery%.?")
+    if sa then
+      t = t:sub(1, sa - 1) .. t:sub(sb + 1)
+    end
+    local tt = t:gsub("^%s+", ""):gsub("%s+$", "")
+    -- Myr Propagator: "Create a token that's a copy of this creature."
+    if tt == "create a token that's a copy of ~." or tt == "create a token that's a copy of ~" then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "copySelf", who = "you", n = 1 } } }
+    end
+    -- Garruk, Primal Hunter -3.
+    if tt:find("^draw cards equal to the greatest power among creatures you control") then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "drawGreatest", who = "you", n = 1 } } }
+    end
+    -- Xavier Sal: Populate. / Proliferate.
+    if tt == "populate." or tt == "populate" then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "populate", who = "you", n = 1 } } }
+    end
+    if tt == "proliferate." or tt == "proliferate" then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "proliferate", who = "you", n = 1 } } }
+    end
+    -- Victimize: sacrifice a creature, then two creature cards from your graveyard come back tapped.
+    if t:find("choose two target creature cards in your graveyard", 1, true) and t:find("sacrifice a creature", 1, true) then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "victimize", who = "you", n = 1 } } }
+    end
+    -- Springheart Nantuko landfall.
+    if t:find("is attached to a creature you control", 1, true)
+        and t:find("create a token that's a copy of that creature", 1, true) then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "nantuko", who = "you", n = 1 } } }
+    end
+  end
+  do
     -- Tireless Tracker and friends: "investigate" = create a Clue.
     if t:find("investigate", 1, true) and not t:find("create a clue", 1, true) then
       t = t:gsub("investigate", "create a clue token", 1)
@@ -292,7 +324,8 @@ function Effects.parse(text, sourceName)
       end
     end
     -- Second Harvest: a token copy of each token you control.
-    if t:find("create a token that's a copy of each token you control", 1, true) then
+    if t:find("create a token that's a copy of each token you control", 1, true)
+        or t:find("for each token you control, create a token that's a copy of that permanent", 1, true) then
       return { optional = false, notes = {}, conds = {}, actions = { { what = "copyEachToken", who = "you", n = 1 } } }
     end
   end
@@ -397,7 +430,7 @@ function Effects.parse(text, sourceName)
   do
     local which = t:match("create a token that's a copy of (that %a+)") or t:match("create a token that's a copy of (enchanted %a+)")
       or t:match("create a token that's a copy of (equipped %a+)")
-    if which then
+    if which and not t:find("is attached to a creature you control", 1, true) then
       return { optional = false, notes = {}, conds = {},
         actions = { { what = "copyThat", who = "you", n = 1, which = which,
           pay = t:match("you may pay ({[{}%w/]+})"),
@@ -1416,6 +1449,18 @@ local function describe(a, target, controller)
     return "goads a target creature"
   elseif a.what == "bounceSelf" then
     return "it returns to its owner's hand"
+  elseif a.what == "copySelf" then
+    return "a token copy of itself"
+  elseif a.what == "drawGreatest" then
+    return "draw cards equal to your greatest creature power"
+  elseif a.what == "populate" then
+    return "populate: a token copy of a creature token you control"
+  elseif a.what == "proliferate" then
+    return "proliferate: another counter of each kind on the permanents you choose"
+  elseif a.what == "victimize" then
+    return "sacrifice a creature, then return two creature cards from your graveyard tapped"
+  elseif a.what == "nantuko" then
+    return "pay {1} for a copy of the enchanted creature, otherwise a 1/1 Insect"
   elseif a.what == "addManaAny" then
     return "add one mana of any color (you pick)"
   elseif a.what == "counterAll" then
@@ -1799,6 +1844,50 @@ local function apply(it, plan, target)
           Effects.pickSacrifice(seat, a, it)
         elseif a.what == "sacDraw" then
           Effects.sacDraw(seat, a, it)
+        elseif a.what == "copySelf" then
+          local src = it.source and getObjectFromGUID(it.source)
+          if src and not src.isDestroyed() then
+            Effects.copyCard(src, seat, {}, it.name)
+          else
+            broadcastToColor(it.name .. ": make the token copy yourself (the card wasn't found).", seat, INFO)
+          end
+        elseif a.what == "drawGreatest" then
+          local best = 0
+          for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+            if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) and Effects.fieldSeat(obj) == seat
+                and Effects.cardTypes(obj).creature then
+              local pw = tonumber(Counters.stats(obj).power) or 0
+              if pw > best then
+                best = pw
+              end
+            end
+          end
+          printToAll("MTG > " .. it.name .. ": greatest power among " .. seat .. "'s creatures is " .. best .. ".", INFO)
+          if best > 0 then
+            Actions.draw(seat, best, it.name)
+          end
+        elseif a.what == "populate" then
+          Effects.populate(seat, it)
+        elseif a.what == "proliferate" then
+          Effects.proliferate(seat, it)
+        elseif a.what == "nantuko" then
+          Effects.nantuko(seat, it)
+        elseif a.what == "victimize" then
+          ask(seat, it.name .. ": sacrifice a creature", "Click SACRIFICE on a creature you control. If you do, you pick two creature cards from your graveyard to return tapped.",
+            { { label = "NONE (NOTHING HAPPENS)", value = false } }, function(victim)
+              if not victim or victim.isDestroyed() then
+                printToAll("MTG > " .. seat .. " sacrifices nothing: " .. it.name .. " does nothing.", INFO)
+                return
+              end
+              printToAll("MTG > " .. seat .. " sacrifices " .. victim.getName() .. " (" .. it.name .. ").", GOOD)
+              Combat.removeCard(victim, "graveyard")
+              Wait.time(function()
+                LibSearch.open(seat, "creature", it.name .. ": click TWO creature cards in your graveyard to return them tapped, then CLOSE.",
+                  "battlefield", true, { typeOnly = true, zone = "graveyard", yardOf = seat })
+              end, 1.2)
+            end, { filter = function(obj, owner)
+              return owner == seat and Effects.cardTypes(obj).creature == true
+            end, label = "SACRIFICE", protect = false })
         elseif a.what == "addManaAny" then
           Effects.askChoice(seat, it.name .. ": which color?", "Pick the color of mana to add to your mana chips.",
             { { label = "W", value = "W" }, { label = "U", value = "U" }, { label = "B", value = "B" },
@@ -2628,6 +2717,68 @@ function Effects.counterAll(seat, a, it)
     end
   end
   printToAll("MTG > " .. it.name .. ": " .. (a.mode == "double" and "doubled the +1/+1 counters on " or "+1/+1 counter on ") .. n .. " creature(s).", GOOD)
+end
+
+-- Populate: a token copy of a creature token you control.
+function Effects.populate(seat, it)
+  ask(seat, it.name .. ": populate", "Click COPY on a creature token you control.", { { label = "SKIP", value = false } }, function(obj)
+    if obj then
+      Effects.copyCard(obj, seat, {}, it.name)
+    end
+  end, { filter = function(obj, owner)
+    return owner == seat and obj.hasTag("Token") and Effects.cardTypes(obj).creature == true
+  end, label = "COPY" })
+end
+
+-- Proliferate: click every permanent that should get another counter of each kind it has, then DONE.
+function Effects.proliferate(seat, it)
+  local chosen = {}
+  local function hasAny(obj)
+    local c = Counters.get(obj)
+    return (c.plus or 0) > 0 or (c.minus or 0) > 0 or (c.loyalty or 0) > 0 or (c.other or 0) > 0
+  end
+  local function step()
+    ask(seat, it.name .. ": proliferate", "Click PROLIFERATE on each permanent with counters you want another counter on, then DONE."
+      .. " (Players with poison or other counters: do those by hand.)", { { label = "DONE", value = false } }, function(obj)
+      if obj then
+        chosen[obj.getGUID()] = true
+        for _, kind in ipairs({ "plus", "minus", "loyalty", "other" }) do
+          if (Counters.get(obj)[kind] or 0) > 0 then
+            Counters.place(obj, kind, 1, seat)
+          end
+        end
+        printToAll("MTG > " .. it.name .. ": proliferate " .. obj.getName() .. ".", GOOD)
+        step()
+      else
+        printToAll("MTG > " .. it.name .. ": proliferate done.", INFO)
+      end
+    end, { filter = function(obj, owner)
+      return owner ~= nil and not chosen[obj.getGUID()] and hasAny(obj)
+    end, label = "PROLIFERATE", protect = false })
+  end
+  step()
+end
+
+-- Springheart Nantuko landfall.
+function Effects.nantuko(seat, it)
+  local src = it.source and getObjectFromGUID(it.source)
+  local host = src and not src.isDestroyed() and Equip and Equip.hostOf and Equip.hostOf(src) or nil
+  local function insect()
+    printToAll("MTG > " .. it.name .. ": a 1/1 Insect instead.", INFO)
+    Tokens.create(seat, { pt = "1/1", words = { "insect" }, colors = { G = true } }, 1, it.name)
+  end
+  if host and not host.isDestroyed() and Effects.fieldSeat(host) == seat then
+    ask(seat, it.name .. ": pay {1}?", "Pay {1} to create a token copy of " .. host.getName() .. "? (If you don't, you get a 1/1 Insect.)",
+      { { label = "PAY {1}", value = true }, { label = "NO", value = false } }, function(yes)
+        if yes then
+          Effects.copyCard(host, seat, {}, it.name)
+        else
+          insect()
+        end
+      end)
+  else
+    insect()
+  end
 end
 
 -- Sephiroth: sacrifice other creatures you control (one, or any number), then draw that many cards.
@@ -4711,6 +4862,35 @@ Events.on("cardMoved", function(d)
         end, nil, true)
     end, 0.6)
     return
+  end
+  -- Devour N (Mycoloth): sacrifice any number of creatures, it enters with N times that many +1/+1 counters.
+  do
+    local dv = t:match("devour (%d+)")
+    if dv and d.to.seat then
+      local seat3, per, eaten = d.to.seat, tonumber(dv), 0
+      local function more()
+        ask(seat3, name .. ": devour " .. dv, "You may sacrifice creatures to it, one at a time, then press DONE. Each one gives it "
+          .. per .. " +1/+1 counters" .. (eaten > 0 and (" (" .. eaten .. " so far)") or "") .. ".",
+          { { label = eaten > 0 and "DONE" or "NONE", value = false } }, function(obj)
+            if obj then
+              printToAll("MTG > " .. seat3 .. " sacrifices " .. obj.getName() .. " to " .. name .. " (devour).", GOOD)
+              Combat.removeCard(obj, "graveyard")
+              eaten = eaten + 1
+              more()
+            elseif eaten > 0 and not card.isDestroyed() then
+              local placed = Counters.place(card, "plus", eaten * per, seat3)
+              printToAll("MTG > " .. name .. " devoured " .. eaten .. " creature(s): " .. placed .. " +1/+1 counters.", GOOD)
+            end
+          end, { filter = function(obj, owner)
+            return owner == seat3 and obj ~= card and Effects.cardTypes(obj).creature == true
+          end, label = "SACRIFICE", protect = false })
+      end
+      Wait.time(function()
+        if not card.isDestroyed() then
+          more()
+        end
+      end, 0.8)
+    end
   end
   if n == nil then
     return

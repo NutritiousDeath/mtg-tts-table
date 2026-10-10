@@ -714,6 +714,89 @@ function Stack.activate(obj, playerColor, ab)
   local nameLow = tostring(cardName):lower()
   local sacSelf = low:find("sacrifice " .. nameLow, 1, true) ~= nil or low:find("sacrifice this", 1, true) ~= nil
     or low:find("sacrifice it", 1, true) ~= nil
+  -- "Sacrifice a creature:" / "Sacrifice another creature or artifact:" - the player clicks what goes.
+  if not ab.sacDone and not sacSelf and Effects and Effects.askChoice and low:find("sacrifice ", 1, true) then
+    local kinds, other
+    if low:find("sacrifice another creature or artifact", 1, true) then
+      kinds, other = { creature = true, artifact = true }, true
+    elseif low:find("sacrifice a creature or artifact", 1, true) then
+      kinds = { creature = true, artifact = true }
+    elseif low:find("sacrifice another creature", 1, true) then
+      kinds, other = { creature = true }, true
+    elseif low:find("sacrifice a creature", 1, true) then
+      kinds = { creature = true }
+    elseif low:find("sacrifice an artifact", 1, true) then
+      kinds = { artifact = true }
+    end
+    if kinds then
+      local what = (kinds.creature and "creature" or "") .. (kinds.creature and kinds.artifact and " or " or "") .. (kinds.artifact and "artifact" or "")
+      Effects.askChoice(playerColor, obj.getName() .. ": sacrifice " .. (other and "another " or "a ") .. what,
+        "Click SACRIFICE on the " .. what .. " you sacrifice to pay for " .. obj.getName() .. ".", { { label = "CANCEL", value = false } },
+        function(victim)
+          if not victim or victim.isDestroyed() then
+            return
+          end
+          local pw = 0
+          pcall(function() pw = tonumber(Counters.stats(victim).power) or 0 end)
+          local vname = victim.getName()
+          Combat.removeCard(victim, "graveyard")
+          local eff = ab.effect
+          local lowE = eff:lower()
+          local needle = "cards equal to the sacrificed creature's power"
+          local at = lowE:find(needle, 1, true)
+          if at then
+            eff = eff:sub(1, at - 1) .. pw .. " cards" .. eff:sub(at + #needle)
+          end
+          Stack.activate(obj, playerColor, { cost = ab.cost, effect = eff, line = ab.line, xDone = ab.xDone, sacDone = true,
+            sacName = vname, remDone = ab.remDone })
+        end, { filter = function(o, owner)
+          if owner ~= seat or (other and o == obj) then
+            return false
+          end
+          local ty = Effects.cardTypes(o)
+          return (kinds.creature and ty.creature == true) or (kinds.artifact and ty.artifact == true)
+        end, label = "SACRIFICE", protect = false })
+      return
+    end
+  end
+  -- "Remove a counter from another permanent you control" (Xavier Sal).
+  if not ab.remDone and low:find("remove a counter from another permanent", 1, true) and Effects and Effects.askChoice then
+    Effects.askChoice(playerColor, obj.getName() .. ": remove a counter", "Click the permanent you control to take a counter off.",
+      { { label = "CANCEL", value = false } }, function(src)
+        if not src or src.isDestroyed() then
+          return
+        end
+        local c = Counters.get(src)
+        local kinds = {}
+        for _, k in ipairs({ "plus", "minus", "loyalty", "other" }) do
+          if (c[k] or 0) > 0 then
+            table.insert(kinds, k)
+          end
+        end
+        local NAMES = { plus = "+1/+1", minus = "-1/-1", loyalty = "loyalty", other = "other" }
+        local function go(k)
+          Counters.change(src, k, -1, playerColor)
+          Stack.activate(obj, playerColor, { cost = ab.cost, effect = ab.effect, line = ab.line, xDone = ab.xDone, sacDone = ab.sacDone,
+            sacName = ab.sacName, remDone = true, remName = src.getName() .. " (" .. NAMES[k] .. ")" })
+        end
+        if #kinds == 1 then
+          go(kinds[1])
+        else
+          local choices = {}
+          for _, k in ipairs(kinds) do
+            table.insert(choices, { label = string.upper(NAMES[k]), value = k })
+          end
+          Effects.askChoice(playerColor, src.getName() .. ": which counter?", "Remove one of these.", choices, go)
+        end
+      end, { filter = function(o, owner)
+        if owner ~= seat or o == obj then
+          return false
+        end
+        local c = Counters.get(o)
+        return (c.plus or 0) > 0 or (c.minus or 0) > 0 or (c.loyalty or 0) > 0 or (c.other or 0) > 0
+      end, label = "REMOVE", protect = false })
+    return
+  end
   -- "Remove three quest counters from ~": check there are enough, take them off.
   local remWord, remKind = low:match("remove (%w+) ([%w%+/%-]+) counters? from")
   local NUM = { a = 1, an = 1, one = 1, two = 2, three = 3, four = 4, five = 5, six = 6, seven = 7, eight = 8, nine = 9, ten = 10 }
@@ -751,6 +834,21 @@ function Stack.activate(obj, playerColor, ab)
   end
   if sacSelf then
     rest = rest:gsub("sacrifice this %a+", ""):gsub("sacrifice it", ""):gsub("sacrifice " .. nameLow:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "")
+  end
+  if ab.sacDone then
+    for _, ph in ipairs({ "sacrifice another creature or artifact", "sacrifice a creature or artifact", "sacrifice another creature",
+        "sacrifice a creature", "sacrifice an artifact" }) do
+      local i, j = rest:find(ph, 1, true)
+      if i then
+        rest = rest:sub(1, i - 1) .. rest:sub(j + 1)
+        break
+      end
+    end
+    table.insert(paid, "sacrificed " .. tostring(ab.sacName))
+  end
+  if ab.remDone then
+    rest = rest:gsub("remove a counter from another permanent you control", ""):gsub("remove a counter from another permanent", "")
+    table.insert(paid, "removed a counter from " .. tostring(ab.remName))
   end
   if rest:find("{", 1, true) then
     table.insert(yours, "the mana")
