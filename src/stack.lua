@@ -307,7 +307,10 @@ function Stack.resolveTop()
     obj.destruct()
     -- Carry out what it says, when the table can (effects.lua).
     if Effects then
-      Effects.resolve(it)
+      local okr, errr = pcall(Effects.resolve, it)
+      if not okr then
+        Events.noteError("resolving " .. tostring(it.name), errr)
+      end
     end
     return
   end
@@ -322,7 +325,12 @@ function Stack.resolveTop()
     -- Read its text before it merges into the graveyard pile.
     local keep = false
     if Effects and Effects.resolveSpell then
-      keep = Effects.resolveSpell(obj, it.controller) == true
+      local oks, res = pcall(Effects.resolveSpell, obj, it.controller)
+      if oks then
+        keep = res == true
+      else
+        Events.noteError("resolving " .. tostring(it.name), res)
+      end
     end
     if keep then
       -- Its effect puts it somewhere (library): unlock it; if nothing moved

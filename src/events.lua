@@ -28,12 +28,24 @@ function Events.onFirst(name, fn)
   table.insert(listeners[name], 1, fn)
 end
 
+-- Script errors inside guarded steps: kept (last 15) and shown in chat, so they can be copied and sent.
+Events.errors = Events.errors or {}
+function Events.noteError(where, err)
+  local line = tostring(where) .. ": " .. tostring(err)
+  table.insert(Events.errors, line)
+  while #Events.errors > 15 do
+    table.remove(Events.errors, 1)
+  end
+  printToAll("MTG > SCRIPT ERROR in " .. line:sub(1, 300) .. "  (type !errors to list the last ones)", { 1, 0.45, 0.35 })
+end
+
 function Events.emit(name, data)
   for _, fn in ipairs(listeners[name] or {}) do
     -- One broken listener shouldn't stop the others.
     local ok, err = pcall(fn, data)
     if not ok then
       print("MTG > Event '" .. name .. "' listener error: " .. tostring(err))
+      Events.noteError("event '" .. name .. "'", err)
     end
   end
 end

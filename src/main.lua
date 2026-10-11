@@ -18,6 +18,7 @@
     !where       show which zones the card under your mouse is in
     !hover       show what is under your mouse (for alt-zoom problems)
     !zones       count the cards tracked in each of your areas
+    !errors         list the last script errors (copy them and send them over)
     !unstick        clear stuck pop-ups / search panels / triggers (!unstick stack also empties the stack)
     !seat <Color>   take a free seat (after a disconnect); !resync refreshes your panels
     !stack on/off   token piles: identical plain tokens share one card (xN badge); !stack merge / !stack unstack
@@ -109,7 +110,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.54 (mana pool tile left of the lands row)"
+SCRIPT_VERSION = "1.55 (script errors show in chat, !errors)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -463,6 +464,18 @@ function onChat(message, sender)
       and ", a seat in this game." or ", NOT a seat: pick a free color or type !seat <Color>.")
     printToColor(msg, sender.color, { 0.75, 0.8, 0.9 })
     broadcastToColor(msg, sender.color, { 0.75, 0.8, 0.9 })
+    return false
+  end
+
+  if message == "!errors" then
+    local list = Events.errors or {}
+    if #list == 0 then
+      printToColor("MTG > No script errors recorded this session.", sender.color, { 0.55, 0.9, 0.6 })
+    else
+      for i, line in ipairs(list) do
+        printToColor("MTG > [" .. i .. "] " .. line:sub(1, 400), sender.color, { 1, 0.45, 0.35 })
+      end
+    end
     return false
   end
 
