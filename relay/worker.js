@@ -166,10 +166,23 @@ function identifierFor(item, nameOnly) {
 }
 
 async function scryfallCollection(identifiers) {
-  // Scryfall sometimes answers 429 (rate limit) to Cloudflare's shared addresses:
-  // wait a moment and try again before giving up.
+  // Same list asked before (a re-import, a deck sharing cards with one already loaded):
+  // answer from Cloudflare's cache and don't bother Scryfall at all.
+  const bodyText = JSON.stringify({ identifiers });
+  let cacheKey = null;
+  try {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(bodyText));
+    const hex = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+    cacheKey = new Request("https://mtg-relay-cache.invalid/collection/" + hex, { method: "GET" });
+    const hit = await caches.default.match(cacheKey);
+    if (hit) return await hit.json();
+  } catch (e) { cacheKey = null; }
+
+  // Scryfall answers 429 (rate limit) to Cloudflare's shared addresses fairly often:
+  // wait longer each time (about 20 seconds in all) before giving up.
   let res;
-  for (let attempt = 0; attempt < 4; attempt++) {
+  const waits = [1.5, 3, 5, 7, 9];
+  for (let attempt = 0; attempt <= waits.length; attempt++) {
     res = await fetch(SCRYFALL_COLLECTION, {
       method: "POST",
       headers: {
@@ -177,10 +190,12 @@ async function scryfallCollection(identifiers) {
         "Accept": "application/json",
         "User-Agent": USER_AGENT,
       },
-      body: JSON.stringify({ identifiers }),
+      body: bodyText,
     });
     if (res.status !== 429 && res.status < 500) break;
-    const wait = Math.min(parseFloat(res.headers.get("Retry-After")) || (attempt + 1), 4);
+    if (attempt === waits.length) break;
+    const hinted = parseFloat(res.headers.get("Retry-After"));
+    const wait = Math.min(hinted > 0 ? hinted : waits[attempt], 10);
     await new Promise((r) => setTimeout(r, wait * 1000));
   }
   if (!res.ok) {
@@ -189,7 +204,15 @@ async function scryfallCollection(identifiers) {
     throw new Error("Scryfall returned " + res.status + " " + detail.replace(/[\t\r\n]+/g, " "));
   }
   const body = await res.json();
-  return body.data || [];
+  const data = body.data || [];
+  if (cacheKey) {
+    try {
+      await caches.default.put(cacheKey, new Response(JSON.stringify(data), {
+        headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=86400" },
+      }));
+    } catch (e) {}
+  }
+  return data;
 }
 
 function indexCards(cards) {
