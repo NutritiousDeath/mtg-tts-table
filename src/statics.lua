@@ -36,8 +36,25 @@ function Statics.bonus(obj)
   return 0, 0
 end
 
+-- "elves" -> elf, "wolves" -> wolf, "allies" -> ally, "zombies" -> zombie, "soldiers" -> soldier.
+local function singular(w)
+  if w:sub(-3) == "ves" then
+    return { w:sub(1, -4) .. "f", w:sub(1, -2) }
+  elseif w:sub(-3) == "ies" then
+    return { w:sub(1, -4) .. "y", w:sub(1, -2) }
+  end
+  return { (w:gsub("s$", "")) }
+end
+
 local function subjectMatches(subj, q, p)
   subj = subj:gsub("^%s+", ""):gsub("%s+$", "")
+  -- "each other creature" / "each creature": same as "other creatures" / "creatures".
+  if subj:sub(1, 5) == "each " then
+    subj = subj:sub(6)
+  end
+  if subj:sub(-9) == " creature" or subj == "creature" then
+    subj = subj .. "s"
+  end
   local other = false
   if subj:sub(1, 6) == "other " then
     other = true
@@ -60,24 +77,76 @@ local function subjectMatches(subj, q, p)
   if subj:find(",", 1, true) or subj:find(" and ", 1, true) or subj:find(" or ", 1, true) then
     for w in subj:gmatch("[%a%-]+") do
       if w ~= "and" and w ~= "or" then
-        local base = w:gsub("s$", "")
-        if base ~= "" and q.tl:find(base, 1, true) then
-          return true
+        for _, base in ipairs(singular(w)) do
+          if base ~= "" and q.tl:find(base, 1, true) then
+            return true
+          end
         end
       end
     end
     return false
   end
-  local word = subj:match("^([%a%-]+)s$") or subj:match("^([%a%-]+) creatures$")
+  local plural = subj:match("^([%a%-]+)s$")
+  if plural then
+    for _, base in ipairs(singular(plural .. "s")) do
+      if q.tl:find(base, 1, true) then
+        return true
+      end
+    end
+    return false
+  end
+  local word = subj:match("^([%a%-]+) creatures$")
   if word then
     return q.tl:find(word, 1, true) ~= nil
   end
   return false
 end
 
+-- "<subject> you control get +1/+1" -> subject, "mine"; "... your opponents control get -2/-2" -> "opps";
+-- "All Slivers get +1/+1" -> "all". Plain searches only (TTS gives up on lazy patterns over long text).
+local function parseAnthem(line)
+  local forms = { { " you control get ", "mine" }, { " you control gets ", "mine" },
+    { " your opponents control get ", "opps" }, { " your opponents control gets ", "opps" },
+    { " get ", "all" }, { " gets ", "all" } }
+  for _, f in ipairs(forms) do
+    local at = line:find(f[1], 1, true)
+    if at and at <= 40 then
+      local x, y = line:sub(at + #f[1]):match("^([%+%-]%d+)/([%+%-]%d+)")
+      if x then
+        return line:sub(1, at - 1), f[2], x, y
+      end
+    end
+  end
+  return nil
+end
+
+-- The city's blessing (Ascend): kept per seat for the rest of the game.
+function Statics.blessing(seat)
+  local b = GameState.data and GameState.data.blessing
+  return b ~= nil and b[seat] == true
+end
+
+local function checkAscend(list)
+  local counts, ascenders = {}, {}
+  for _, p in ipairs(list) do
+    counts[p.seat] = (counts[p.seat] or 0) + (Pile and Pile.count(p.obj) or 1)
+    if p.oracle:find("ascend", 1, true) == 1 or p.oracle:find("\nascend", 1, true) then
+      ascenders[p.seat] = p.obj.getName()
+    end
+  end
+  for seat, name in pairs(ascenders) do
+    if (counts[seat] or 0) >= 10 and not Statics.blessing(seat) then
+      GameState.data.blessing = GameState.data.blessing or {}
+      GameState.data.blessing[seat] = true
+      printToAll("MTG > " .. seat .. " has ten or more permanents: they get the CITY'S BLESSING for the rest of the game (" .. tostring(name) .. ").", { 1, 0.85, 0.3 })
+    end
+  end
+end
+
 function Statics.compute()
   local list = perms()
   local new = {}
+  pcall(checkAscend, list)
   local function add(q, a, b)
     local g = q.obj.getGUID()
     new[g] = new[g] or { p = 0, t = 0 }
@@ -116,20 +185,31 @@ function Statics.compute()
           end
         end
       end
-      -- "Creature tokens you control get +1/+1 ..." / "Other Soldiers you control get +1/+1".
+      -- Anthems: "Creatures you control get +1/+1", "Other Soldiers you control get +1/+1", "Creatures your
+      -- opponents control get -2/-2", "Saprolings you control get +2/+2 as long as you have the city's blessing".
+      -- Only lasting effects: not "until end of turn", not triggered ("whenever...") or activated ("{2}: ...") lines.
       -- (plain search first: MoonSharp gives up on lazy patterns over long rules text)
-      local subj, x, y
-      local at = line:find(" you control get +", 1, true)
-      if at and at <= 40 then
-        x, y = line:sub(at):match("^ you control get %+(%d+)/%+(%d+)")
-        if x then
-          subj = line:sub(1, at - 1)
+      local lowl = line
+      local temporary = lowl:find("until end of turn", 1, true) or lowl:find("until your next turn", 1, true)
+        or lowl:find("this turn", 1, true) or lowl:find(":", 1, true) or lowl:sub(1, 4) == "when"
+        or lowl:find("at the beginning", 1, true) or lowl:find("target", 1, true)
+      if not temporary then
+        local subj, scope, x, y = parseAnthem(line)
+        -- Conditions: only the city's blessing is understood; any other "as long as" is left out
+        -- rather than applied all the time.
+        local okCond = true
+        if line:find(" as long as ", 1, true) then
+          okCond = line:find("as long as you have the city's blessing", 1, true) ~= nil and Statics.blessing(p.seat) == true
         end
-      end
-      if subj and #subj < 40 then
-        for _, q in ipairs(list) do
-          if q.seat == p.seat and subjectMatches(subj, q, p) then
-            add(q, tonumber(x), tonumber(y))
+        if subj and #subj < 40 and okCond then
+          if subj:sub(1, 4) == "all " then
+            subj = subj:sub(5)
+          end
+          for _, q in ipairs(list) do
+            local sideOk = (scope == "all") or (scope == "mine" and q.seat == p.seat) or (scope == "opps" and q.seat ~= p.seat)
+            if sideOk and subjectMatches(subj, q, p) then
+              add(q, tonumber(x), tonumber(y))
+            end
           end
         end
       end
@@ -173,6 +253,10 @@ function Statics.soon()
     end
   end, 1.0)
 end
+
+Events.on("stepStarted", function()
+  Statics.soon()
+end)
 
 Events.on("cardMoved", function(d)
   if d.from == nil or d.to == nil then

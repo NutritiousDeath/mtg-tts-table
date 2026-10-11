@@ -110,7 +110,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.55 (script errors show in chat, !errors)"
+SCRIPT_VERSION = "1.56 (anthems, Metamorphosis, Hickory, Bloom Tender, Horizon, Dryad, Force of Vigor, Station)"
 
 function onLoad(saved)
   GameLog.setup()

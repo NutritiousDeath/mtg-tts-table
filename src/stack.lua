@@ -658,6 +658,14 @@ function Stack.activatedAbilities(obj)
       end
     end
   end
+  -- Station (Spacecraft / Planets): "Tap another creature you control: put charge counters equal to its power".
+  do
+    local lowAll = text:lower()
+    if lowAll:sub(1, 8) == "station " or lowAll:find("\nstation ", 1, true) or lowAll:sub(1, 8) == "station(" or lowAll:find("\nstation(", 1, true) then
+      table.insert(list, { cost = "Tap another creature you control", effect = "Put charge counters equal to its power on this (Station, sorcery speed).",
+        line = "Station", station = true })
+    end
+  end
   return list
 end
 
@@ -699,6 +707,15 @@ end
 
 function Stack.activate(obj, playerColor, ab)
   if obj == nil or obj.isDestroyed() then
+    return
+  end
+  if ab.station then
+    local sseat, sregion = seatOf(obj)
+    if not (sregion == "battlefield" or sregion == "lands") or (sseat ~= playerColor and not GameState.solo()) then
+      broadcastToColor(obj.getName() .. " has to be on your battlefield to Station.", playerColor, WARN)
+      return
+    end
+    Effects.station(obj, sseat or playerColor)
     return
   end
   local seat, region = seatOf(obj)

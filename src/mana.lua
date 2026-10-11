@@ -264,8 +264,109 @@ function ManaChips.offer(seat, name, options)
 end
 
 -- A player tapped this by hand. `skipAsk`: the caller already handles it (painlands).
+-- Every permanent the seat controls (face up, on the battlefield or lands row).
+local function permanentsOf(seat)
+  local out = {}
+  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+    if o.type == "Card" and not o.isDestroyed() and o.held_by_color == nil and not (Faces and Faces.unknown(o)) then
+      local loc = Zones.regionAt(o.getPosition())
+      if loc.seat == seat and (loc.region == "battlefield" or loc.region == "lands") then
+        table.insert(out, o)
+      end
+    end
+  end
+  return out
+end
+
+-- The colors among the seat's permanents, in WUBRG order (Bloom Tender).
+function ManaChips.colorsAmong(seat)
+  local have = {}
+  for _, o in ipairs(permanentsOf(seat)) do
+    local d = CardData.get(o)
+    local cols = type(d.colors) == "table" and d.colors or {}
+    for _, c in pairs(cols) do
+      have[tostring(c):upper()] = true
+    end
+  end
+  local out = {}
+  for _, k in ipairs({ "W", "U", "B", "R", "G" }) do
+    if have[k] then
+      table.insert(out, k)
+    end
+  end
+  return out
+end
+
+-- What the seat's lands could produce (Horizon of Progress, Reflecting Pool style), as a list of keys.
+function ManaChips.landTypes(seat)
+  local have = {}
+  for _, o in ipairs(permanentsOf(seat)) do
+    local d = CardData.get(o)
+    if tostring(d.typeLine or ""):lower():find("land", 1, true) then
+      for _, opt in ipairs(ManaChips.parseTap(oracleOf(o)) or {}) do
+        for _, k in ipairs(opt) do
+          have[k] = true
+        end
+      end
+    end
+  end
+  local out = {}
+  for _, k in ipairs({ "W", "U", "B", "R", "G", "C" }) do
+    if have[k] then
+      table.insert(out, k)
+    end
+  end
+  return out
+end
+
 function ManaChips.onTap(obj, seat)
   local text = oracleOf(obj)
+  -- Bloom Tender: one mana of each color among your permanents.
+  if text:find("for each color among permanents you control, add one mana of that color", 1, true) then
+    local cols = ManaChips.colorsAmong(seat)
+    for _, k in ipairs(cols) do
+      ManaChips.add(seat, k, 1)
+    end
+    printToAll("MTG > " .. obj.getName() .. ": " .. seat .. " adds " .. (#cols > 0 and table.concat(cols, "") or "no mana (no colored permanents)") .. ".", { 0.55, 0.9, 0.6 })
+    return
+  end
+  -- "{T}, Remove a depletion counter from this land: Add {G}{G}." (Hickory Woodlot, Peat Bog...)
+  if text:find("{t}, remove ", 1, true) and text:find(" counter from ", 1, true) then
+    local c = Counters.get(obj)
+    if (c.other or 0) <= 0 then
+      printToAll("MTG > " .. obj.getName() .. " has no counters left: no mana.", { 1, 0.6, 0.2 })
+      return
+    end
+    Counters.change(obj, "other", -1, seat)
+    local left = (c.other or 1) - 1
+    local options = ManaChips.parseTap(text)
+    if options then
+      ManaChips.offer(seat, obj.getName(), options)
+    end
+    if left <= 0 and text:find("sacrifice", 1, true) then
+      printToAll("MTG > " .. obj.getName() .. " has no counters left: sacrificed.", { 0.75, 0.8, 0.9 })
+      Wait.time(function()
+        if not obj.isDestroyed() then
+          Combat.removeCard(obj, "graveyard")
+        end
+      end, 0.8)
+    end
+    return
+  end
+  -- Horizon of Progress: one mana of any type a land you control could produce.
+  if text:find("one mana of any type that a land you control could produce", 1, true) then
+    local types = ManaChips.landTypes(seat)
+    if #types == 0 then
+      printToAll("MTG > " .. obj.getName() .. ": your lands can't make any mana right now.", { 1, 0.6, 0.2 })
+      return
+    end
+    local options = {}
+    for _, k in ipairs(types) do
+      table.insert(options, { k })
+    end
+    ManaChips.offer(seat, obj.getName(), options)
+    return
+  end
   local options = ManaChips.parseTap(text)
   if options then
     ManaChips.offer(seat, obj.getName(), options)

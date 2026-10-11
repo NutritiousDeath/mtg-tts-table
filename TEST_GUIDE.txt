@@ -1,6 +1,6 @@
 MTG COMMANDER TABLE (TTS) - TEST GUIDE
-Version being tested: 1.53
-After loading, chat should say:  MTG > Scripts loaded: version 1.53 (...)
+Version being tested: 1.56
+After loading, chat should say:  MTG > Scripts loaded: version 1.56 (...)
 
 HOW TO USE THIS
 - One person can test alone: type  !solo on  in chat. You can then act for every seat.
@@ -8,7 +8,7 @@ HOW TO USE THIS
 - Go down the list ONE LINE AT A TIME. Each line is:   DO this  ->  EXPECT that.
 - Mark each line:  OK   or   WRONG (and write what actually happened).
 - "BY HAND" lists at the end of each deck are things the table does NOT automate. The test there is only that the table doesn't do something wrong; you play them yourself.
-- If something looks stuck, try these chat commands:  !unstick   !triggers flush   !import reset   !resync   !order off
+- If something looks stuck, try these chat commands:  !errors   !unstick   !triggers flush   !import reset   !resync   !order off
 - When you report a bug, copy the chat lines from just before and after it. That's the most useful thing you can send.
 
 
@@ -117,6 +117,15 @@ TOKEN PILES (OFF by default - turn on with  !stack on  only when you want to tes
 [ ] 69. DO: attack with Utvara Hellkite (or another Dragon).  EXPECT: a "Whenever a Dragon you control attacks" trigger on the stack per Dragon, then a 6/6 red flying Dragon token.
 [ ] 70. DO: cast World at War in your first main phase.  EXPECT: it is exiled (rebound); after your post-combat main phase the table loops to a second combat, the creatures that attacked untap, then another post-combat main phase.  At your NEXT upkeep: a pop-up offers to cast it free.
 [ ] 71. DO: cast Wheel of Misfortune.  EXPECT: each player gets a number pop-up in turn (nobody sees the others' choices), then chat reveals them: highest number takes that much damage, everyone who did not pick the lowest discards their hand and draws 7.
+[ ] 72. DO: cast Metamorphosis (G, sorcery).  EXPECT: click a creature to sacrifice, pick a color, and you get 1 + its mana value of that color in your mana pool.
+[ ] 73. DO: play Hickory Woodlot.  EXPECT: enters tapped with 2 depletion counters. Tap it: GG in the pool and one counter less. At 0 counters it is sacrificed.
+[ ] 74. DO: tap Bloom Tender with a green and a white-black permanent out.  EXPECT: W, B and G added to the pool (one of each color among your permanents).
+[ ] 75. DO: Horizon of Progress: pay {3} + tap its ability with a land in hand.  EXPECT: a list of the lands in your hand; pick one: it goes onto the battlefield tapped (landfall fires).  Tapping it for mana asks which type your lands can make.
+[ ] 76. DO: Tendershoot Dryad with 10+ permanents.  EXPECT: chat says you get the city's blessing; your Saprolings get +2/+2. Each upkeep (anyone's) a Saproling token trigger goes on the stack.
+[ ] 77. DO: Force of Vigor: cast it targeting artifacts/enchantments.  EXPECT: two "click DESTROY" prompts (each can be skipped). It does NOT ask about the free-cast clause.
+[ ] 78. DO: Evendo, Waking Haven: right-click > Station.  EXPECT: click an untapped creature: it taps and Evendo gets charge counters equal to its power; chat says when a 12+ level is reached (the 12+ mana ability itself is by hand).
+[ ] 79. DO: anthems: Glorious Anthem, an "Other Elves you control get +1/+1" lord, a "Creatures your opponents control get -2/-2" card.  EXPECT: the numbers on the cards update when the anthem enters AND go away when it leaves. "Until end of turn" lines never become permanent.
+[ ] 80. DO: any spell/ability that fails with a script error.  EXPECT: an orange "SCRIPT ERROR" line in chat. Type !errors to list the last ones and send them over.
 
 
 
