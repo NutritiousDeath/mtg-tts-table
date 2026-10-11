@@ -69,6 +69,9 @@ end
 -- Mana empties between steps. True if anything was in a pool.
 function ManaChips.emptyAll()
   local any = false
+  if GameState.data then
+    GameState.data.restrict = {}
+  end
   for _, color in ipairs(TableSetup.activeSeats()) do
     local p = pool(color)
     if next(p) ~= nil then
@@ -239,13 +242,35 @@ local function label(opt)
 end
 
 -- Put one of the options into the pool; several options: the player picks.
-function ManaChips.offer(seat, name, options)
+-- Mana with a catch ("Spend this mana only to cast a creature spell of the chosen type", Cavern of Souls):
+-- it sits in the pool like any mana, and is remembered so that paying for the wrong thing is called out.
+function ManaChips.addRestricted(seat, key, ty, src)
+  ManaChips.add(seat, key, 1)
+  local d = GameState.data
+  d.restrict = d.restrict or {}
+  d.restrict[seat] = d.restrict[seat] or {}
+  local list = d.restrict[seat][key] or {}
+  d.restrict[seat][key] = list
+  for _, e in ipairs(list) do
+    if e.type == ty and e.src == src then
+      e.n = e.n + 1
+      return
+    end
+  end
+  table.insert(list, { type = ty, src = src, n = 1 })
+end
+
+function ManaChips.offer(seat, name, options, restrictType)
   if options == nil or #options == 0 then
     return
   end
   local function give(opt)
     for _, k in ipairs(opt) do
-      ManaChips.add(seat, k, 1)
+      if restrictType and k ~= "C" then
+        ManaChips.addRestricted(seat, k, restrictType, name)
+      else
+        ManaChips.add(seat, k, 1)
+      end
     end
   end
   if #options == 1 then
@@ -369,6 +394,20 @@ function ManaChips.onTap(obj, seat)
   end
   local options = ManaChips.parseTap(text)
   if options then
+    if text:find("spend this mana only to cast a creature spell of the chosen type", 1, true) then
+      local ty = Statics.chosenType(obj)
+      if ty == nil then
+        Effects.askText(seat, obj.getName() .. ": creature type", "No creature type is chosen for " .. obj.getName() .. " yet. Type it (for example Elf).", function(t)
+          ty = t:sub(1, 1):upper() .. t:sub(2):lower()
+          Statics.setChosen(obj, ty)
+          printToAll("MTG > " .. seat .. " chooses " .. ty .. " for " .. obj.getName() .. ".", { 0.55, 0.9, 0.6 })
+          ManaChips.offer(seat, obj.getName(), options, ty)
+        end)
+      else
+        ManaChips.offer(seat, obj.getName(), options, ty)
+      end
+      return
+    end
     ManaChips.offer(seat, obj.getName(), options)
   end
 end
@@ -392,8 +431,73 @@ end
 
 -- Take a mana cost ("{2}{B}{B}", "{1}{U}, {T}") out of the pool. Returns the text of what was
 -- taken (nil if nothing), and whether the whole cost was covered.
-function ManaChips.pay(seat, cost, name)
+-- Which of the mana just taken was restricted, and was it allowed to pay for this? (`card` = the spell
+-- being cast, nil for an ability.) A matching creature spell uses the restricted mana first, and can't be
+-- countered; anything else uses ordinary mana first, and is called out if it had to use the restricted kind.
+local function settleRestricted(seat, taken, p, card, spellName)
+  local rs = GameState.data.restrict and GameState.data.restrict[seat]
+  if not rs then
+    return
+  end
+  local tl, orc = "", ""
+  if card then
+    local cd = CardData.get(card)
+    tl, orc = cd.typeLine, cd.oracle
+  end
+  for k, t in pairs(taken) do
+    local list = rs[k]
+    if list then
+      local before = (p[k] or 0) + t
+      local total = 0
+      for _, e in ipairs(list) do
+        total = total + e.n
+      end
+      local excess = total - before
+      for i = #list, 1, -1 do
+        if excess > 0 then
+          local cut = math.min(excess, list[i].n)
+          list[i].n = list[i].n - cut
+          excess = excess - cut
+          total = total - cut
+        end
+      end
+      local need = t
+      for _, e in ipairs(list) do
+        if need > 0 and e.n > 0 and card and Statics.typeMatches(tl, orc, e.type) then
+          local u = math.min(e.n, need)
+          e.n = e.n - u
+          need = need - u
+          GameState.data.noCounter = GameState.data.noCounter or {}
+          GameState.data.noCounter[card.getGUID()] = e.src
+          printToAll("MTG > " .. spellName .. " is paid with " .. e.src .. " mana: it can't be countered.", { 0.55, 0.9, 0.6 })
+        end
+      end
+      need = need - math.min(need, math.max(0, before - total))
+      for _, e in ipairs(list) do
+        if need > 0 and e.n > 0 then
+          local u = math.min(e.n, need)
+          e.n = e.n - u
+          need = need - u
+          printToAll("MTG > NOT ALLOWED: " .. e.src .. " mana can only be spent to cast a creature spell of the chosen type (" .. e.type .. "), but "
+            .. u .. k .. " of it was used for " .. spellName .. ". Take it back by hand and pay another way.", { 1, 0.45, 0.2 })
+        end
+      end
+      local keep = {}
+      for _, e in ipairs(list) do
+        if e.n > 0 then
+          table.insert(keep, e)
+        end
+      end
+      rs[k] = #keep > 0 and keep or nil
+    end
+  end
+end
+
+function ManaChips.pay(seat, cost, name, card)
   cost = tostring(cost or "")
+  if card and GameState.data.noCounter then
+    GameState.data.noCounter[card.getGUID()] = nil
+  end
   local colored, hybrids, generic = {}, {}, 0
   for sym in cost:gmatch("{([^}]*)}") do
     local s = sym:upper()
@@ -466,6 +570,7 @@ function ManaChips.pay(seat, cost, name)
   if #parts == 0 then
     return nil
   end
+  settleRestricted(seat, taken, p, card, tostring(name or "the cost"))
   renderTile(seat)
   printToAll("MTG > " .. seat .. " pays " .. tostring(name or "the cost") .. " from the mana pool (" .. table.concat(parts, " ")
     .. ")" .. (short > 0 and (" - " .. short .. " short, pay the rest yourself") or "") .. ". Pool: " .. ManaChips.summary(seat) .. ".", INFO)
@@ -478,8 +583,13 @@ Events.on("spellCast", function(d)
     return
   end
   local cost = CardData.get(d.card).manaCost
+  local fc = GameState.data.freeCast
+  if fc and fc[d.card.getGUID()] then
+    fc[d.card.getGUID()] = nil      -- cast without paying its mana cost (suspend, rebound)
+    return
+  end
   if cost and cost ~= "" and d.controller and TableSetup.isActive(d.controller) then
-    ManaChips.pay(d.controller, cost, d.card.getName())
+    ManaChips.pay(d.controller, cost, d.card.getName(), d.card)
   end
 end)
 

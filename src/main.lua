@@ -110,7 +110,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.56 (anthems, Metamorphosis, Hickory, Bloom Tender, Horizon, Dryad, Force of Vigor, Station)"
+SCRIPT_VERSION = "1.57 (Suspend, Cavern of Souls, mana value search, Sheoldred, Notion Thief, Descent, Roaming Throne)"
 
 function onLoad(saved)
   GameLog.setup()

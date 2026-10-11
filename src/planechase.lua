@@ -628,6 +628,7 @@ local function ensureSpot()
     local co = o.getCustomObject()
     if co and co.image == img then
       o.setLock(true)
+      pcall(function() o.setInvisibleTo(Player.getColors()) end)
       return
     end
     o.destruct()
@@ -649,6 +650,7 @@ local function ensureSpot()
           o.setScale({ k, 1, k })
         end
         o.setLock(true)
+        pcall(function() o.setInvisibleTo(Player.getColors()) end)
       end, function() return o.isDestroyed() or not o.loading_custom end, 10,
       function() o.setLock(true) end)
     end,

@@ -113,6 +113,9 @@ function Effects.parse(text, sourceName)
   for _, w in ipairs({ "creature", "land", "enchantment", "artifact", "permanent", "planeswalker", "case", "class", "saga", "aura", "equipment" }) do
     t = t:gsub("this " .. w, "~")
   end
+  -- Other ways to say the same thing.
+  t = t:gsub("each of your opponents", "each opponent"):gsub("each of those opponents", "each opponent")
+    :gsub("each other player", "each opponent")
   -- Several paragraphs (a spell: "This spell can't be countered." then
   -- "Destroy all creatures."): read them as sentences.
   t = t:gsub("\n", " ")
@@ -319,6 +322,25 @@ function Effects.parse(text, sourceName)
     -- Scute Swarm: an Insect token, or a copy of itself with six or more lands.
     if t:find("if you control six or more lands, create a token that's a copy of ~ instead", 1, true) then
       return { optional = false, notes = {}, conds = {}, actions = { { what = "scute", who = "you", n = 1 } } }
+    end
+    -- Descent into Avernus: counters first (parsed as usual), then X Treasures and X damage, X = descent counters.
+    do
+      local at = t:find(" then each player creates x treasure tokens and ~ deals x damage to each player, where x is the number of descent counters on ~", 1, true)
+      local tw, dw = "all", "all"
+      if not at then
+        at = t:find(" then each opponent creates x treasure tokens and ~ deals x damage to each opponent, where x is the number of descent counters on ~", 1, true)
+        tw, dw = "opponents", "opponents"
+      end
+      if not at then
+        at = t:find(" then each player creates x treasure tokens and ~ deals x damage to each opponent, where x is the number of descent counters on ~", 1, true)
+        tw, dw = "all", "opponents"
+      end
+      if at then
+        local first = t:sub(1, at - 1)
+        local sub = Effects.parse(first, sourceName) or { actions = {}, notes = {}, conds = {} }
+        table.insert(sub.actions, { what = "descentBurst", who = "you", n = 1, treasureWho = tw, damageWho = dw })
+        return { optional = sub.optional or false, notes = sub.notes or {}, conds = sub.conds or {}, actions = sub.actions }
+      end
     end
     -- Sly Requisitioner: each player creates a Treasure token.
     do
@@ -799,6 +821,10 @@ function Effects.parse(text, sourceName)
   add("lose", "target", num(w))
   w = t:match("that player loses? (%w+) life")
   add("lose", "that", num(w))
+  if w == nil then
+    w = t:match(" they lose (%w+) life")      -- Sheoldred, the Apocalypse
+    add("lose", "that", num(w))
+  end
   w = t:match("deals (%w+) damage to each opponent")
   add("lose", "opponents", num(w))
   w = t:match("deals (%w+) damage to that player")
@@ -1361,11 +1387,13 @@ function Effects.parse(text, sourceName)
   do
     local t2 = t:gsub("up to one target", "target")
     local upTo = t2 ~= t
+    local another = t2:find(" on another target ", 1, true) ~= nil
+    t2 = t2:gsub(" on another target ", " on target ")
     local pn, pk, pty = t2:match("put (%w+) ([%w%+/%-]+) counters? on target (%a+)")
     if pn and num(pn) and pty and (pty == "creature" or pty == "permanent" or pty == "artifact" or pty == "planeswalker" or pty == "land") then
       local after = t2:match("put %w+ [%w%+/%-]+ counters? on target %a+ ([%a ]*)") or ""
       table.insert(actions, { what = "counterOn", who = "you", n = num(pn), kind = Counters.kindOf(pk), label = pk, ty = pty, mine = after:find("you control", 1, true) ~= nil,
-        upTo = upTo })
+        upTo = upTo, other = another })
     end
   end
   -- "remove an ice counter from ~" (Dark Depths).
@@ -1485,6 +1513,8 @@ local function describe(a, target, controller)
     return "sacrifice a creature, add mana of one color equal to 1 + its mana value (creature spells only)"
   elseif a.what == "handLand" then
     return "put a land card from your hand onto the battlefield" .. (a.tapped and " tapped" or "")
+  elseif a.what == "descentBurst" then
+    return "X Treasure tokens and X damage, X = the descent counters on this card"
   elseif a.what == "wheelMisfortune" then
     return "every player secretly picks a number; highest takes that much damage, everyone but the lowest discards their hand and draws seven"
   elseif a.what == "extraCombat" then
@@ -2106,6 +2136,27 @@ local function apply(it, plan, target)
             end, label = "SACRIFICE", protect = false })
         elseif a.what == "handLand" then
           Effects.handLand(seat, a, it)
+        elseif a.what == "descentBurst" then
+          local src = it.source and getObjectFromGUID(it.source)
+          local x = src and not src.isDestroyed() and (Counters.get(src).other or 0) or 0
+          printToAll("MTG > " .. it.name .. ": X = " .. x .. " (descent counters).", INFO)
+          if x > 0 then
+            local order = Effects.orderFrom(seat)
+            for i, c in ipairs(order) do
+              if a.treasureWho == "all" or i > 1 then
+                Tokens.create(c, { words = { "treasure" }, colors = {} }, x, it.name)
+              end
+            end
+            for i, c in ipairs(order) do
+              if a.damageWho == "all" or i > 1 then
+                watched("damage", c, x, controller, it.name, function(v)
+                  if v > 0 then
+                    Trackers.changeLife(c, -v, it.name)
+                  end
+                end)
+              end
+            end
+          end
         elseif a.what == "wheelMisfortune" then
           Effects.wheelMisfortune(controller, it)
         elseif a.what == "extraCombat" then
@@ -2279,6 +2330,8 @@ local function render()
       if q.number then
         numTyped[c] = nil
         UI.setAttribute("effNumIn_" .. c, "text", "")
+        UI.setAttribute("effNumIn_" .. c, "characterValidation", q.number == "text" and "None" or "Integer")
+        UI.setAttribute("effNumIn_" .. c, "placeholder", q.number == "text" and "type it here" or "X")
       end
       for i = 1, MAX_CHOICES do
         local ch = q.choices[i]
@@ -2352,6 +2405,15 @@ function Effects.unstick()
   numTyped = {}
   pcall(render)
   return n
+end
+
+-- Ask for a word or two (a creature type): a text box with OK. onPick(text) only on an answer.
+function Effects.askText(seat, title, text, onPick)
+  ask(seat, title, text, { { label = "CANCEL", value = false } }, function(v)
+    if v ~= false then
+      onPick(v)
+    end
+  end, nil, "text")
 end
 
 function Effects.askNumber(seat, title, text, onPick)
@@ -2432,6 +2494,11 @@ function Effects.counterSpell(seat, a, it)
     end
   end
   local function counter(e)
+    local why = Stack.uncounterable and Stack.uncounterable(e)
+    if why then
+      printToAll("MTG > " .. it.name .. " can't counter " .. e.name .. ": " .. why .. ".", { 1, 0.6, 0.2 })
+      return
+    end
     if a.unless then
       local payer = e.controller
       local extra = a.wizardNote and " (If " .. seat .. " controls a Wizard it is {4} instead.)" or ""
@@ -2575,6 +2642,9 @@ function Effects.counterOn(seat, a, it)
       end
     end, { filter = function(obj, owner)
       if a.mine and owner ~= seat then
+        return false
+      end
+      if a.other and it.source and obj.getGUID() == it.source then
         return false
       end
       local types = Effects.cardTypes(obj)
@@ -3764,6 +3834,8 @@ Events.on("stepStarted", function(d)
               printToAll("MTG > " .. r.seat .. " casts " .. r.name .. " from exile (rebound).", GOOD)
               GameState.data.reboundCast = GameState.data.reboundCast or {}
               GameState.data.reboundCast[card.getGUID()] = true
+              GameState.data.freeCast = GameState.data.freeCast or {}
+              GameState.data.freeCast[card.getGUID()] = true
               Stack.pushCard(card, r.seat)
             else
               printToAll("MTG > " .. r.seat .. " doesn't cast " .. r.name .. " (rebound lost).", INFO)
@@ -3775,6 +3847,147 @@ Events.on("stepStarted", function(d)
     end
   end
   GameState.data.rebound = keep
+end)
+
+-- Suspend N-{cost}: pay the cost, exile the card with N time counters. At the start of the
+-- owner's upkeep one comes off; when the last one goes the card is cast free (creatures get haste).
+function Effects.suspendInfo(obj)
+  local d = CardData.get(obj)
+  local low = tostring(d.oracle or ""):lower()
+  local at = nil
+  if low:sub(1, 8) == "suspend " then
+    at = 1
+  else
+    local f = low:find("\nsuspend ", 1, true)
+    at = f and (f + 1) or nil
+  end
+  if not at then
+    return nil
+  end
+  local line = low:sub(at, (low:find("\n", at, true) or (#low + 1)) - 1)
+  local paren = line:find("(", 1, true)
+  if paren then
+    line = line:sub(1, paren - 1)
+  end
+  local n = tonumber(line:match("^suspend (%d+)"))
+  if not n then
+    return nil
+  end
+  local cost = ""
+  local fromBrace = line:find("{", 1, true)
+  if fromBrace then
+    for sym in line:sub(fromBrace):gmatch("{[^}]*}") do
+      cost = cost .. sym:upper()
+    end
+  end
+  return n, cost
+end
+
+function Effects.suspend(obj, seat)
+  if obj == nil or obj.isDestroyed() then
+    return
+  end
+  local n, cost = Effects.suspendInfo(obj)
+  if not n then
+    printToColor("That card has no suspend.", seat or "White", { 1, 0.6, 0.2 })
+    return
+  end
+  seat = seat or (Zones.locationOf(obj) or {}).seat
+  if seat == nil then
+    return
+  end
+  local nm = obj.getName()
+  if cost ~= "" and ManaChips and ManaChips.pay then
+    ManaChips.pay(seat, cost, nm .. " (suspend)")
+  end
+  obj.setLock(false)
+  local s = TableSetup.seat(seat)
+  obj.setPositionSmooth(TableSetup.slot(seat, "exile", 3), false, true)
+  if s then
+    obj.setRotationSmooth({ 0, s.yaw, 0 }, false, true)
+  end
+  GameState.data.suspended = GameState.data.suspended or {}
+  table.insert(GameState.data.suspended, { seat = seat, guid = obj.getGUID(), name = nm })
+  Wait.time(function()
+    if not obj.isDestroyed() then
+      Zones.refresh(obj)
+      Counters.change(obj, "other", n, seat)
+    end
+  end, 1.2)
+  printToAll("MTG > " .. seat .. " suspends " .. nm .. ": exiled with " .. n .. " time counter" .. (n == 1 and "" or "s")
+    .. (cost ~= "" and (" (cost " .. cost .. ")") or "") .. ". It comes off one at each of their upkeeps.", GOOD)
+end
+
+Events.on("stepStarted", function(d)
+  local list = GameState.data and GameState.data.suspended
+  if d.step ~= "upkeep" or not list or #list == 0 then
+    return
+  end
+  local keep = {}
+  for _, r in ipairs(list) do
+    local card = getObjectFromGUID(r.guid)
+    if card == nil or card.isDestroyed() then
+      -- gone (cast or moved by hand): forget it
+    elseif r.seat ~= d.seat then
+      table.insert(keep, r)
+    else
+      Counters.change(card, "other", -1, r.seat)
+      local left = Counters.get(card).other or 0
+      if left > 0 then
+        printToAll("MTG > " .. r.name .. " (suspended): one time counter removed, " .. left .. " left.", INFO)
+        table.insert(keep, r)
+      else
+        printToAll("MTG > " .. r.name .. " (suspended): last time counter removed, " .. r.seat .. " casts it without paying.", GOOD)
+        ask(r.seat, r.name .. ": suspend", "The last time counter came off. Cast " .. r.name .. " without paying its mana cost? (You must, if you can.)",
+          { { label = "CAST", value = "cast" }, { label = "CAN'T CAST", value = false } }, function(pick)
+            if pick == "cast" and not card.isDestroyed() then
+              local tl = tostring(CardData.get(card).typeLine or ""):lower()
+              if tl:find("creature", 1, true) and Counters.addTempKeyword then
+                Counters.addTempKeyword(card, "haste")
+              end
+              GameState.data.freeCast = GameState.data.freeCast or {}
+              GameState.data.freeCast[card.getGUID()] = true
+              Stack.pushCard(card, r.seat)
+            end
+          end)
+      end
+    end
+  end
+  GameState.data.suspended = keep
+end)
+
+-- "As ~ enters, choose a creature type" (Cavern of Souls, Roaming Throne, Coat of Arms...):
+-- the controller types it in; it is remembered for the card (Statics.chosenType).
+function Effects.chooseType(obj, seat)
+  if obj == nil or obj.isDestroyed() then
+    return
+  end
+  local nm = obj.getName()
+  Effects.askText(seat, nm .. ": creature type", "Type the creature type you choose for " .. nm .. " (for example Elf, Goblin, Human).", function(t)
+    if obj.isDestroyed() then
+      return
+    end
+    local ty = t:sub(1, 1):upper() .. t:sub(2):lower()
+    Statics.setChosen(obj, ty)
+    printToAll("MTG > " .. seat .. " chooses " .. ty .. " for " .. nm .. ".", { 0.55, 0.9, 0.6 })
+  end)
+end
+
+Events.on("cardMoved", function(d)
+  if d.card == nil or d.to == nil or (d.to.region ~= "battlefield" and d.to.region ~= "lands") or d.to.seat == nil then
+    return
+  end
+  if d.from == nil or d.from.region == nil or d.from.region == "battlefield" or d.from.region == "lands" then
+    return
+  end
+  local ok, obj = pcall(function() return d.card end)
+  if not ok or obj == nil or obj.isDestroyed() then
+    return
+  end
+  local low = tostring(CardData.get(obj).oracle or ""):lower()
+  if low:find("choose a creature type", 1, true) and low:find("enters", 1, true) and not Statics.chosenType(obj) then
+    Effects.chooseType(obj, d.to.seat)
+  end
 end)
 
 -- Put an exiled card back onto the battlefield (a real move, so enters triggers fire).
@@ -3915,6 +4128,19 @@ function ui_effNumOk(player, seat)
     return
   end
   if player.color ~= seat and not GameState.solo() then
+    return
+  end
+  if q.number == "text" then
+    local t = tostring(numTyped[player.color] or numTyped[seat] or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if t == "" then
+      broadcastToColor("Type something first.", player.color, INFO)
+      return
+    end
+    current = nil
+    q.onPick(t)
+    if current == nil then
+      nextQuestion()
+    end
     return
   end
   local n = tonumber(numTyped[player.color] or numTyped[seat] or "")

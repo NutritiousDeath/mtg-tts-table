@@ -33,6 +33,8 @@ local yardOf = {}    -- [color] = whose graveyard is searched (Reanimate: any); 
 -- "Look at the top N cards": { left = cards still in that top group, picks =
 -- how many may still be taken }. Not cleared by typing a new search.
 local look = {}
+-- Big picture of each shown card for the hover preview: big[color][slotKey] = url
+local big = {}
 -- "Up to N cards" (Collective Voyage): the panel closes by itself after N.
 local limit = {}
 
@@ -64,8 +66,8 @@ function LibSearch.xml()
     local slots = {}
     for i = 1, MAX_SHOWN do
       local id = c .. "_" .. i
-      table.insert(slots, ('<Panel id="lsSlot_%s" active="false"><Image id="lsImg_%s" preserveAspect="true" raycastTarget="false" /><Button id="lsBtn_%s" onClick="ui_libPick(%s)" color="#00000000" /></Panel>')
-        :format(id, id, id, id))
+      table.insert(slots, ('<Panel id="lsSlot_%s" active="false"><Image id="lsImg_%s" preserveAspect="true" raycastTarget="false" /><Button id="lsBtn_%s" onClick="ui_libPick(%s)" onMouseEnter="ui_libHover(%s)" onMouseExit="ui_libUnhover(%s)" color="#00000000" /></Panel>')
+        :format(id, id, id, id, id, id))
     end
     table.insert(parts, ([[
 <Panel id="libsearch_%s" visibility="%s" active="false" rectAlignment="UpperCenter" offsetXY="0 -60" width="1260" height="160"
@@ -78,7 +80,7 @@ function LibSearch.xml()
     </HorizontalLayout>
     <HorizontalLayout spacing="8" preferredHeight="38" childForceExpandWidth="false">
       <InputField id="lsInput_%s" onValueChanged="ui_libText" onEndEdit="ui_libSubmit" fontSize="16" flexibleWidth="1"
-                  placeholder="name, type or rules text: forest, creature elf, scry, draw a card... (empty = whole library)" />
+                  placeholder="name, type or text: forest, creature elf, scry... mana value: mv3, mv&lt;=2, mv&gt;=4 (empty = whole library)" />
       <Button onClick="ui_libSearch(%s)" preferredWidth="110" color="#00B3A4" textColor="#06130B" fontStyle="Bold">SEARCH</Button>
       <Panel preferredWidth="210">
         <Button id="lsDestBtn_%s" onClick="ui_libDest(%s)" color="#2A3346" tooltip="Where a clicked card goes: click to switch" />
@@ -93,7 +95,15 @@ function LibSearch.xml()
     </VerticalScrollView>
   </VerticalLayout>
 </Panel>
-]]):format(c, c, c, c, c, c, c, c, c, c, c, c))
+<Panel id="lsPrevL_%s" visibility="%s" active="false" rectAlignment="MiddleLeft" offsetXY="8 -40" width="350" height="490"
+       color="#0B0F17F0" outline="#5AF0FF" outlineSize="2 2" raycastTarget="false">
+  <Image id="lsPrevImgL_%s" preserveAspect="true" raycastTarget="false" />
+</Panel>
+<Panel id="lsPrevR_%s" visibility="%s" active="false" rectAlignment="MiddleRight" offsetXY="-8 -40" width="350" height="490"
+       color="#0B0F17F0" outline="#5AF0FF" outlineSize="2 2" raycastTarget="false">
+  <Image id="lsPrevImgR_%s" preserveAspect="true" raycastTarget="false" />
+</Panel>
+]]):format(c, c, c, c, c, c, c, c, c, c, c, c, c, c, c, c, c, c))
   end
   return table.concat(parts)
 end
@@ -121,6 +131,8 @@ end
 local function render(color, guids, faces, total, matched)
   local rows = math.max(1, math.ceil(#guids / COLS))
   local view = math.min(rows, VIEW_ROWS)
+  UI.setAttribute("lsPrevL_" .. color, "active", "false")
+  UI.setAttribute("lsPrevR_" .. color, "active", "false")
   UI.setAttribute("lsScroll_" .. color, "active", #guids > 0 and "true" or "false")
   UI.setAttribute("lsScroll_" .. color, "preferredHeight", view * 212)
   UI.setAttribute("lsGrid_" .. color, "preferredHeight", rows * 212)
@@ -158,7 +170,38 @@ function LibSearch.run(color)
   searched[color] = true
   local entries = lib.type == "Deck" and lib.getObjects() or {
     { guid = lib.getGUID(), name = lib.getName(), description = lib.getDescription(), gm_notes = lib.getGMNotes() } }
-  local want = words(query[color])
+  local want = {}
+  -- Mana value words: mv3, mv=3, mv:3, mv<=2, mv>=4, mv<5, cmc>2 ("mv 3" works too).
+  local qmin, qmax
+  do
+    local all = words(query[color])
+    local i = 1
+    while i <= #all do
+      local w = all[i]
+      local key, op, num = w:match("^(%a+)([<>=:]*)(%d*)$")
+      if (key == "mv" or key == "cmc") and (op ~= "" or num ~= "") then
+        if num == "" and all[i + 1] and all[i + 1]:match("^%d+$") then
+          num = all[i + 1]
+          i = i + 1
+        end
+        local n = tonumber(num)
+        if n then
+          if op == "<=" or op == "=<" then qmax = math.min(qmax or n, n)
+          elseif op == ">=" or op == "=>" then qmin = math.max(qmin or n, n)
+          elseif op == "<" then qmax = math.min(qmax or n - 1, n - 1)
+          elseif op == ">" then qmin = math.max(qmin or n + 1, n + 1)
+          else qmin = math.max(qmin or n, n); qmax = math.min(qmax or n, n) end
+        end
+      elseif (w == "mv" or w == "cmc") and all[i + 1] and all[i + 1]:match("^%d+$") then
+        local n = tonumber(all[i + 1])
+        qmin = math.max(qmin or n, n); qmax = math.min(qmax or n, n)
+        i = i + 1
+      else
+        table.insert(want, w)
+      end
+      i = i + 1
+    end
+  end
   -- getObjects() can leave the type line / rules text out of its entries, so the card data
   -- inside the deck (getData, matched by POSITION) is read as well.
   local dataAll = lib.getData()
@@ -204,9 +247,11 @@ function LibSearch.run(color)
         break
       end
     end
-    if ok and f and (f.mvMin or f.mvMax) then
+    local lo = math.max((f and f.mvMin) or -1, qmin or -1)
+    local hi = math.min((f and f.mvMax) or 999, qmax or 999)
+    if ok and (lo >= 0 or hi < 999) then
       local mv = tonumber(gmField(e.gm_notes, "cmc") or "") or 0
-      if (f.mvMin and mv < f.mvMin) or (f.mvMax and mv > f.mvMax) then
+      if mv < lo or mv > hi then
         ok = false
       end
     end
@@ -218,7 +263,7 @@ function LibSearch.run(color)
   -- Cards are matched to their pictures by POSITION in the deck: cards
   -- inside a deck can share a GUID, so a GUID lookup showed one card's
   -- picture for every match (and could take the wrong card).
-  local faces, guids = {}, {}
+  local faces, guids, bigs = {}, {}, {}
   local contained = inside
   for i = 1, math.min(MAX_SHOWN, #matches) do
     local e = matches[i]
@@ -233,7 +278,9 @@ function LibSearch.run(color)
     end
     faces[key] = face and face:gsub("/large/", "/small/", 1) or ""
     faces[key .. "|name"] = e.name
+    bigs[key] = face or ""
   end
+  big[color] = bigs
   shown[color] = guids
   render(color, guids, faces, #entries, #matches)
   if #matches == 0 and #want > 0 then
@@ -312,28 +359,53 @@ function LibSearch.open(color, preset, note, where, tapped, opts)
   end
 end
 
+-- !unstick: close every open search panel (no shuffle message, errors ignored).
+function LibSearch.unstick()
+  local n = 0
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    if open[c] then
+      n = n + 1
+      pcall(LibSearch.close, c, true)
+    end
+    open[c] = false
+    UI.setAttribute("libsearch_" .. c, "active", "false")
+    UI.setAttribute("lsPrevL_" .. c, "active", "false")
+    UI.setAttribute("lsPrevR_" .. c, "active", "false")
+  end
+  return n
+end
+
 function LibSearch.close(color, quiet)
   if not open[color] then
     return
   end
   open[color] = false
   shown[color] = nil
+  big[color] = nil
   UI.setAttribute("libsearch_" .. color, "active", "false")
+  UI.setAttribute("lsPrevL_" .. color, "active", "false")
+  UI.setAttribute("lsPrevR_" .. color, "active", "false")
   local lk = look[color]
   look[color] = nil
   limit[color] = nil
   if lk then
     -- Looked at the top cards: the rest go on the bottom, no shuffle.
     if lk.left > 0 then
-      Library.topToBottom(color, lk.left)
+      local okb, errb = pcall(Library.topToBottom, color, lk.left)
+      if not okb then
+        print("LibSearch: could not move the rest to the bottom: " .. tostring(errb))
+      end
     end
     if not quiet then
       printToAll("MTG > " .. color .. " put the rest (" .. lk.left .. ") on the bottom of their library.", INFO)
     end
   elseif searched[color] and zoneOf[color] ~= "graveyard" then
-    local lib = Library.find(color)
-    if lib and lib.type == "Deck" then
-      lib.shuffle()
+    local okl, lib = pcall(Library.find, color)
+    if okl and lib and not lib.isDestroyed() and lib.type == "Deck" then
+      local oks = pcall(function() lib.shuffle() end)
+      if not oks then
+        print("LibSearch: the library changed while closing, shuffle skipped.")
+      end
     end
     if not quiet then
       printToAll("MTG > " .. color .. " finished searching and shuffled their library.", INFO)
@@ -344,12 +416,18 @@ function LibSearch.close(color, quiet)
   local h = held[color]
   held[color] = nil
   if h and not h.isDestroyed() then
-    Library.holdRevealed(color, h)
+    local okh, errh = pcall(Library.holdRevealed, color, h)
+    if not okh then
+      print("LibSearch: could not hold the revealed card: " .. tostring(errh))
+    end
   end
   local cb = LibSearch.onCloseCb and LibSearch.onCloseCb[color]
   if cb then
     LibSearch.onCloseCb[color] = nil
-    cb()
+    local okc, errc = pcall(cb)
+    if not okc then
+      print("LibSearch: close step failed: " .. tostring(errc))
+    end
   end
 end
 
@@ -410,6 +488,11 @@ local function take(color, slot, toBattlefield, tapped, toTop)
     if lib.type == "Deck" then
       local card = lib.takeObject({ index = index, position = hand.position, rotation = { 0, s.yaw, 0 }, smooth = true })
       name = card and card.getName() or name
+      -- Fetching a card is not drawing it (Sheoldred, Notion Thief...).
+      if card and fromWhere == "library" then
+        GameState.data.searched = GameState.data.searched or {}
+        GameState.data.searched[card.getGUID()] = true
+      end
       if card and fromWhere == "graveyard" then
         Wait.time(function()
           if not card.isDestroyed() then
@@ -418,6 +501,10 @@ local function take(color, slot, toBattlefield, tapped, toTop)
         end, 1.2)
       end
     else
+      if fromWhere == "library" then
+        GameState.data.searched = GameState.data.searched or {}
+        GameState.data.searched[lib.getGUID()] = true
+      end
       lib.setPositionSmooth(hand.position)
       name = lib.getName()
     end
@@ -477,6 +564,37 @@ function ui_libSearch(player, c)
     return
   end
   LibSearch.run(c)
+end
+
+-- Hover preview: a big, readable copy of the card under the mouse. Cards in the
+-- left half show it on the right of the screen and the other way round.
+local function hidePreview(c)
+  UI.setAttribute("lsPrevL_" .. c, "active", "false")
+  UI.setAttribute("lsPrevR_" .. c, "active", "false")
+end
+
+function ui_libHover(player, arg)
+  local c, i = tostring(arg):match("^(%a+)_(%d+)$")
+  if c == nil or (c ~= player.color and not GameState.solo()) then
+    return
+  end
+  local url = big[c] and big[c][i]
+  if url == nil or url == "" then
+    return
+  end
+  local col = ((tonumber(i) - 1) % COLS) + 1
+  local side = col <= COLS / 2 and "R" or "L"
+  local other = side == "R" and "L" or "R"
+  UI.setAttribute("lsPrevImg" .. side .. "_" .. c, "image", url)
+  UI.setAttribute("lsPrev" .. side .. "_" .. c, "active", "true")
+  UI.setAttribute("lsPrev" .. other .. "_" .. c, "active", "false")
+end
+
+function ui_libUnhover(player, arg)
+  local c = tostring(arg):match("^(%a+)_")
+  if c then
+    hidePreview(c)
+  end
 end
 
 function ui_libClose(player, c)

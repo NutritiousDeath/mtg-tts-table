@@ -350,10 +350,31 @@ function Stack.resolveTop()
   end
 end
 
+-- Why a stack item can't be countered (nil when it can): Cavern of Souls mana, "This spell can't be countered."
+function Stack.uncounterable(it)
+  if it == nil or it.kind == "ability" then
+    return nil
+  end
+  local nc = GameState.data and GameState.data.noCounter
+  if nc and nc[it.guid] then
+    return "it was cast with " .. tostring(nc[it.guid]) .. " mana"
+  end
+  local obj = getObjectFromGUID(it.guid)
+  if obj and tostring(CardData.get(obj).oracle or ""):lower():find("this spell can't be countered", 1, true) then
+    return "\"This spell can't be countered\""
+  end
+  return nil
+end
+
 function Stack.counterTop(byColor)
   local list = items()
   local it = list[#list]
   if it == nil then
+    return
+  end
+  local why = Stack.uncounterable(it)
+  if why then
+    log(it.name .. " can't be countered: " .. why .. ". Nothing happens.", WARN)
     return
   end
   local obj = getObjectFromGUID(it.guid)
@@ -383,6 +404,11 @@ function Stack.counterGuid(guid, byName)
   local list = items()
   for i, it in ipairs(list) do
     if it.guid == guid then
+      local why = Stack.uncounterable(it)
+      if why then
+        log(it.name .. " can't be countered: " .. why .. ". " .. tostring(byName) .. " does nothing to it.", WARN)
+        return nil
+      end
       local obj = getObjectFromGUID(it.guid)
       removeAt(i)
       log(it.name .. (it.kind == "ability" and "'s ability" or "") .. " is countered (by " .. tostring(byName) .. ").", WARN)

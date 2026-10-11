@@ -413,6 +413,71 @@ function Statics.chatterfang(seat)
   return false
 end
 
+-- "Choose a creature type" permanents (Cavern of Souls, Roaming Throne...): what was chosen.
+function Statics.chosenType(obj)
+  local c = GameState.data and GameState.data.chosen
+  return c and obj and c[obj.getGUID()] or nil
+end
+
+function Statics.setChosen(obj, ty)
+  GameState.data.chosen = GameState.data.chosen or {}
+  GameState.data.chosen[obj.getGUID()] = ty
+end
+
+-- Is a card with this type line (and rules text, for changeling) of the creature type `ty`?
+-- Plurals are forgiven: elves -> elf, goblins -> goblin.
+function Statics.typeMatches(typeLine, oracle, ty)
+  typeLine = tostring(typeLine or ""):lower()
+  ty = tostring(ty or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+  if ty == "" or not typeLine:find("creature", 1, true) then
+    return false
+  end
+  if tostring(oracle or ""):lower():find("changeling", 1, true) then
+    return true
+  end
+  if typeLine:find(ty, 1, true) then
+    return true
+  end
+  for _, w in ipairs(singular(ty)) do
+    if w ~= "" and typeLine:find(w, 1, true) then
+      return true
+    end
+  end
+  return false
+end
+
+-- Roaming Throne: triggered abilities of the chosen type's other creatures trigger an additional time.
+function Statics.extraTriggers(src, seat)
+  if src == nil or seat == nil then
+    return 0
+  end
+  local n = 0
+  local sd
+  for _, p in ipairs(perms()) do
+    if p.seat == seat and p.obj ~= src and p.oracle:find("triggers an additional time", 1, true)
+        and p.oracle:find("creature you control of the chosen type", 1, true) then
+      local ty = Statics.chosenType(p.obj)
+      if ty then
+        sd = sd or CardData.get(src)
+        if Statics.typeMatches(sd.typeLine, sd.oracle, ty) then
+          n = n + 1
+        end
+      end
+    end
+  end
+  return n
+end
+
+-- Notion Thief: who (if anyone) replaces this seat's extra draws, and with which card.
+function Statics.drawReplacer(seat)
+  for _, p in ipairs(perms()) do
+    if p.seat ~= seat and p.oracle:find("except the first one they draw in each of their draw steps", 1, true) then
+      return p.seat, p.obj
+    end
+  end
+  return nil
+end
+
 -- Panharmonicon: how many of them this seat controls.
 function Statics.panharmonicons(seat)
   local n = 0

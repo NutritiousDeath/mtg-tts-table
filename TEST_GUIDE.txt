@@ -1,5 +1,5 @@
 MTG COMMANDER TABLE (TTS) - TEST GUIDE
-Version being tested: 1.56
+Version being tested: 1.57
 After loading, chat should say:  MTG > Scripts loaded: version 1.56 (...)
 
 HOW TO USE THIS
@@ -126,6 +126,18 @@ TOKEN PILES (OFF by default - turn on with  !stack on  only when you want to tes
 [ ] 78. DO: Evendo, Waking Haven: right-click > Station.  EXPECT: click an untapped creature: it taps and Evendo gets charge counters equal to its power; chat says when a 12+ level is reached (the 12+ mana ability itself is by hand).
 [ ] 79. DO: anthems: Glorious Anthem, an "Other Elves you control get +1/+1" lord, a "Creatures your opponents control get -2/-2" card.  EXPECT: the numbers on the cards update when the anthem enters AND go away when it leaves. "Until end of turn" lines never become permanent.
 [ ] 80. DO: any spell/ability that fails with a script error.  EXPECT: an orange "SCRIPT ERROR" line in chat. Type !errors to list the last ones and send them over.
+[ ] 81. DO: search your library and type  mv3  /  mv<=2  /  mv>=4 creature  (or  cmc 5 ).  EXPECT: only cards with that mana value come up; words still narrow it down.
+[ ] 82. DO: put Cavern of Souls onto the battlefield.  EXPECT: a box asks you to TYPE a creature type (Elf, Goblin...). Tap it for colored mana: the pool gets the mana as usual.
+[ ] 83. DO: cast a creature of the chosen type paying with Cavern's colored mana.  EXPECT: chat says "can't be countered"; clicking COUNTER on it (or a counterspell resolving) says it can't be countered and does nothing.
+[ ] 84. DO: spend Cavern's colored mana on a non-matching spell or an ability.  EXPECT: an orange "NOT ALLOWED" line in chat telling you to take it back by hand.
+[ ] 85. DO: right-click a suspend card in your hand (Rift Bolt, Ancestral Vision) > Suspend.  EXPECT: cost comes out of the pool, card goes to exile with time counters; at each of your upkeeps one comes off; at zero you are asked to cast it free (creatures get haste).
+[ ] 86. DO: Black Waltz No. 3 on the table, cast a noncreature spell.  EXPECT: trigger, then 2 damage to each opponent.
+[ ] 87. DO: Descent into Avernus on the table, reach your upkeep.  EXPECT: 2 descent counters, then Treasures and damage equal to the counters (chat shows X).
+[ ] 88. DO: Sheoldred, the Apocalypse on the table, draw a card, then have an opponent draw.  EXPECT: you gain 2 / they lose 2. A library SEARCH (fetch land, tutor) does NOT trigger her.
+[ ] 89. DO: Notion Thief on the table, an opponent draws an extra card (not their first draw-step draw).  EXPECT: their card goes back on top, you draw instead.
+[ ] 90. DO: Avabruck Caretaker, go to combat.  EXPECT: asks you to click another creature of yours: it gets two +1/+1 counters.
+[ ] 91. DO: Roaming Throne enters.  EXPECT: type a creature type; triggers of your other creatures of that type then happen twice (chat says so).
+[ ] 92. DO: look at the table after UNPACK in Planechase.  EXPECT: no visible marker where the planar die goes (the die just sits there).
 
 
 

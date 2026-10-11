@@ -442,6 +442,13 @@ local function parseCombat(p)
     end
   elseif plainFind(p, "whenever a creature you control attacks") or plainFind(p, "whenever a nontoken creature you control attacks") then
     add({ kind = "attacks", mine = true })
+  elseif between(p, "whenever a", " you control attacks,") or between(p, "whenever an", " you control attacks,") then
+    -- Utvara Hellkite: "Whenever a Dragon you control attacks, ..." (only that creature type).
+    local word = between(p, "whenever an", " you control attacks,") or between(p, "whenever a", " you control attacks,")
+    word = tostring(word or ""):gsub("^n? ", ""):gsub("^%s+", "")
+    if word ~= "" and not word:find(" ", 1, true) and #word < 20 then
+      add({ kind = "attacks", mine = true, onlyType = word })
+    end
   elseif plainFind(p, "whenever one or more creatures you control attack") or plainFind(p, "whenever you attack") then
     add({ kind = "attacks", mine = true, once = true })
   end
@@ -856,6 +863,23 @@ finishOrdering = function(resolveOrder)
 end
 
 -- !triggers flush: put anything waiting on the stack now (a stuck ordering panel).
+-- !unstick: put whatever is waiting to be ordered onto the stack, then clear the panels.
+function Triggers.unstick()
+  local n = #queue + (ordering and 1 or 0)
+  local guard = 0
+  while (ordering or #queue > 0) and guard < 20 do
+    guard = guard + 1
+    local ok = pcall(Triggers.flush)
+    if not ok then
+      break
+    end
+  end
+  queue = {}
+  ordering = nil
+  pcall(renderOrder)
+  return n
+end
+
 function Triggers.flush()
   if ordering then
     finishOrdering(ordering.list)
@@ -988,6 +1012,26 @@ local function pushAll(found, that, thatCard)
   if #found == 0 then
     return
   end
+  -- Roaming Throne: an additional time for creatures of the chosen type.
+  if Statics and Statics.extraTriggers then
+    local extra = {}
+    for _, f in ipairs(found) do
+      local ok, k = pcall(Statics.extraTriggers, f.obj, f.controller)
+      for _ = 1, ok and k or 0 do
+        local c2 = {}
+        for kk, vv in pairs(f) do
+          c2[kk] = vv
+        end
+        table.insert(extra, c2)
+      end
+    end
+    if #extra > 0 then
+      printToAll("MTG > Roaming Throne: " .. #extra .. " trigger(s) happen an additional time.", { 0.55, 0.9, 0.6 })
+      for _, c2 in ipairs(extra) do
+        table.insert(found, c2)
+      end
+    end
+  end
   for _, f in ipairs(found) do
     f.that = f.that or that
     f.thatCard = f.thatCard or thatCard
@@ -1054,6 +1098,36 @@ Events.on("cardMoved", function(d)
   end
   -- A card drawn: library -> hand.
   if d.from.region == "library" and d.to.region == "hand" and d.to.seat then
+    local sg = GameState.data.searched
+    if sg and sg[card.getGUID()] then
+      sg[card.getGUID()] = nil      -- taken by a library search, not drawn
+      return
+    end
+    -- Notion Thief: an opponent's extra draw is skipped; its controller draws instead.
+    if Statics and Statics.drawReplacer then
+      local gd = GameState.data
+      local tt = gd.turn or {}
+      local stepId = tt.stepIndex and Turns.STEPS[tt.stepIndex] and Turns.STEPS[tt.stepIndex].id
+      gd.drawStep = gd.drawStep or {}
+      local first = false
+      if stepId == "draw" and tt.activeSeat == d.to.seat then
+        local key = tostring(tt.taken) .. "|" .. d.to.seat
+        gd.drawStep[key] = (gd.drawStep[key] or 0) + 1
+        first = gd.drawStep[key] == 1
+      end
+      if not first then
+        local thief, thiefObj = Statics.drawReplacer(d.to.seat)
+        if thief then
+          printToAll("MTG > " .. thiefObj.getName() .. ": " .. d.to.seat .. "'s draw is skipped (" .. card.getName() .. " goes back on top), "
+            .. thief .. " draws a card instead.", { 0.55, 0.9, 0.6 })
+          local who = d.to.seat
+          Library.putAt(who, card, 0, function()
+            Actions.draw(thief, 1, thiefObj.getName())
+          end)
+          return
+        end
+      end
+    end
     do
       local gd = GameState.data
       local turnNo = gd.turn and gd.turn.taken
@@ -1436,6 +1510,10 @@ function Triggers.onAttack(list)
           if t.nonType then
             local dd = cardData(at.obj)
             okType = not tostring(dd and dd.typeLine or ""):lower():find(t.nonType, 1, true)
+          end
+          if t.onlyType then
+            local dd = cardData(at.obj)
+            okType = tostring(dd and dd.typeLine or ""):lower():find(t.onlyType, 1, true) ~= nil
           end
           if at.controller == p.controller and okType then
             mineCount = mineCount + 1
