@@ -183,6 +183,18 @@ function Equip.keywordList(creature)
       end
     end
   end
+  -- Given by other permanents (Sliver lords...).
+  if Statics and Statics.grants then
+    local okg, g = pcall(Statics.grants, creature)
+    if okg and g then
+      for _, kw in ipairs(g.kws) do
+        if not seen[kw] and kw ~= "exalted" then
+          seen[kw] = true
+          table.insert(out, kw)
+        end
+      end
+    end
+  end
   return out
 end
 

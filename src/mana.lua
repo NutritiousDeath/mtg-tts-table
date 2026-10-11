@@ -163,6 +163,17 @@ local function oracleOf(obj)
   if nm ~= "" then
     text = text:gsub(nm:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "~")
   end
+  -- Mana abilities other permanents give it (Manaweft Sliver: Slivers tap for any color).
+  if Statics and Statics.grants then
+    local okg, g = pcall(Statics.grants, obj)
+    if okg and g then
+      for _, a in ipairs(g.lines) do
+        if a:find("{t}", 1, true) and a:find("add ", 1, true) then
+          text = text .. "\n" .. a
+        end
+      end
+    end
+  end
   return text, d
 end
 
@@ -244,7 +255,7 @@ end
 -- Put one of the options into the pool; several options: the player picks.
 -- Mana with a catch ("Spend this mana only to cast a creature spell of the chosen type", Cavern of Souls):
 -- it sits in the pool like any mana, and is remembered so that paying for the wrong thing is called out.
-function ManaChips.addRestricted(seat, key, ty, src)
+function ManaChips.addRestricted(seat, key, ty, src, unc)
   ManaChips.add(seat, key, 1)
   local d = GameState.data
   d.restrict = d.restrict or {}
@@ -257,17 +268,17 @@ function ManaChips.addRestricted(seat, key, ty, src)
       return
     end
   end
-  table.insert(list, { type = ty, src = src, n = 1 })
+  table.insert(list, { type = ty, src = src, n = 1, unc = unc and true or false })
 end
 
-function ManaChips.offer(seat, name, options, restrictType)
+function ManaChips.offer(seat, name, options, restrictType, restrictUnc)
   if options == nil or #options == 0 then
     return
   end
   local function give(opt)
     for _, k in ipairs(opt) do
       if restrictType and k ~= "C" then
-        ManaChips.addRestricted(seat, k, restrictType, name)
+        ManaChips.addRestricted(seat, k, restrictType, name, restrictUnc)
       else
         ManaChips.add(seat, k, 1)
       end
@@ -394,19 +405,34 @@ function ManaChips.onTap(obj, seat)
   end
   local options = ManaChips.parseTap(text)
   if options then
-    if text:find("spend this mana only to cast a creature spell of the chosen type", 1, true) then
-      local ty = Statics.chosenType(obj)
-      if ty == nil then
-        Effects.askText(seat, obj.getName() .. ": creature type", "No creature type is chosen for " .. obj.getName() .. " yet. Type it (for example Elf).", function(t)
-          ty = t:sub(1, 1):upper() .. t:sub(2):lower()
-          Statics.setChosen(obj, ty)
-          printToAll("MTG > " .. seat .. " chooses " .. ty .. " for " .. obj.getName() .. ".", { 0.55, 0.9, 0.6 })
-          ManaChips.offer(seat, obj.getName(), options, ty)
-        end)
-      else
-        ManaChips.offer(seat, obj.getName(), options, ty)
+    -- "Spend this mana only to cast ..." (Cavern of Souls, Unclaimed Territory, Sliver Hive, Ancient Ziggurat).
+    local only = text:find("spend this mana only to cast", 1, true)
+    if only then
+      local tail = text:sub(only, only + 160)
+      local unc = tail:find("can't be countered", 1, true) ~= nil
+      local function go(ty)
+        ManaChips.offer(seat, obj.getName(), options, ty, unc)
       end
-      return
+      if tail:find("of the chosen type", 1, true) then
+        local ty = Statics.chosenType(obj)
+        if ty == nil then
+          Effects.askText(seat, obj.getName() .. ": creature type", "No creature type is chosen for " .. obj.getName() .. " yet. Type it (for example Elf).", function(t)
+            ty = t:sub(1, 1):upper() .. t:sub(2):lower()
+            Statics.setChosen(obj, ty)
+            printToAll("MTG > " .. seat .. " chooses " .. ty .. " for " .. obj.getName() .. ".", { 0.55, 0.9, 0.6 })
+            go(ty)
+          end)
+        else
+          go(ty)
+        end
+        return
+      elseif tail:find("cast a sliver spell", 1, true) then
+        go("Sliver")
+        return
+      elseif tail:find("cast a creature spell", 1, true) or tail:find("cast creature spells", 1, true) then
+        go("")
+        return
+      end
     end
     ManaChips.offer(seat, obj.getName(), options)
   end
@@ -463,13 +489,15 @@ local function settleRestricted(seat, taken, p, card, spellName)
       end
       local need = t
       for _, e in ipairs(list) do
-        if need > 0 and e.n > 0 and card and Statics.typeMatches(tl, orc, e.type) then
+        if need > 0 and e.n > 0 and card and ((e.type == "" and tostring(tl):lower():find("creature", 1, true)) or Statics.typeMatches(tl, orc, e.type)) then
           local u = math.min(e.n, need)
           e.n = e.n - u
           need = need - u
-          GameState.data.noCounter = GameState.data.noCounter or {}
-          GameState.data.noCounter[card.getGUID()] = e.src
-          printToAll("MTG > " .. spellName .. " is paid with " .. e.src .. " mana: it can't be countered.", { 0.55, 0.9, 0.6 })
+          if e.unc then
+            GameState.data.noCounter = GameState.data.noCounter or {}
+            GameState.data.noCounter[card.getGUID()] = e.src
+            printToAll("MTG > " .. spellName .. " is paid with " .. e.src .. " mana: it can't be countered.", { 0.55, 0.9, 0.6 })
+          end
         end
       end
       need = need - math.min(need, math.max(0, before - total))
@@ -478,7 +506,7 @@ local function settleRestricted(seat, taken, p, card, spellName)
           local u = math.min(e.n, need)
           e.n = e.n - u
           need = need - u
-          printToAll("MTG > NOT ALLOWED: " .. e.src .. " mana can only be spent to cast a creature spell of the chosen type (" .. e.type .. "), but "
+          printToAll("MTG > NOT ALLOWED: " .. e.src .. " mana can only be spent to cast " .. (e.type == "" and "a creature spell" or ("a creature spell of the type " .. e.type)) .. ", but "
             .. u .. k .. " of it was used for " .. spellName .. ". Take it back by hand and pay another way.", { 1, 0.45, 0.2 })
         end
       end

@@ -39,7 +39,11 @@ function Events.noteError(where, err)
   printToAll("MTG > SCRIPT ERROR in " .. line:sub(1, 300) .. "  (type !errors to list the last ones)", { 1, 0.45, 0.35 })
 end
 
+Events.epoch = 0     -- bumped whenever cards move or a step starts: caches that depend on the board check it
 function Events.emit(name, data)
+  if name == "cardMoved" or name == "stepStarted" then
+    Events.epoch = Events.epoch + 1
+  end
   for _, fn in ipairs(listeners[name] or {}) do
     -- One broken listener shouldn't stop the others.
     local ok, err = pcall(fn, data)

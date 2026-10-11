@@ -424,6 +424,11 @@ function Effects.parse(text, sourceName)
   if t:find("it deals damage equal to its power to any target", 1, true) then
     return { optional = false, notes = {}, conds = {}, actions = { { what = "powerHit", who = "you", n = 1 } } }
   end
+  -- Rabid Bite / Bite Down: your creature deals damage equal to its power to another creature.
+  if t:find("deals damage equal to its power to target creature", 1, true)
+      and t:find("target creature you control deals damage equal to its power", 1, true) then
+    return { optional = false, notes = {}, conds = {}, actions = { { what = "bite", who = "you", n = 1 } } }
+  end
   -- "If it's not your turn, you may exile a green card from your hand rather than pay this spell's mana
   -- cost." (Force of Vigor, Force of Will...): that is how it is cast, not part of what it does.
   do
@@ -821,6 +826,10 @@ function Effects.parse(text, sourceName)
   add("lose", "target", num(w))
   w = t:match("that player loses? (%w+) life")
   add("lose", "that", num(w))
+  if w == nil then
+    w = t:match("defending player loses (%w+) life")      -- Leeching Sliver
+    add("lose", "that", num(w))
+  end
   if w == nil then
     w = t:match(" they lose (%w+) life")      -- Sheoldred, the Apocalypse
     add("lose", "that", num(w))
@@ -1537,6 +1546,8 @@ local function describe(a, target, controller)
     return "a target artifact creature is sacrificed and its controller may search for an artifact worth 1 more"
   elseif a.what == "windfall" then
     return "everyone discards their hand and draws as many cards as the most anyone discarded"
+  elseif a.what == "bite" then
+    return "your creature deals damage equal to its power to a creature you don't control"
   elseif a.what == "powerHit" then
     return "damage equal to the creature's power to any target"
   elseif a.what == "manaAsk" then
@@ -2190,6 +2201,10 @@ local function apply(it, plan, target)
           end)
         elseif a.what == "windfall" then
           Effects.windfall(it, a.fixed)
+        elseif a.what == "bite" then
+          Effects.askNumber(seat, it.name .. ": your creature's power?", "Type the power of the creature you chose, then OK. Put that much damage on the other creature by hand.", function(n)
+            printToAll("MTG > " .. it.name .. ": " .. seat .. "'s creature deals " .. n .. " damage to the target creature: mark it on that creature (one-sided, it deals nothing back).", GOOD)
+          end)
         elseif a.what == "powerHit" then
           Effects.powerHit(seat, a, it)
         elseif a.what == "manaAsk" then
@@ -5267,6 +5282,10 @@ end
 
 local function hasKeyword(obj, kw)
   local found = Counters.hasTempKeyword and Counters.hasTempKeyword(obj, kw) or false
+  if not found and Statics and Statics.hasGrantedKeyword then
+    local okk, yes = pcall(Statics.hasGrantedKeyword, obj, kw)
+    found = okk and yes or false
+  end
   pcall(function()
     local d = JSON.decode(obj.getGMNotes())
     for _, k in ipairs(type(d) == "table" and d.keywords or {}) do

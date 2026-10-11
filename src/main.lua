@@ -110,7 +110,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.57 (Suspend, Cavern of Souls, mana value search, Sheoldred, Notion Thief, Descent, Roaming Throne)"
+SCRIPT_VERSION = "1.58 (Sliver abilities for every Sliver, Cavern uncounterable, Rabid Bite)"
 
 function onLoad(saved)
   GameLog.setup()

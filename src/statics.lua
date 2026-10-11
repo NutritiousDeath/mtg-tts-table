@@ -189,10 +189,46 @@ function Statics.compute()
       -- opponents control get -2/-2", "Saprolings you control get +2/+2 as long as you have the city's blessing".
       -- Only lasting effects: not "until end of turn", not triggered ("whenever...") or activated ("{2}: ...") lines.
       -- (plain search first: MoonSharp gives up on lazy patterns over long rules text)
+      do
+        local gat = line:find(" get ", 1, true)
+        if gat and gat <= 40 and line:find(" for each other ", 1, true) and line:find(" on the battlefield", 1, true)
+            and not line:find(":", 1, true) and not line:find("until end of turn", 1, true) then
+          local gx, gy, gw = line:sub(gat + 5):match("^([%+%-]%d+)/([%+%-]%d+) for each other (%a+) on the battlefield")
+          if gx then
+            local subj = line:sub(1, gat - 1)
+            if subj:sub(1, 4) == "all " then
+              subj = subj:sub(5)
+            end
+            local bases = singular(gw)
+            local total = 0
+            for _, q in ipairs(list) do
+              for _, b in ipairs(bases) do
+                if b ~= "" and q.tl:find(b, 1, true) then
+                  total = total + 1
+                  break
+                end
+              end
+            end
+            for _, q in ipairs(list) do
+              if subjectMatches(subj, q, p) then
+                local mine = 0
+                for _, b in ipairs(bases) do
+                  if b ~= "" and q.tl:find(b, 1, true) then
+                    mine = 1
+                    break
+                  end
+                end
+                local k = total - mine
+                add(q, tonumber(gx) * k, tonumber(gy) * k)
+              end
+            end
+          end
+        end
+      end
       local lowl = line
       local temporary = lowl:find("until end of turn", 1, true) or lowl:find("until your next turn", 1, true)
         or lowl:find("this turn", 1, true) or lowl:find(":", 1, true) or lowl:sub(1, 4) == "when"
-        or lowl:find("at the beginning", 1, true) or lowl:find("target", 1, true)
+        or lowl:find("at the beginning", 1, true) or lowl:find("target", 1, true) or lowl:find(" for each ", 1, true)
       if not temporary then
         local subj, scope, x, y = parseAnthem(line)
         -- Conditions: only the city's blessing is understood; any other "as long as" is left out
@@ -461,6 +497,185 @@ function Statics.extraTriggers(src, seat)
         sd = sd or CardData.get(src)
         if Statics.typeMatches(sd.typeLine, sd.oracle, ty) then
           n = n + 1
+        end
+      end
+    end
+  end
+  return n
+end
+
+---------------------------------------------------------------------------
+-- Abilities given to other creatures: "Sliver creatures you control have flying and haste",
+-- "Creatures you control have trample", "Hellbent - As long as you have no cards in hand, Sliver
+-- creatures you control have '{T}: This creature deals 1 damage to target player.'"
+-- Keywords go to combat; quoted abilities are added to the creature's rules text (triggers.lua,
+-- stack.lua right-click Activate, mana.lua tapping for mana).
+---------------------------------------------------------------------------
+local GRANTABLE = { ["flying"] = true, ["first strike"] = true, ["double strike"] = true, ["deathtouch"] = true,
+  ["lifelink"] = true, ["haste"] = true, ["trample"] = true, ["vigilance"] = true, ["reach"] = true,
+  ["menace"] = true, ["hexproof"] = true, ["indestructible"] = true, ["defender"] = true, ["flash"] = true,
+  ["infect"] = true, ["wither"] = true, ["exalted"] = true, ["shroud"] = true, ["fear"] = true, ["intimidate"] = true }
+
+local grantSrc = { epoch = -1, at = -100, list = {} }
+
+local function clockNow()
+  return (Time and Time.time) or os.time()
+end
+
+local function parseGrantLine(line)
+  line = line:gsub("%b()", "")
+  line = line:gsub("^%s+", "")
+  if line:find("until end of turn", 1, true) or line:find("target", 1, true) and not line:find('"', 1, true) then
+    return nil
+  end
+  local cond
+  local lead = line:find("as long as you have no cards in hand, ", 1, true)
+  if lead then
+    cond = "hellbent"
+    line = line:sub(lead + #"as long as you have no cards in hand, ")
+  end
+  local first = line:sub(1, 4)
+  if first == "when" or line:sub(1, 3) == "at " or line:sub(1, 3) == "if " or line:sub(1, 4) == "{t}:" then
+    return nil
+  end
+  local forms = { { " you control have ", "mine" }, { " you control has ", "mine" } }
+  if line:sub(1, 4) == "all " or line:sub(1, 5) == "each " then
+    table.insert(forms, { " have ", "all" })
+    table.insert(forms, { " has ", "all" })
+  end
+  for _, f in ipairs(forms) do
+    local at = line:find(f[1], 1, true)
+    if at and at <= 40 then
+      local subj = line:sub(1, at - 1)
+      if subj:find(":", 1, true) or subj:find('"', 1, true) then
+        return nil
+      end
+      local rest = line:sub(at + #f[1])
+      local rec = { subj = subj, scope = f[2], cond = cond, kws = {}, lines = {} }
+      for q in rest:gmatch('"([^"]*)"') do
+        local t = q:gsub("%s+$", "")
+        if t:sub(-1) ~= "." then
+          t = t .. "."
+        end
+        table.insert(rec.lines, t)
+      end
+      local bare = rest:gsub('"[^"]*"', "")
+      bare = bare:gsub("%.", ""):gsub(" and ", ","):gsub("^%s+", "")
+      for raw in bare:gmatch("[^,]+") do
+        local tok = raw:gsub("^%s+", ""):gsub("%s+$", "")
+        if GRANTABLE[tok] then
+          table.insert(rec.kws, tok)
+          if tok == "exalted" then
+            table.insert(rec.lines, "exalted")
+          end
+        elseif tok:sub(1, 7) == "outlast" then
+          local ol = tok:gsub("outlast (%d+)", "{%1}, {t}: put a +1/+1 counter on this creature. activate only as a sorcery.")
+          table.insert(rec.lines, ol)
+        end
+      end
+      if #rec.kws > 0 or #rec.lines > 0 then
+        return rec
+      end
+      return nil
+    end
+  end
+  return nil
+end
+
+local function grantSources()
+  local ep = Events and Events.epoch or 0
+  local now = clockNow()
+  if grantSrc.epoch == ep and now - grantSrc.at < 2 then
+    return grantSrc.list
+  end
+  local out = {}
+  for _, p in ipairs(perms()) do
+    if p.oracle:find(" have ", 1, true) or p.oracle:find(" has ", 1, true) then
+      local nm = tostring(p.obj.getName() or ""):lower()
+      for line in (p.oracle .. "\n"):gmatch("([^\n]*)\n") do
+        local l2 = line
+        if nm ~= "" and l2:find(nm, 1, true) then
+          l2 = l2:gsub(nm:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "~")
+        end
+        if l2:find(" have ", 1, true) or l2:find(" has ", 1, true) then
+          local rec = parseGrantLine(l2)
+          if rec then
+            rec.obj, rec.seat = p.obj, p.seat
+            table.insert(out, rec)
+          end
+        end
+      end
+    end
+  end
+  grantSrc.epoch, grantSrc.at, grantSrc.list = ep, now, out
+  return out
+end
+
+local function handEmpty(seat)
+  local n = 1
+  pcall(function() n = #(Player[seat].getHandObjects() or {}) end)
+  return n == 0
+end
+
+-- What `obj` is given by the other permanents: { kws = {"flying", ...}, lines = {"{t}: add ...", ...} }
+function Statics.grants(obj)
+  local out = { kws = {}, lines = {} }
+  if obj == nil then
+    return out
+  end
+  local srcs = grantSources()
+  if #srcs == 0 then
+    return out
+  end
+  local ok, loc = pcall(function() return Zones.regionAt(obj.getPosition()) end)
+  if not ok or loc == nil or not IN[loc.region] or loc.seat == nil then
+    return out
+  end
+  local d = dataOf(obj)
+  local q = { obj = obj, seat = loc.seat, tl = tostring(d.typeLine or ""):lower(), token = obj.hasTag("Token") }
+  local seenK = {}
+  for _, g in ipairs(srcs) do
+    local sideOk = g.scope == "all" or g.seat == loc.seat
+    if sideOk and (g.cond ~= "hellbent" or handEmpty(g.seat)) and subjectMatches(g.subj, q, { obj = g.obj }) then
+      for _, k in ipairs(g.kws) do
+        if not seenK[k] then
+          seenK[k] = true
+          table.insert(out.kws, k)
+        end
+      end
+      for _, l in ipairs(g.lines) do
+        table.insert(out.lines, l)
+      end
+    end
+  end
+  return out
+end
+
+function Statics.hasGrantedKeyword(obj, kw)
+  kw = tostring(kw):lower()
+  for _, k in ipairs(Statics.grants(obj).kws) do
+    if k == kw then
+      return true
+    end
+  end
+  return false
+end
+
+-- "Sliver spells you cast have cascade" (The First Sliver): how many extra cascades this spell gets.
+function Statics.spellGrantCount(card, seat, word)
+  local d = dataOf(card)
+  local tl = tostring(d.typeLine or ""):lower()
+  local n = 0
+  for _, p in ipairs(perms()) do
+    if p.seat == seat then
+      for line in (p.oracle .. "\n"):gmatch("([^\n]*)\n") do
+        local at = line:find(" spells you cast have " .. word, 1, true)
+        if at and at <= 30 then
+          local subj = line:sub(1, at - 1):gsub("^%s+", "")
+          local base = subj:gsub("s$", "")
+          if base ~= "" and tl:find(base, 1, true) then
+            n = n + 1
+          end
         end
       end
     end

@@ -368,6 +368,13 @@ local function parseTrigger(p)
   if plainFind(p, "when ~ becomes the target of a spell or ability") or plainFind(p, "whenever ~ becomes the target of a spell or ability") then
     return { kind = "targeted", self = true, opp = plainFind(p, "an opponent controls") }
   end
+  -- Diffusion Sliver: "Whenever a Sliver creature you control becomes the target of a spell or ability an opponent controls".
+  do
+    local who = between(p, "whenever a ", " creature you control becomes the target of a spell or ability")
+    if who and #who < 20 and not who:find(" ", 1, true) then
+      return { kind = "targeted", mine = true, subject = "sub:" .. who, subjects = { "sub:" .. who }, opp = plainFind(p, "an opponent controls") }
+    end
+  end
   -- Dies (self).
   if plainFind(p, "when ~ dies") or plainFind(p, "whenever ~ dies") then
     return { kind = "dies", self = true }
@@ -534,10 +541,24 @@ end
 
 local function abilitiesOf(obj)
   local d = cardData(obj)
-  if d == nil or type(d.oracle) ~= "string" or d.oracle == "" then
+  if d == nil or type(d) ~= "table" then
     return {}
   end
-  local key = obj.getGUID() .. "|" .. tostring(d.name)
+  -- Abilities other permanents give this one (Sliver lords...): part of the key, so they come and go.
+  local given = ""
+  if Statics and Statics.grants then
+    local okg, g = pcall(Statics.grants, obj)
+    if okg and g and #g.lines > 0 then
+      given = table.concat(g.lines, "\n")
+    end
+  end
+  if type(d.oracle) ~= "string" or d.oracle == "" then
+    if given == "" then
+      return {}
+    end
+    d = setmetatable({ oracle = "" }, { __index = d })
+  end
+  local key = obj.getGUID() .. "|" .. tostring(d.name) .. "|" .. given
   if cache[key] then
     return visibleTo(obj, cache[key])
   end
@@ -545,7 +566,7 @@ local function abilitiesOf(obj)
   list.hasHarness = false
   -- "Choose one —" modes ("• ...") belong to the line before them.
   local paras = {}
-  for _, raw in ipairs(lines(d.oracle)) do
+  for _, raw in ipairs(lines(given ~= "" and (d.oracle .. "\n" .. given) or d.oracle)) do
     local first = raw:sub(1, 3)
     if #paras > 0 and (first == "•" or raw:sub(1, 1) == "\149" or raw:find("^%s*•")) then
       paras[#paras] = paras[#paras] .. "\n" .. raw
@@ -1232,11 +1253,26 @@ function Triggers.onTargeted(obj, bySeat)
     return
   end
   local found = {}
+  -- Other permanents that watch for their friends being targeted (Diffusion Sliver).
+  for _, p in ipairs(permanents()) do
+    if p.obj ~= obj then
+      for _, a in ipairs(abilitiesOf(p.obj)) do
+        local tr = a.trig
+        if tr.kind == "targeted" and tr.mine and not tr.self and (not tr.opp or bySeat ~= p.controller) and matchesSubject(obj, tr) then
+          local ownerSeat
+          pcall(function() ownerSeat = Zones.regionAt(obj.getPosition()).seat end)
+          if ownerSeat == p.controller then
+            table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
+          end
+        end
+      end
+    end
+  end
   for _, p in ipairs(permanents()) do
     if p.obj == obj then
       for _, a in ipairs(abilitiesOf(obj)) do
         local tr = a.trig
-        if tr.kind == "targeted" and (not tr.opp or bySeat ~= p.controller) then
+        if tr.kind == "targeted" and tr.self and (not tr.opp or bySeat ~= p.controller) then
           -- "...becomes the target..., exile ~": it leaves before the spell can do anything
           -- (the table applies the spell right away), so the spell has no target left.
           local low = tostring(a.text):lower()
@@ -1452,6 +1488,12 @@ Events.on("spellCast", function(d)
         storm = true
       end
     end
+    if Statics and Statics.spellGrantCount then
+      local okc, extraC = pcall(Statics.spellGrantCount, d.card, d.controller, "cascade")
+      if okc and extraC then
+        cascades = cascades + extraC
+      end
+    end
     local gid, face = d.card.getGUID(), faceOf(d.card)
     local mv = dd and tonumber(dd.cmc) or nil
     for _ = 1, cascades do
@@ -1505,6 +1547,7 @@ function Triggers.onAttack(list)
       local t = a.trig
       if t.kind == "attacks" and t.mine then
         local mineCount = 0
+        local mineList = {}
         for _, at in ipairs(list) do
           local okType = true
           if t.nonType then
@@ -1517,6 +1560,7 @@ function Triggers.onAttack(list)
           end
           if at.controller == p.controller and okType then
             mineCount = mineCount + 1
+            table.insert(mineList, at)
           end
         end
         if t.alone then
@@ -1528,8 +1572,8 @@ function Triggers.onAttack(list)
             table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
           end
         else
-          for _ = 1, mineCount do
-            table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
+          for _, at in ipairs(mineList) do
+            table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, that = at.target })
           end
         end
       elseif t.kind == "attacks" and t.targetsMe then

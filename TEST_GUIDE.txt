@@ -1,6 +1,6 @@
 MTG COMMANDER TABLE (TTS) - TEST GUIDE
-Version being tested: 1.57
-After loading, chat should say:  MTG > Scripts loaded: version 1.56 (...)
+Version being tested: 1.58
+After loading, chat should say:  MTG > Scripts loaded: version 1.58 (...)
 
 HOW TO USE THIS
 - One person can test alone: type  !solo on  in chat. You can then act for every seat.
@@ -268,6 +268,23 @@ COUNTERS AND SACRIFICE
 [ ] D16. Victimize: asks which creature to sacrifice, then lets you click two creature cards in your graveyard (they return tapped).
 
 BY HAND in the Xavier Sal deck: Living Death, Abundance, Rite of Replication kicker (five copies), Sekki's damage prevention into Spirits and its return from the graveyard, Worldspine Wurm's shuffle clause, Tireless Tracker's Clue-sacrifice counter, Kodama's trample for modified creatures, Deep Forest Hermit vanishing, Cabal Coffers / Circle of Dreams Druid / Cryptolith Rite / Bloom Tender mana, Urborg and Yavimaya land types, Chatterfang's +X/-X ability, Liliana -9, Liliana Death's Majesty's Zombie type, Myr Battlesphere attack tapping.
+
+
+DECK E: SLIVERS (Sliver Hivelord, 5 colors)
+Slivers hand every Sliver you control (yours only, unless a card says "all Slivers") a keyword or an ability. The table now reads those lines off the Sliver cards on the battlefield and gives them to each Sliver.
+[ ] E-1. Put Sliver Hivelord plus two other Slivers out. Hover/open any Sliver: its info should list the abilities the others grant it (e.g. Bladeback Sliver's "{T}: 1 damage to target player", Manaweft's mana).
+[ ] E-2. Sliver Legion: each Sliver gets +1/+1 for every OTHER Sliver on the battlefield (check the numbers on 3 Slivers, then remove one).
+[ ] E-3. Keyword Slivers (Cloudshredder flying/Striking double strike etc.): attack with a Sliver; combat should treat it as having the keyword.
+[ ] E-4. First Sliver's Chosen / The First Sliver: Slivers you cast get cascade (check The First Sliver); casting a Sliver triggers the cascade search.
+[ ] E-5. Diffusion Sliver: target one of your Slivers with an opponent's spell; the table offers the "counter unless they pay {2}" trigger.
+[ ] E-6. Leeching Sliver: when a Sliver attacks, the defending player loses 1 life.
+[ ] E-7. Cavern of Souls: tap it, type the creature type (e.g. Sliver). That mana can only pay for a creature spell of that type, and the spell cannot be countered (a counterspell on it is refused). Right-click the Cavern > "Choose creature type again" to change it.
+[ ] E-8. Sliver Hive: its colored mana only pays for Sliver spells.
+[ ] E-9. Hive Stirrings / Thrumming Hivepool: make Sliver tokens (use the TOKENS tile if the table says it couldn't find one).
+[ ] E-10. Rabid Bite: asks for your creature's power, then tells you to mark that much damage on the target.
+[ ] E-11. Counterspells (Negate, Essence Scatter, Spell Pierce, Dovin's Veto, Saw It Coming, Supreme Will, Cancel) counter a spell on the stack; Dovin's Veto's spell can't be countered.
+
+BY HAND in the Sliver deck: Patchwork Banner's +1/+1 for the chosen type and Herald's Horn's cost reduction / upkeep look, Coldsteel Heart's color choice, Path of Ancestry's scry, Distant Melody (count the permanents), Rise of the Dark Realms (mass reanimate), Confounding Riddle's modes, Celestial Regulator's copy, Dregscape Sliver's unearth, Sliver Overlord's gain-control search, Spiteful Sliver's damage trigger, damage marking on the creature Rabid Bite hits, Timeless Lotus eternalize, Replicating Ring's night counters.
 
 
 =====================================================================

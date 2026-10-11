@@ -638,6 +638,15 @@ local function oracleOf(obj)
       text = text .. "\n" .. a
     end
   end
+  -- Abilities other permanents give it (Sliver lords...).
+  if Statics and Statics.grants then
+    local okg, g = pcall(Statics.grants, obj)
+    if okg and g then
+      for _, a in ipairs(g.lines) do
+        text = text .. "\n" .. a
+      end
+    end
+  end
   return text, name
 end
 
