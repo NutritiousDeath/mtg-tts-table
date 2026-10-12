@@ -409,6 +409,13 @@ local function parseTrigger(p)
   if plainFind(p, "when you cast this spell") or plainFind(p, "when you cast ~") then
     return { kind = "castSelf" }
   end
+  -- Gandalf, Westward Voyager: "whenever you cast a spell with mana value 5 or greater".
+  do
+    local mv = p:match("whenever you cast a spell with mana value (%d+) or greater")
+    if mv then
+      return { kind = "cast", who = "you", mvMin = tonumber(mv) }
+    end
+  end
   local castType = between(p, "whenever you cast a", " spell")
   castType = castType and castType:gsub("^n? ", "") or nil
   if castType and #castType < 30 and castType ~= "" then
@@ -1517,8 +1524,16 @@ Events.on("spellCast", function(d)
             firstOk = false
           end
         end
+        if t.mvMin then
+          local cd = cardData(d.card)
+          if (cd and tonumber(cd.cmc) or 0) < t.mvMin then
+            firstOk = false
+          end
+        end
         if firstOk and ((t.who == "you" and mine) or (t.who == "opp" and not mine)) and spellMatches(d.card, t.spellType) then
-          table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
+          -- "That spell" (Gandalf copies it) is the spell that was cast.
+          local that = tostring(a.text):lower():find("that spell", 1, true) and d.card.getGUID() or nil
+          table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, thatCard = that })
         end
       end
     end

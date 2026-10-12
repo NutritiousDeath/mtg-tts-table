@@ -110,7 +110,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.59 (exalted works, Sliver keyword labels refresh and fit, granted-ability chat lines)"
+SCRIPT_VERSION = "1.60 (Gandalf: mana value 5+ only, reveals and copies the spell)"
 
 function onLoad(saved)
   GameLog.setup()

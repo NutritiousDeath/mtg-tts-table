@@ -535,6 +535,15 @@ function Effects.parse(text, sourceName)
   if t:find("controller sacrifices it", 1, true) and t:find("1 plus the sacrificed creature's mana value", 1, true) then
     return { optional = false, notes = {}, conds = {}, actions = { { what = "arcum", who = "you", n = 1 } } }
   end
+  -- Gandalf, Westward Voyager: each opponent reveals the top card of their
+  -- library; one that shares a card type with "that spell" copies it.
+  if t:find("each opponent reveals the top card of their library", 1, true) and t:find("copy that spell", 1, true)
+      and t:find("shares a card type with that spell", 1, true) then
+    return { optional = false, notes = {}, conds = {}, actions = { { what = "revealCopy", who = "you", n = 1,
+      perCard = t:find("for each card revealed", 1, true) ~= nil,
+      oppDraw = t:find("each opponent draws a card", 1, true) ~= nil,
+      elseDraw = t:find("otherwise, you draw a card", 1, true) ~= nil or t:find("draw a card", 1, true) ~= nil } } }
+  end
   -- Mirrorworks / Mechanized Production / Helm of the Host: a token copy of "that artifact" / "enchanted artifact" / "equipped creature".
   do
     local which = t:match("create a token that's a copy of (that %a+)") or t:match("create a token that's a copy of (enchanted %a+)")
@@ -1554,6 +1563,8 @@ local function describe(a, target, controller)
     return "mana for each " .. tostring(a.label)
   elseif a.what == "copyThat" then
     return "a token copy of " .. tostring(a.which)
+  elseif a.what == "revealCopy" then
+    return "each opponent reveals their top card; if one shares a card type with the spell, copy the spell"
   elseif a.what == "tapX" then
     return tostring(a.mode) .. (a.self and " itself" or (a.all and " all matching permanents" or " target permanent"))
   elseif a.what == "counterOn" then
@@ -2211,6 +2222,8 @@ local function apply(it, plan, target)
           Effects.manaAsk(seat, a, it)
         elseif a.what == "copyThat" then
           Effects.copyThat(seat, a, it)
+        elseif a.what == "revealCopy" then
+          Effects.revealCopy(seat, a, it)
         elseif a.what == "tapX" then
           Effects.tapX(seat, a, it)
         elseif a.what == "blink" then
@@ -2745,7 +2758,10 @@ function Effects.copyCard(obj, seat, a, srcName)
   -- The copy must land on the SAME area as the original, or "enters the battlefield" never fires for it
   -- (a copy that slid off the battlefield was just a card sitting on the table).
   local here, there = Zones.regionAt(pos), Zones.regionAt(spot)
-  if there.region ~= here.region or there.seat ~= here.seat then
+  if a.toField then
+    local slot = TableSetup.slot(seat, "battlefield", TableSetup.SURFACE_TOP + 1.5)
+    spot = { x = slot.x, y = slot.y, z = slot.z }
+  elseif there.region ~= here.region or there.seat ~= here.seat then
     spot = { x = pos.x - s.right.x * 3.2, y = pos.y + 0.6, z = pos.z - s.right.z * 3.2 }
     there = Zones.regionAt(spot)
     if there.region ~= here.region or there.seat ~= here.seat then
@@ -2760,6 +2776,11 @@ function Effects.copyCard(obj, seat, a, srcName)
   end
   c.addTag("Token")
   c.memo = ""
+  if a.toField then
+    -- Cloned from a spell on the stack: that card is locked and turned toward the stack.
+    c.setLock(false)
+    c.setRotation({ 0, s.yaw, 0 })
+  end
   Zones.presetFrom(c, seat)
   local pc = a.pileCount or 1
   if pc > 1 and Pile then
@@ -3623,6 +3644,129 @@ function Effects.copyThat(seat, a, it)
   end
 end
 
+-- Gandalf, Westward Voyager: each opponent reveals the top card of their
+-- library. If one shares a card type with the spell that triggered it, the
+-- spell is copied (and each opponent draws, as the card says); otherwise you
+-- draw. The revealed cards go back on top.
+local CARD_TYPES = { artifact = true, battle = true, creature = true, enchantment = true, instant = true,
+  kindred = true, tribal = true, land = true, planeswalker = true, sorcery = true }
+
+function Effects.revealCopy(seat, a, it)
+  local spell = it.thatCard and getObjectFromGUID(it.thatCard)
+  if spell == nil or spell.isDestroyed() then
+    broadcastToColor(it.name .. ": the spell wasn't found - resolve this one by hand.", seat, INFO)
+    return
+  end
+  local spellTypes = Effects.cardTypes(spell)
+  local opps = {}
+  for _, c in ipairs(players()) do
+    if c ~= seat then
+      table.insert(opps, c)
+    end
+  end
+  local revealed, hits = {}, 0
+  local function finish()
+    for _, r in ipairs(revealed) do
+      if not r.card.isDestroyed() then
+        Library.putAt(r.seat, r.card, 0)
+      end
+    end
+    Wait.time(function()
+      if hits > 0 then
+        local copies = a.perCard and hits or 1
+        for _ = 1, copies do
+          Effects.copySpell(spell, seat, it.name)
+        end
+        if a.oppDraw then
+          for _, c in ipairs(opps) do
+            Library.draw(c, 1)
+          end
+          printToAll("MTG > " .. it.name .. ": each opponent draws a card.", INFO)
+        end
+      else
+        printToAll("MTG > " .. it.name .. ": no revealed card shares a card type with " .. spell.getName()
+          .. (a.elseDraw and (". " .. seat .. " draws a card.") or "."), INFO)
+        if a.elseDraw then
+          Library.draw(seat, 1)
+        end
+      end
+    end, 1.2)
+  end
+  local function step(i)
+    if i > #opps then
+      -- Leave the revealed cards up for a moment so everyone sees them.
+      Wait.time(finish, 2.5)
+      return
+    end
+    local opp = opps[i]
+    Library.revealTop(opp, function(card)
+      if card == nil then
+        printToAll("MTG > " .. it.name .. ": " .. opp .. "'s library is empty.", INFO)
+      else
+        table.insert(revealed, { seat = opp, card = card })
+        local shared = {}
+        for ty in pairs(Effects.cardTypes(card)) do
+          if CARD_TYPES[ty] and spellTypes[ty] then
+            table.insert(shared, ty)
+          end
+        end
+        if #shared > 0 then
+          hits = hits + 1
+        end
+        printToAll("MTG > " .. it.name .. ": " .. opp .. " reveals " .. card.getName()
+          .. (#shared > 0 and (" (shares " .. table.concat(shared, ", ") .. ")") or " (no shared card type)") .. ".", GOOD)
+      end
+      Wait.time(function() step(i + 1) end, 0.6)
+    end)
+  end
+  if #opps == 0 then
+    finish()
+  else
+    step(1)
+  end
+end
+
+-- Put a copy of a spell on the stack. It resolves first (it's on top): an
+-- instant or sorcery copy does what the card says; a permanent spell's copy
+-- becomes a token copy on the controller's battlefield.
+function Effects.copySpell(spell, seat, srcName)
+  local image = ""
+  pcall(function() image = spell.getCustomObject().face or "" end)
+  Stack.pushAbility(seat, spell.getName(), spell.getDescription(), image, { copyOf = spell.getGUID() })
+  printToAll("MTG > " .. srcName .. ": " .. seat .. " copies " .. spell.getName() .. ". The copy is on the stack"
+    .. " (new targets are picked when it resolves).", GOOD)
+end
+
+function Effects.resolveCopy(it)
+  local spell = getObjectFromGUID(it.copyOf)
+  if spell == nil or spell.isDestroyed() then
+    broadcastToColor(it.name .. " (copy): the original card wasn't found - resolve the copy by hand.", it.controller, INFO)
+    return
+  end
+  local ty = Effects.cardTypes(spell)
+  if ty.creature or ty.artifact or ty.enchantment or ty.planeswalker or ty.battle or ty.land then
+    -- A copy of a permanent spell isn't "created", so token doublers don't apply.
+    Effects.copyCard(spell, it.controller, { toField = true, noMods = true }, it.name)
+    printToAll("MTG > The copy of " .. spell.getName() .. " resolves: a token copy enters for " .. it.controller .. ".", GOOD)
+    return
+  end
+  local text, cost = "", ""
+  pcall(function()
+    local d = JSON.decode(spell.getGMNotes())
+    if type(d) == "table" and type(d.oracle) == "string" then
+      text = d.oracle
+      cost = tostring(d.manaCost or "")
+    end
+  end)
+  if text == "" then
+    broadcastToColor("The copy of " .. spell.getName() .. ": no rules text found - resolve it by hand.", it.controller, INFO)
+    return
+  end
+  printToAll("MTG > The copy of " .. spell.getName() .. " resolves.", GOOD)
+  Effects.resolve({ name = spell.getName() .. " (copy)", controller = it.controller, text = text, auto = true,
+    manaCost = cost, card = spell.getGUID() })
+end
+
 -- Tap or untap permanents.
 local function turnTapped(obj, owner, tapped)
   local s = TableSetup.seat(owner)
@@ -4230,6 +4374,10 @@ function Effects.resolve(it)
     it.resolvedTimes = countResolve(it)
   end
   Effects.currentSource = it.source or it.card
+  if it.copyOf then
+    Effects.resolveCopy(it)
+    return
+  end
   -- "Choose one —" with "• mode" lines: the controller picks a mode first.
   local raw = tostring(it.text or "")
   do

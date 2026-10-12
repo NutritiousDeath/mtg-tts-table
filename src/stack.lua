@@ -204,7 +204,7 @@ end
 -- text = its rules text; opts.trigger = true labels it TRIGGER.
 function Stack.pushAbility(controller, sourceName, text, image, opts)
   opts = opts or {}
-  local label = opts.trigger and "TRIGGER" or "ABILITY"
+  local label = opts.copyOf and "COPY" or (opts.trigger and "TRIGGER" or "ABILITY")
   local pos = { MAT.x, TableSetup.SURFACE_TOP + 1, MAT.z }
   local obj = spawnObject({
     type = "Custom_Token",
@@ -212,7 +212,7 @@ function Stack.pushAbility(controller, sourceName, text, image, opts)
     rotation = { 0, MAT_YAW, 0 },
     sound = false,
     callback_function = function(o)
-      o.setName(sourceName .. (opts.trigger and " (trigger)" or " (ability)"))
+      o.setName(sourceName .. (opts.copyOf and " (copy)" or (opts.trigger and " (trigger)" or " (ability)")))
       o.setDescription(text or "")
       o.addTag("StackAbility")
       Wait.condition(function()
@@ -236,10 +236,12 @@ function Stack.pushAbility(controller, sourceName, text, image, opts)
   -- can't move on in the meantime.
   table.insert(items(), { guid = obj.getGUID(), kind = "ability", name = sourceName, controller = controller,
     text = text, trigger = opts.trigger, that = opts.that, source = opts.source, thatCard = opts.thatCard,
-    amount = opts.amount,
-    auto = (opts.trigger or opts.loyalty or opts.activated) and true or nil })
+    amount = opts.amount, copyOf = opts.copyOf,
+    auto = (opts.trigger or opts.loyalty or opts.activated or opts.copyOf) and true or nil })
   Stack.render()
-  if opts.trigger then
+  if opts.copyOf then
+    log(controller .. " puts a copy of " .. sourceName .. " on the stack.")
+  elseif opts.trigger then
     log(sourceName .. " triggers (" .. controller .. ")"
       .. (opts.grantedBy and (" [ability given by " .. tostring(opts.grantedBy) .. "]") or "") .. ": " .. tostring(text or ""))
   else
