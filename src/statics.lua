@@ -271,6 +271,9 @@ function Statics.compute()
       pcall(Counters.render, obj)
     end
   end
+  if Statics.refreshGrantLabels then
+    pcall(Statics.refreshGrantLabels)
+  end
 end
 
 -- Recompute shortly after anything moves (several moves in a row count once).
@@ -619,7 +622,7 @@ end
 
 -- What `obj` is given by the other permanents: { kws = {"flying", ...}, lines = {"{t}: add ...", ...} }
 function Statics.grants(obj)
-  local out = { kws = {}, lines = {} }
+  local out = { kws = {}, lines = {}, from = {} }
   if obj == nil then
     return out
   end
@@ -643,12 +646,55 @@ function Statics.grants(obj)
           table.insert(out.kws, k)
         end
       end
+      local srcName = "?"
+      pcall(function() srcName = g.obj.getName() end)
       for _, l in ipairs(g.lines) do
         table.insert(out.lines, l)
+        table.insert(out.from, srcName)
       end
     end
   end
   return out
+end
+
+-- Which permanent gave `obj` this ability text (for the chat line), or nil if it's the card's own.
+function Statics.grantedBy(obj, text)
+  local t = tostring(text or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+  local okg, g = pcall(Statics.grants, obj)
+  if not okg or g == nil then
+    return nil
+  end
+  for i, l in ipairs(g.lines) do
+    if l == t then
+      return g.from[i]
+    end
+  end
+  return nil
+end
+
+-- Granted keywords show on the card's label: when a lord enters or leaves, every creature it
+-- affects is redrawn (not only the ones that moved). Called from Statics.compute.
+local grantLabelSig = {}
+function Statics.refreshGrantLabels()
+  grantSrc.at = -100     -- read the lords again now
+  local seen = {}
+  for _, p in ipairs(perms()) do
+    local g = p.obj.getGUID()
+    seen[g] = true
+    local okg, gr = pcall(Statics.grants, p.obj)
+    local sig = (okg and gr) and table.concat(gr.kws, ",") or ""
+    if (grantLabelSig[g] or "") ~= sig then
+      grantLabelSig[g] = sig
+      if Counters and Counters.render then
+        pcall(Counters.render, p.obj)
+      end
+    end
+  end
+  for g in pairs(grantLabelSig) do
+    if not seen[g] then
+      grantLabelSig[g] = nil
+    end
+  end
 end
 
 function Statics.hasGrantedKeyword(obj, kw)

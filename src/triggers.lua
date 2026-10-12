@@ -539,6 +539,9 @@ local function visibleTo(obj, list)
   return out
 end
 
+-- Exalted as the table resolves it: "it" is the creature that attacked alone (thatCard).
+local EXALTED_TEXT = "Exalted \226\128\148 Whenever a creature you control attacks alone, it gets +1/+1 until end of turn."
+
 local function abilitiesOf(obj)
   local d = cardData(obj)
   if d == nil or type(d) ~= "table" then
@@ -625,13 +628,34 @@ local function abilitiesOf(obj)
   }
   for _, kw in ipairs(type(d.keywords) == "table" and d.keywords or {}) do
     local k = tostring(kw):lower()
+    -- Scryfall lists keywords a card only gives away ("Sliver creatures you control have exalted"):
+    -- those aren't this card's own ability (it gets them through the grant below, if at all).
+    local onlyGiven = false
     if KEYWORD_TRIGGERS[k] then
+      local own, gives = false, false
+      for _, para in ipairs(lines(d.oracle)) do
+        local lp = stripReminder(para):lower()
+        for tok in (lp .. ","):gmatch("([^,]*),") do
+          if tok:gsub("^%s+", ""):sub(1, #k) == k then
+            own = true
+          end
+        end
+        if lp:find(" have " .. k, 1, true) or lp:find(" has " .. k, 1, true) or lp:find(", " .. k, 1, true) and lp:find(" ha", 1, true) then
+          gives = true
+        end
+      end
+      onlyGiven = gives and not own
+    end
+    if KEYWORD_TRIGGERS[k] and not onlyGiven then
       -- The keyword's own line in the rules text (e.g. "Annihilator 2").
       local text = tostring(kw)
       for _, para in ipairs(lines(d.oracle)) do
         if para:lower():sub(1, #k) == k then
           text = para
         end
+      end
+      if k == "exalted" then
+        text = EXALTED_TEXT
       end
       local already = false
       for _, e in ipairs(list) do
@@ -642,6 +666,14 @@ local function abilitiesOf(obj)
       if not already then
         local trig = KEYWORD_TRIGGERS[k]
         table.insert(list, { trig = trig, text = text })
+      end
+    end
+  end
+  -- Exalted given by other permanents (First Sliver's Chosen): one trigger per instance.
+  if given ~= "" then
+    for gl in (given .. "\n"):gmatch("([^\n]*)\n") do
+      if gl == "exalted" then
+        table.insert(list, { trig = KEYWORD_TRIGGERS.exalted, text = EXALTED_TEXT, granted = true })
       end
     end
   end
@@ -798,7 +830,7 @@ end
 local function push(f)
   -- that = "that player" in the effect (the one who drew, cast, whose
   -- creature entered...), for auto-resolve (effects.lua).
-  Stack.pushAbility(f.controller, f.name or "?", f.text, f.face or "", { trigger = true, that = f.that, source = f.guid, thatCard = f.thatCard, amount = f.amount })
+  Stack.pushAbility(f.controller, f.name or "?", f.text, f.face or "", { trigger = true, that = f.that, source = f.guid, thatCard = f.thatCard, amount = f.amount, grantedBy = f.grantedBy })
 end
 
 local function shortText(f)
@@ -846,7 +878,16 @@ end
 processNext = function()
   while #queue > 0 do
     local b = table.remove(queue, 1)
-    local askOrder = #b.list >= 2 and #b.list <= MAX_ORDER and seated(b.seat)
+    -- Triggers that all do the same thing (five exalted triggers) can go in any order: don't ask.
+    local kinds, nk = {}, 0
+    for _, f in ipairs(b.list) do
+      local k = f.sameKey or (tostring(f.guid or f.name) .. "|" .. tostring(f.text))
+      if not kinds[k] then
+        kinds[k] = true
+        nk = nk + 1
+      end
+    end
+    local askOrder = #b.list >= 2 and nk >= 2 and #b.list <= MAX_ORDER and seated(b.seat)
       and not (GameState.data and GameState.data.autoOrder)
     if askOrder then
       -- Shown in resolve order: as found, the first found resolves last.
@@ -1064,6 +1105,24 @@ local function pushAll(found, that, thatCard)
       local ok2, guid = pcall(function() return f.obj.getGUID() end)
       f.guid = ok2 and guid or nil
       f.face = faceOf(f.obj)
+    end
+    -- An ability another permanent gave it (Tempered Sliver's, on Manaweft Sliver): say whose it is.
+    if f.grantedBy == nil and Statics and Statics.grantedBy then
+      if f.text == EXALTED_TEXT then
+        local okx, gx = pcall(Statics.grants, f.obj)
+        if okx and gx then
+          for i, l in ipairs(gx.lines) do
+            if l == "exalted" then
+              f.grantedBy = gx.from[i]
+            end
+          end
+        end
+      else
+        local okb, by = pcall(Statics.grantedBy, f.obj, f.text)
+        if okb then
+          f.grantedBy = by
+        end
+      end
     end
   end
   for _, seat in ipairs(turnOrder()) do
@@ -1565,7 +1624,11 @@ function Triggers.onAttack(list)
         end
         if t.alone then
           if #list == 1 and mineCount == 1 then
-            table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
+            local f = { obj = p.obj, controller = p.controller, text = a.text, thatCard = mineList[1].obj.getGUID() }
+            if a.text == EXALTED_TEXT then
+              f.sameKey = "exalted"     -- every exalted trigger does the same thing: no need to order them
+            end
+            table.insert(found, f)
           end
         elseif t.once then
           if mineCount > 0 then

@@ -223,7 +223,8 @@ function Stack.pushAbility(controller, sourceName, text, image, opts)
           o.setScale({ k, 1, k })
         end
         Trackers.tileButton(o, { label = label, click_function = "trk_noop",
-          tooltip = sourceName .. "\n" .. tostring(text or ""), width = 900, height = 160, font_size = 120,
+          tooltip = sourceName .. (opts.grantedBy and (" (ability given by " .. tostring(opts.grantedBy) .. ")") or "")
+            .. "\n" .. tostring(text or ""), width = 900, height = 160, font_size = 120,
           color = { 0.04, 0.06, 0.1, 0.9 }, font_color = { 0.35, 0.95, 1 } }, 0, -1.3)
         Stack.layout()
       end, function() return o.isDestroyed() or not o.loading_custom end, 10)
@@ -239,7 +240,8 @@ function Stack.pushAbility(controller, sourceName, text, image, opts)
     auto = (opts.trigger or opts.loyalty or opts.activated) and true or nil })
   Stack.render()
   if opts.trigger then
-    log(sourceName .. " triggers (" .. controller .. "): " .. tostring(text or ""))
+    log(sourceName .. " triggers (" .. controller .. ")"
+      .. (opts.grantedBy and (" [ability given by " .. tostring(opts.grantedBy) .. "]") or "") .. ": " .. tostring(text or ""))
   else
     log(controller .. " puts " .. sourceName .. "'s ability on the stack.")
   end

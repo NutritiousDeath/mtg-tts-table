@@ -110,7 +110,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.58 (Sliver abilities for every Sliver, Cavern uncounterable, Rabid Bite)"
+SCRIPT_VERSION = "1.59 (exalted works, Sliver keyword labels refresh and fit, granted-ability chat lines)"
 
 function onLoad(saved)
   GameLog.setup()

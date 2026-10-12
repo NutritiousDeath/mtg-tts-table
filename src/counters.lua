@@ -207,6 +207,8 @@ end
 local LABEL_Z = -0.75
 local LABEL_Y = 0.25
 local LABEL_FONT = 250
+local KW_FONT = 120      -- keyword list: smaller, so "indestructible, first strike" fits on the card
+local KW_WRAP = 18
 
 function Counters.render(obj)
   if not isCard(obj) then
@@ -255,9 +257,7 @@ function Counters.render(obj)
       table.insert(kws, k)
     end
   end
-  if #kws > 0 then
-    table.insert(lines, table.concat(kws, ", "))
-  end
+  -- Keywords get their own smaller label (below), wrapped so a long list stays on the card.
   local pro = Equip and Equip.protectionOf and Equip.protectionOf(obj) or {}
   if #pro > 0 then
     table.insert(lines, "PRO " .. table.concat(pro, ", "))
@@ -321,11 +321,10 @@ function Counters.render(obj)
     })
     sickIndex[obj.getGUID()] = #obj.getButtons() - 1
   end
-  if #lines == 0 then
-    Counters.decorate(obj)
-    return
-  end
-  obj.createButton({
+  local mainH = 0
+  if #lines > 0 then
+    mainH = 110 + math.floor(LABEL_FONT * 1.15) * #lines
+    obj.createButton({
     click_function = "counters_noop",
     function_owner = Global,
     label = table.concat(lines, "\n"),
@@ -336,11 +335,53 @@ function Counters.render(obj)
     -- Narrower than the card (about 1050 wide in button units) so the
     -- label stays inside it.
     width = 880,
-    height = 110 + math.floor(LABEL_FONT * 1.15) * #lines,
+    height = mainH,
     font_size = LABEL_FONT,
     font_color = { 1, 1, 1 },
     color = { 0, 0, 0, 0.8 },
   })
+  end
+  if #kws > 0 then
+    -- Wrap at about 18 characters a line: the most that fits across the card at this size.
+    local kwLines, cur, dup = {}, "", {}
+    for _, k in ipairs(kws) do
+      if dup[k] then
+        k = nil
+      end
+      if k then
+      dup[k] = true
+      local piece = (cur == "") and k or (cur .. ", " .. k)
+      if cur ~= "" and #piece > KW_WRAP then
+        table.insert(kwLines, cur .. ",")
+        cur = k
+      else
+        cur = piece
+      end
+      end
+    end
+    if cur ~= "" then
+      table.insert(kwLines, cur)
+    end
+    local kwH = 60 + math.floor(KW_FONT * 1.15) * #kwLines
+    -- Under the counters label when there is one (button units are about 500 to one card unit).
+    local z = LABEL_Z
+    if mainH > 0 then
+      z = LABEL_Z + (mainH + kwH) / 1000 + 0.04
+    end
+    obj.createButton({
+      click_function = "counters_noop",
+      function_owner = Global,
+      label = table.concat(kwLines, "\n"),
+      tooltip = "Keywords it has from other cards, equipment, or until end of turn",
+      position = { 0, LABEL_Y, z },
+      rotation = { 0, 0, 0 },
+      width = 900,
+      height = kwH,
+      font_size = KW_FONT,
+      font_color = { 0.85, 0.95, 1 },
+      color = { 0, 0, 0, 0.8 },
+    })
+  end
   Counters.decorate(obj)
 end
 

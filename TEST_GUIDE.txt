@@ -1,6 +1,6 @@
 MTG COMMANDER TABLE (TTS) - TEST GUIDE
-Version being tested: 1.58
-After loading, chat should say:  MTG > Scripts loaded: version 1.58 (...)
+Version being tested: 1.59
+After loading, chat should say:  MTG > Scripts loaded: version 1.59 (...)
 
 HOW TO USE THIS
 - One person can test alone: type  !solo on  in chat. You can then act for every seat.
@@ -11,6 +11,16 @@ HOW TO USE THIS
 - If something looks stuck, try these chat commands:  !errors   !unstick   !triggers flush   !import reset   !resync   !order off
 - When you report a bug, copy the chat lines from just before and after it. That's the most useful thing you can send.
 
+
+
+=====================================================================
+NEW IN 1.59 - SLIVER FIXES (test these first)
+=====================================================================
+[ ] S1. DO: with First Sliver's Chosen out, attack with ONE Sliver alone.  EXPECT: one exalted trigger per Sliver you control (First Sliver's Chosen gives every Sliver exalted, itself included), no ordering panel, chat says "[ability given by First Sliver's Chosen]". Each one resolving gives the attacker +1/+1 (turn).
+[ ] S2. DO: attack with TWO creatures.  EXPECT: no exalted triggers.
+[ ] S3. DO: cast Sliver Hivelord with other Slivers out.  EXPECT: about a second after it lands, EVERY Sliver shows "indestructible" (not only the Hivelord). Same for a Sliver you cast afterwards.
+[ ] S4. DO: look at a Sliver with 3+ granted keywords.  EXPECT: the keyword list is in smaller text, wrapped onto several lines, and stays inside the card. If it overlaps the counter label or sits in a strange spot, send a screenshot.
+[ ] S5. DO: attack with Slivers while Tempered Sliver is out, let them deal combat damage to a player.  EXPECT: each Sliver that dealt damage triggers once, under ITS OWN name, with "[ability given by Tempered Sliver]", and gets a +1/+1 counter on itself. Slivers that were blocked or didn't attack get nothing (that's the card's rule).
 
 =====================================================================
 PART 1 - EVERY GAME (any deck, do these once)
