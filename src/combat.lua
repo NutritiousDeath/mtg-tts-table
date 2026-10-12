@@ -1287,6 +1287,14 @@ local function sendToGraveyard(card, zone)
   if Counters and Counters.remember then Counters.remember(card) end
   card.setRotation({ 0, s.yaw, 0 })
   if isToken(card) then
+    if zone == "graveyard" then
+      -- A dying token does reach the graveyard ("dies" triggers see it,
+      -- Marionette Apprentice, Blood Artist), then ceases to exist.
+      card.setPosition(TableSetup.slot(seat, "graveyard", TableSetup.SURFACE_TOP + 2))
+      Zones.refresh(card)
+      Wait.time(function() Combat.tokenGone(card, seat, zone) end, 0.4)
+      return
+    end
     Combat.tokenGone(card, seat, zone)
     return
   end

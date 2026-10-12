@@ -124,6 +124,10 @@ local SUBJECTS = { "creature", "land", "artifact", "enchantment", "permanent", "
 
 -- Parse one paragraph of rules text into a trigger, or nil.
 local function parseTrigger(p)
+  -- "Is put into a graveyard from the battlefield" (Marionette Apprentice) is "dies"
+  -- for creatures, and the same check for artifacts.
+  p = (p:gsub(" is put into a graveyard from the battlefield", " dies"))
+  p = (p:gsub(" are put into a graveyard from the battlefield", " die"))
   -- Steps.
   local stepWho = {
     { "at the beginning of your upkeep", "upkeep", "you" },
