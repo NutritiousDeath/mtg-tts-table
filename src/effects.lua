@@ -4191,6 +4191,73 @@ Events.on("cardMoved", function(d)
   end
 end)
 
+-- Mox Diamond: "If ~ would enter, you may discard a land card instead. If you
+-- do, put ~ onto the battlefield. If you don't, put it into its owner's
+-- graveyard." Asked as it lands on the battlefield.
+Events.on("cardMoved", function(d)
+  if not enabled() or not GameState.data.started or d.card == nil or d.to == nil then
+    return
+  end
+  local into = d.to.region == "battlefield" or d.to.region == "lands"
+  local fromField = d.from and (d.from.region == "battlefield" or d.from.region == "lands")
+  if not into or fromField or d.card.hasTag("Token") then
+    return
+  end
+  local oracle = ""
+  pcall(function() oracle = tostring(JSON.decode(d.card.getGMNotes()).oracle or ""):lower() end)
+  if not oracle:find("would enter, you may discard a land card instead", 1, true) then
+    return
+  end
+  local card, seat, name = d.card, d.to.seat, d.card.getName()
+  if seat == nil then
+    return
+  end
+  local function toGraveyard()
+    if card.isDestroyed() then
+      return
+    end
+    -- It never entered: no "dies" / "leaves the battlefield" for it.
+    if Zones.forget then
+      Zones.forget(card.getGUID())
+    end
+    local s = TableSetup.seat(seat)
+    card.setLock(false)
+    card.setRotation({ 0, s.yaw, 0 })
+    card.setPosition(TableSetup.slot(seat, "graveyard", TableSetup.SURFACE_TOP + 2))
+    Library.toGraveyard(seat, card)
+    printToAll("MTG > " .. name .. ": no land discarded, it goes to " .. seat .. "'s graveyard.", INFO)
+  end
+  local function isLand(data)
+    for _, t in ipairs(type(data) == "table" and data.types or {}) do
+      if tostring(t):lower() == "land" then
+        return true
+      end
+    end
+    return false
+  end
+  local hasLand = false
+  for _, o in ipairs(Player[seat].getHandObjects() or {}) do
+    local okd, data = pcall(function() return JSON.decode(o.getGMNotes()) end)
+    if o.type == "Card" and okd and isLand(data) then
+      hasLand = true
+    end
+  end
+  if not hasLand then
+    toGraveyard()
+    return
+  end
+  ask(seat, name .. ": discard a land?", "Discard a land card to keep " .. name .. " on the battlefield? If you don't, it goes to your graveyard.",
+    { { label = "DISCARD A LAND", value = true }, { label = "NO", value = false } }, function(yes)
+      if not yes then
+        toGraveyard()
+        return
+      end
+      Actions.chooseFromHand(seat, seat, name, isLand, "Pick the land card to discard.", function()
+        printToAll("MTG > " .. name .. " stays on " .. seat .. "'s battlefield.", GOOD)
+      end)
+    end)
+end)
+
 -- Delayed effects come due when their step starts.
 Events.on("stepStarted", function(d)
   if not enabled() or not GameState.data.started then
