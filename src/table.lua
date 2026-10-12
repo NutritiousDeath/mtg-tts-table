@@ -83,6 +83,8 @@ local REGIONS = {
   act_mill = { side = 25.3, depth = 15.2, w = 3, d = 4.2 },
   act_untap = { side = 25.3, depth = 10.5, w = 3, d = 4.2 },
   act_tokens = { side = 25.3, depth = 5.8, w = 3, d = 4.2 },
+  -- Attraction deck (attractions.lua), above the library column.
+  attractions = { side = 20.5, depth = 31, w = 5, d = 5.5 },
   -- Mana chip dispenser (mana.lua), left of the command zones.
   mana = { side = -19.8, depth = 30, w = 6.4, d = 4.4 },
   -- CAST mat above the tracker: a card dropped here goes onto the stack.

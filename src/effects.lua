@@ -535,6 +535,15 @@ function Effects.parse(text, sourceName)
   if t:find("controller sacrifices it", 1, true) and t:find("1 plus the sacrificed creature's mana value", 1, true) then
     return { optional = false, notes = {}, conds = {}, actions = { { what = "arcum", who = "you", n = 1 } } }
   end
+  -- Unfinity: "Open an Attraction." (the top of your Attraction deck onto the battlefield).
+  do
+    local word = t:match("open (%a+) attractions?")
+    local N = { an = 1, a = 1, one = 1, two = 2, three = 3 }
+    if word and (N[word] or tonumber(word)) and not t:find("whenever you open an attraction", 1, true) then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "openAttraction", who = "you",
+        n = N[word] or tonumber(word) } } }
+    end
+  end
   -- Lithoform Engine, Reverberate, Strionic Resonator: copy a spell or ability on the stack.
   do
     local kinds = {
@@ -1579,6 +1588,8 @@ local function describe(a, target, controller)
     return "mana for each " .. tostring(a.label)
   elseif a.what == "copyThat" then
     return "a token copy of " .. tostring(a.which)
+  elseif a.what == "openAttraction" then
+    return "open " .. a.n .. " Attraction" .. (a.n == 1 and "" or "s")
   elseif a.what == "copyStack" then
     return "copy a " .. tostring(a.kind) .. " on the stack"
   elseif a.what == "revealCopy" then
@@ -2244,6 +2255,10 @@ local function apply(it, plan, target)
           Effects.revealCopy(seat, a, it)
         elseif a.what == "copyStack" then
           Effects.copyStack(seat, a, it)
+        elseif a.what == "openAttraction" then
+          if Attractions then
+            Attractions.open(seat, a.n, it.name)
+          end
         elseif a.what == "tapX" then
           Effects.tapX(seat, a, it)
         elseif a.what == "blink" then

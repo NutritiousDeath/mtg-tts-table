@@ -203,6 +203,7 @@ local function buildCardData(card, f, isCommander)
     keywords = card.keywords or {},
     colors = card.colors or {},
     parts = f.parts,
+    lights = card.attraction_lights,
     colorIdentity = card.color_identity or {},
     isCommander = isCommander,
     layout = card.layout,
@@ -451,7 +452,7 @@ end
 -- fast; it roughly halves what TTS's slow JSON decoder has to chew through.
 local UNUSED_OBJECTS = { "legalities", "prices", "purchase_uris", "related_uris", "preview" }
 local UNUSED_ARRAYS = { "all_parts", "multiverse_ids", "games", "finishes", "promo_types",
-  "artist_ids", "frame_effects", "produced_mana", "attraction_lights" }
+  "artist_ids", "frame_effects", "produced_mana" }
 local UNUSED_IMAGE_SIZES = { "small", "normal", "png", "art_crop", "border_crop" }
 
 local function slimJSON(text)
@@ -839,6 +840,11 @@ function Importer.clearSeat(color)
       end
     end
   end
+  local attr = Attractions and Attractions.deck(color)
+  if attr then
+    n = n + (attr.type == "Deck" and #attr.getObjects() or 1)
+    attr.destruct()
+  end
   if n > 0 then
     broadcastToAll(color .. "'s previous deck was removed (" .. n .. " cards) for the new import.", { 0.7, 0.85, 1 })
   end
@@ -1107,6 +1113,10 @@ function Importer.importDeck(color, text)
       broadcastToColor("No image available yet (card will be blank): " .. table.concat(noImage, ", "), color, { 1, 0.6, 0.2 })
     end
     broadcastToAll(color .. "'s deck is ready: " .. #mainCards .. " cards + " .. #commanderCards .. " commander(s).", { 0.6, 1, 0.6 })
+    -- Attraction cards get their own deck (attractions.lua), once the library has spawned.
+    if Attractions then
+      Wait.time(function() Attractions.sortOut(color) end, 2.5)
+    end
     -- New commanders mean new commander damage counters on every tracker.
     if Trackers then
       Trackers.renderAll()
@@ -1257,6 +1267,10 @@ function Importer.importDeck(color, text)
       broadcastToColor("Not found on Scryfall: " .. table.concat(missing, ", "), color, { 1, 0.3, 0.3 })
     end
     broadcastToAll(color .. "'s deck is ready: " .. #mainCards .. " cards + " .. #commanderJson .. " commander(s).", { 0.6, 1, 0.6 })
+    -- Attraction cards get their own deck (attractions.lua), once the library has spawned.
+    if Attractions then
+      Wait.time(function() Attractions.sortOut(color) end, 2.5)
+    end
     -- New commanders mean new commander damage counters on every tracker.
     if Trackers then
       Trackers.renderAll()

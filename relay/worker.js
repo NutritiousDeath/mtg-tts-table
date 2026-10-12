@@ -341,6 +341,7 @@ function buildCardData(card, f, isCommander) {
   if (f.toughness != null) data.toughness = f.toughness;
   if (f.loyalty != null) data.loyalty = f.loyalty;
   if (f.parts) data.parts = f.parts;
+  if (Array.isArray(card.attraction_lights)) data.lights = card.attraction_lights;
   return data;
 }
 

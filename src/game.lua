@@ -398,12 +398,19 @@ function GameFlow.start(byColor)
 
   for _, color in ipairs(players) do
     local back = Library.gatherTable(color)
+    -- Attractions go back to their own deck, never into the library.
+    if Attractions then
+      back = Attractions.splitGathered(color, back)
+    end
     -- Clear selection buttons left from a previous mulligan.
     for _, obj in ipairs(back) do
       if obj.type == "Card" then obj.clearButtons() obj.highlightOff() end
     end
     Library.returnCards(color, back)
     returnCommanders(color)
+    if Attractions then
+      Wait.time(function() Attractions.sortOut(color) end, 0.8)
+    end
   end
 
   broadcastToAll("New game: " .. table.concat(players, ", ") .. ". " .. first .. " goes first."

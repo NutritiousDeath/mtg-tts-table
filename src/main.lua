@@ -39,6 +39,8 @@
     !triggers card       show the triggers read on the card under your mouse
     !triggers audit      list trigger text on the battlefield the table can't watch for
     !solo on / off       solo test mode: one person plays every seat
+    !attraction  open an Attraction (top of your Attraction deck)
+    !visit       roll to visit your Attractions now
     !import reset        clear a stuck "import already running" state
     !import <link>       import an Archidekt / Moxfield link to your seat
     !import Red <link>   import an Archidekt / Moxfield link (or list) to a seat
@@ -77,6 +79,7 @@ require("src/equip")
 require("src/ring")
 require("src/walkers")
 require("src/effects")
+require("src/attractions")
 require("src/statics")
 require("src/soulbond")
 require("src/pile")
@@ -110,7 +113,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.61 (Marionette, Mox Diamond, Lithoform, Lantern, prepared spells, mana numbers, rage flip)"
+SCRIPT_VERSION = "1.62 (Attractions: own deck, open, roll to visit)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -753,6 +756,10 @@ function onChat(message, sender)
   end
 
   if Flip and Flip.chat(message, sender.color) then
+    return false
+  end
+
+  if Attractions and Attractions.chat(message, sender.color) then
     return false
   end
 
