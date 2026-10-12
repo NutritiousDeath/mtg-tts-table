@@ -1,8 +1,8 @@
 --[[
   mana.lua
   Mana pool. Each seat has a MANA tile left of its command zones showing six
-  colors (W U B R G and colorless C). The pool is counted ON the tile: a number
-  beside a color's circle (nothing shows at 0).
+  colors (W U B R G and colorless C). The pool is counted ON the tile: a big
+  number in the middle of a color's circle (nothing shows at 0).
     click a color   +1        right-click   -1
   It fills itself: tap a land / mana creature / artifact by hand and what it
   makes is added (a land that can make one of several colors asks which), and
@@ -18,7 +18,6 @@ local ART_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-tabl
 local ART_VERSION = "?v=2"
 local TILE_W = 6.4
 local INFO = { 0.75, 0.8, 0.9 }
-local BADGE_DX, BADGE_DZ = 0.58, -0.52   -- the count is a small badge at the circle's upper right
 local ORDER = { "W", "U", "B", "R", "G", "C" }
 
 -- Same order and spots as tools/make_mana_art.py (x right, z toward the player).
@@ -115,16 +114,15 @@ renderTile = function(color)
       ManaChips.add(color, c.key, alt and -1 or 1)
     end
     local n = ManaChips.get(color, c.key)
-    Trackers.tileButton(tile, { label = "", click_function = fn,
+    -- The banked amount sits big in the middle of its circle (nothing at 0);
+    -- the circle itself is the +1 / -1 button.
+    Trackers.tileButton(tile, { label = n > 0 and tostring(n) or "", click_function = fn,
       tooltip = string.upper(c.name) .. ": " .. n .. "\nClick: +1   Right-click: -1\nTapping lands and casting spells keep it up to date.",
-      width = 440, height = 440, color = { 0, 0, 0, 0 }, hover_color = { 1, 1, 1, 0.1 },
-      press_color = { 1, 1, 1, 0.2 } }, c.x, c.z)
-    if n > 0 then
-      local digits = #tostring(n)
-      Trackers.tileButton(tile, { label = tostring(n), click_function = "trk_noop", tooltip = string.upper(c.name) .. ": " .. n,
-        width = 170 + 70 * (digits - 1), height = 170, font_size = 150, color = { 0.02, 0.03, 0.06, 0.94 },
-        font_color = { 1, 1, 1 } }, c.x + BADGE_DX, c.z + BADGE_DZ)
-    end
+      width = 440, height = 440, font_size = n >= 10 and 300 or 380,
+      color = n > 0 and { 0.02, 0.03, 0.06, 0.55 } or { 0, 0, 0, 0 },
+      -- See-through buttons only draw their text with a font alpha far above 1.
+      font_color = { 1, 1, 1, 100 },
+      hover_color = { 1, 1, 1, 0.1 }, press_color = { 1, 1, 1, 0.2 } }, c.x, c.z)
   end
 end
 
