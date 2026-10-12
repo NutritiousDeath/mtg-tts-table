@@ -535,6 +535,22 @@ function Effects.parse(text, sourceName)
   if t:find("controller sacrifices it", 1, true) and t:find("1 plus the sacrificed creature's mana value", 1, true) then
     return { optional = false, notes = {}, conds = {}, actions = { { what = "arcum", who = "you", n = 1 } } }
   end
+  -- Lithoform Engine, Reverberate, Strionic Resonator: copy a spell or ability on the stack.
+  do
+    local kinds = {
+      { "copy target activated or triggered ability", "ability" },
+      { "copy target triggered ability", "triggered" },
+      { "copy target instant or sorcery spell", "instsorc" },
+      { "copy target permanent spell", "permanent" },
+      { "copy target spell", "spell" },
+    }
+    for _, k in ipairs(kinds) do
+      if t:find(k[1], 1, true) then
+        return { optional = false, notes = {}, conds = {}, actions = { { what = "copyStack", who = "you", n = 1,
+          kind = k[2], mine = t:find(k[1] .. " you control", 1, true) ~= nil } } }
+      end
+    end
+  end
   -- Gandalf, Westward Voyager: each opponent reveals the top card of their
   -- library; one that shares a card type with "that spell" copies it.
   if t:find("each opponent reveals the top card of their library", 1, true) and t:find("copy that spell", 1, true)
@@ -1563,6 +1579,8 @@ local function describe(a, target, controller)
     return "mana for each " .. tostring(a.label)
   elseif a.what == "copyThat" then
     return "a token copy of " .. tostring(a.which)
+  elseif a.what == "copyStack" then
+    return "copy a " .. tostring(a.kind) .. " on the stack"
   elseif a.what == "revealCopy" then
     return "each opponent reveals their top card; if one shares a card type with the spell, copy the spell"
   elseif a.what == "tapX" then
@@ -2224,6 +2242,8 @@ local function apply(it, plan, target)
           Effects.copyThat(seat, a, it)
         elseif a.what == "revealCopy" then
           Effects.revealCopy(seat, a, it)
+        elseif a.what == "copyStack" then
+          Effects.copyStack(seat, a, it)
         elseif a.what == "tapX" then
           Effects.tapX(seat, a, it)
         elseif a.what == "blink" then
@@ -3737,6 +3757,57 @@ function Effects.copySpell(spell, seat, srcName)
     .. " (new targets are picked when it resolves).", GOOD)
 end
 
+-- Copy a spell or ability that's on the stack. With more than one that fits,
+-- the controller picks which.
+function Effects.copyStack(seat, a, it)
+  local list = {}
+  for _, e in ipairs(Stack.entries()) do
+    local obj = getObjectFromGUID(e.guid)
+    local ok = obj ~= nil and not (a.mine and e.controller ~= seat)
+    if ok and e.kind == "card" then
+      local ty = Effects.cardTypes(obj)
+      local permanent = ty.creature or ty.artifact or ty.enchantment or ty.planeswalker or ty.battle or ty.land
+      ok = a.kind == "spell" or (a.kind == "permanent" and permanent)
+        or (a.kind == "instsorc" and (ty.instant or ty.sorcery) and not permanent)
+    elseif ok then
+      ok = (a.kind == "ability" or (a.kind == "triggered" and e.trigger)) and e.copyOf == nil
+    end
+    if ok then
+      table.insert(list, e)
+    end
+  end
+  local function copy(e)
+    local obj = getObjectFromGUID(e.guid)
+    if obj == nil then
+      return
+    end
+    if e.kind == "card" then
+      Effects.copySpell(obj, seat, it.name)
+      return
+    end
+    local image = ""
+    pcall(function() image = obj.getCustomObject().image or "" end)
+    Stack.pushAbility(seat, e.name, e.text, image, { trigger = e.trigger, activated = not e.trigger, source = e.source,
+      that = e.that, thatCard = e.thatCard, amount = e.amount })
+    printToAll("MTG > " .. it.name .. ": " .. seat .. " copies " .. tostring(e.name) .. "'s ability. The copy is on the stack.", GOOD)
+  end
+  if #list == 0 then
+    broadcastToColor(it.name .. ": there's nothing on the stack it can copy.", seat, INFO)
+  elseif #list == 1 then
+    copy(list[1])
+  else
+    local choices = {}
+    for i = #list, math.max(1, #list - 5), -1 do
+      table.insert(choices, { label = string.upper(tostring(list[i].name)):sub(1, 24), value = i })
+    end
+    ask(seat, it.name .. ": copy what?", "Pick the spell or ability to copy (top of the stack first).", choices, function(i)
+      if list[i] then
+        copy(list[i])
+      end
+    end)
+  end
+end
+
 function Effects.resolveCopy(it)
   local spell = getObjectFromGUID(it.copyOf)
   if spell == nil or spell.isDestroyed() then
@@ -4256,6 +4327,89 @@ Events.on("cardMoved", function(d)
         printToAll("MTG > " .. name .. " stays on " .. seat .. "'s battlefield.", GOOD)
       end)
     end)
+end)
+
+-- "Each player plays with the top card of their library revealed" (Lantern of
+-- Insight) / "Play with the top card of your library revealed" (Courser of
+-- Kruphix): a label over each such library names its top card. TTS can't show
+-- a deck's top card face up without taking it off, so the name is shown.
+local function revealedTopSeats()
+  local seats = {}
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" and not obj.isDestroyed() and not obj.is_face_down then
+      local owner = Effects.fieldSeat(obj)
+      if owner then
+        local o = ""
+        pcall(function() o = tostring(JSON.decode(obj.getGMNotes()).oracle or ""):lower() end)
+        if o:find("each player plays with the top card of their library revealed", 1, true) then
+          for _, c in ipairs(players()) do
+            seats[c] = true
+          end
+        elseif o:find("play with the top card of your library revealed", 1, true) then
+          seats[owner] = true
+        end
+      end
+    end
+  end
+  return seats
+end
+
+local topPending = false
+function Effects.refreshRevealedTops()
+  if topPending or GameState.data == nil then
+    return
+  end
+  topPending = true
+  Wait.time(function()
+    topPending = false
+    local labels = GameState.data.topLabels or {}
+    GameState.data.topLabels = labels
+    local want = revealedTopSeats()
+    for _, c in ipairs(TableSetup.activeSeats()) do
+      local label = labels[c] and getObjectFromGUID(labels[c])
+      if not want[c] then
+        if label then
+          label.destruct()
+        end
+        labels[c] = nil
+      else
+        local lib = Library.find(c)
+        local name = "(empty)"
+        if lib and lib.type == "Deck" then
+          local top = lib.getObjects()[1]
+          name = top and (top.name or top.nickname) or name
+        elseif lib then
+          name = lib.getName()
+        end
+        local s = TableSetup.seat(c)
+        local spot = TableSetup.slot(c, "library", 0.2)
+        local pos = { x = spot.x + s.inward.x * 4.3, y = TableSetup.SURFACE_TOP + 0.1, z = spot.z + s.inward.z * 4.3 }
+        if label == nil then
+          label = spawnObject({ type = "3DText", position = pos, rotation = { 90, s.yaw, 0 } })
+          label.interactable = false
+          labels[c] = label.getGUID()
+        else
+          label.setPosition(pos)
+        end
+        label.TextTool.setFontSize(46)
+        label.TextTool.setFontColor({ 1, 0.85, 0.3 })
+        label.TextTool.setValue("TOP: " .. tostring(name))
+      end
+    end
+  end, 0.8)
+end
+
+Events.on("cardMoved", function(d)
+  if GameState.data and GameState.data.started and (GameState.data.topLabels and next(GameState.data.topLabels)
+      or (d.to and (d.to.region == "battlefield" or d.to.region == "library")) or (d.from and d.from.region == "library")) then
+    Effects.refreshRevealedTops()
+  end
+end)
+
+Events.on("stepStarted", function()
+  if GameState.data and GameState.data.started then
+    Effects.refreshRevealedTops()
+  end
 end)
 
 -- Delayed effects come due when their step starts.
