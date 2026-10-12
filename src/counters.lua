@@ -676,7 +676,8 @@ function Counters.menuSig(obj)
   local att = (Equip and Equip.isAttachment(obj) and Equip.hostOf(obj)) and "|attached" or ""
   local sb = (Soulbond and Soulbond.menuKey) and Soulbond.menuKey(obj) or ""
   local pk = (Pile and Pile.menuKey) and Pile.menuKey(obj) or ""
-  return region .. "|" .. step .. att .. sb .. pk
+  local prep = (Effects and Effects.preparedPart and Effects.preparedPart(obj)) and "|prepared" or ""
+  return region .. "|" .. step .. att .. sb .. pk .. prep
 end
 
 -- Rebuild the menu if what it was built for has changed.

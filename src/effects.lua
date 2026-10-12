@@ -4412,6 +4412,82 @@ Events.on("stepStarted", function()
   end
 end)
 
+-- Prepared (Secrets of Strixhaven): "This creature enters prepared." While it
+-- is prepared, its controller may cast a copy of its prepare spell (the
+-- card's other part, e.g. Rampant Growth); casting it ends the prepared state.
+local function partsOf(obj)
+  local parts
+  pcall(function() parts = JSON.decode(obj.getGMNotes()).parts end)
+  return type(parts) == "table" and parts or nil
+end
+
+local function preparedTable()
+  GameState.data.prepared = GameState.data.prepared or {}
+  return GameState.data.prepared
+end
+
+-- The prepare spell a prepared creature can cast (nil when it isn't prepared).
+function Effects.preparedPart(obj)
+  if obj == nil or GameState.data == nil or not preparedTable()[obj.getGUID()] then
+    return nil
+  end
+  local parts = partsOf(obj)
+  return parts and parts[1] or nil
+end
+
+function Effects.setPrepared(obj, on)
+  preparedTable()[obj.getGUID()] = on or nil
+  if Counters and Counters.refreshMenu then
+    Counters.refreshMenu(obj)
+  end
+end
+
+function Effects.castPrepared(obj, playerColor)
+  local part = Effects.preparedPart(obj)
+  if part == nil then
+    return
+  end
+  local seat = Effects.fieldSeat(obj)
+  if seat ~= playerColor and not GameState.solo() then
+    broadcastToColor("Only " .. tostring(seat) .. " can cast that.", playerColor, INFO)
+    return
+  end
+  seat = seat or playerColor
+  if part.manaCost and part.manaCost ~= "" and ManaChips and ManaChips.pay then
+    ManaChips.pay(seat, part.manaCost, part.name)
+  end
+  Effects.setPrepared(obj, false)
+  local image = ""
+  pcall(function()
+    for _, d in pairs(obj.getData().CustomDeck or {}) do
+      image = d.FaceURL
+      break
+    end
+  end)
+  Stack.pushAbility(seat, part.name, part.oracle, image, { activated = true })
+  printToAll("MTG > " .. seat .. " casts " .. part.name .. " (the prepared copy from " .. obj.getName()
+    .. "). " .. obj.getName() .. " is no longer prepared.", GOOD)
+end
+
+Events.on("cardMoved", function(d)
+  if d.card == nil or GameState.data == nil then
+    return
+  end
+  local into = d.to and (d.to.region == "battlefield" or d.to.region == "lands")
+  local fromField = d.from and (d.from.region == "battlefield" or d.from.region == "lands")
+  if into and not fromField then
+    local oracle = ""
+    pcall(function() oracle = tostring(JSON.decode(d.card.getGMNotes()).oracle or ""):lower() end)
+    if oracle:find("enters prepared", 1, true) and partsOf(d.card) then
+      Effects.setPrepared(d.card, true)
+      printToAll("MTG > " .. d.card.getName() .. " is prepared: right-click it > Cast prepared: "
+        .. tostring(partsOf(d.card)[1].name) .. ".", GOOD)
+    end
+  elseif fromField and not into and preparedTable()[d.card.getGUID()] then
+    preparedTable()[d.card.getGUID()] = nil
+  end
+end)
+
 -- Delayed effects come due when their step starts.
 Events.on("stepStarted", function(d)
   if not enabled() or not GameState.data.started then

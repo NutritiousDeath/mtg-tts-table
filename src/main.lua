@@ -110,7 +110,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.60 (Gandalf: mana value 5+ only, reveals and copies the spell)"
+SCRIPT_VERSION = "1.61 (Marionette, Mox Diamond, Lithoform, Lantern, prepared spells, mana numbers, rage flip)"
 
 function onLoad(saved)
   GameLog.setup()

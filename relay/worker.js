@@ -273,8 +273,26 @@ function isDoubleFaced(card) {
   );
 }
 
+// One printed image with several parts (adventure, prepare, split cards):
+// Scryfall leaves the card's own rules text empty and puts each part in
+// card_faces. The first part is the card itself; the others become "parts".
+function firstPart(card, face) {
+  if (face || card.oracle_text != null || !Array.isArray(card.card_faces) || isDoubleFaced(card)) return null;
+  return card.card_faces[0] || null;
+}
+
+function otherParts(card, face) {
+  if (!firstPart(card, face)) return null;
+  return card.card_faces.slice(1).map((p) => ({
+    name: p.name || "",
+    manaCost: p.mana_cost || "",
+    typeLine: p.type_line || "",
+    oracle: p.oracle_text || "",
+  }));
+}
+
 function faceFields(card, face) {
-  const src = face || card;
+  const src = face || firstPart(card, face) || card;
   return {
     name: src.name || card.name,
     manaCost: src.mana_cost ?? card.mana_cost ?? "",
@@ -297,6 +315,10 @@ function buildDescription(f) {
   if (f.oracle) lines.push(f.oracle);
   if (f.power != null && f.toughness != null) lines.push(f.power + "/" + f.toughness);
   else if (f.loyalty != null) lines.push("Loyalty: " + f.loyalty);
+  for (const p of f.parts || []) {
+    lines.push("// " + p.name + (p.manaCost ? "  " + p.manaCost : "") + " (" + p.typeLine + ")");
+    if (p.oracle) lines.push(p.oracle);
+  }
   return lines.join("\n");
 }
 
@@ -318,6 +340,7 @@ function buildCardData(card, f, isCommander) {
   if (f.power != null) data.power = f.power;
   if (f.toughness != null) data.toughness = f.toughness;
   if (f.loyalty != null) data.loyalty = f.loyalty;
+  if (f.parts) data.parts = f.parts;
   return data;
 }
 
@@ -336,6 +359,7 @@ function customDeckEntry(card, faceIndex, host) {
 function cardObject(card, faceIndex, isCommander, slot, host) {
   const face = faceIndex !== null && card.card_faces ? card.card_faces[faceIndex] : null;
   const f = faceFields(card, face);
+  f.parts = otherParts(card, face);
   return {
     Name: "Card",
     Transform: { posX: 0, posY: 0, posZ: 0, rotX: 0, rotY: 180, rotZ: 180, scaleX: 1, scaleY: 1, scaleZ: 1 },

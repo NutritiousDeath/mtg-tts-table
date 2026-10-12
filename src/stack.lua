@@ -980,6 +980,17 @@ function Stack.addCardMenu(obj, full)
   if not full then
     return   -- off the battlefield only the Activate items apply
   end
+  -- Prepared (Studious First-Year): cast the copy of its prepare spell.
+  local part = Effects and Effects.preparedPart and Effects.preparedPart(obj)
+  if part then
+    local label = "Cast prepared: " .. tostring(part.name)
+    if #label > 38 then
+      label = label:sub(1, 36) .. ".."
+    end
+    obj.addContextMenuItem(label, function(playerColor)
+      Effects.castPrepared(obj, playerColor)
+    end)
+  end
   obj.addContextMenuItem("Ability to stack", function(playerColor)
     local face = ""
     pcall(function()

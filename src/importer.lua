@@ -116,9 +116,32 @@ local function isDoubleFaced(card)
     and card.card_faces[1].image_uris ~= nil
 end
 
+-- One printed image with several parts (adventure, prepare, split cards):
+-- Scryfall leaves the card's own rules text empty and puts each part in
+-- card_faces. The first part is the card itself; the others become "parts".
+local function firstPart(card, face)
+  if face or card.oracle_text ~= nil or type(card.card_faces) ~= "table" or isDoubleFaced(card) then
+    return nil
+  end
+  return card.card_faces[1]
+end
+
+local function otherParts(card, face)
+  if firstPart(card, face) == nil then
+    return nil
+  end
+  local parts = {}
+  for i = 2, #card.card_faces do
+    local p = card.card_faces[i]
+    table.insert(parts, { name = p.name or "", manaCost = p.mana_cost or "", typeLine = p.type_line or "",
+      oracle = p.oracle_text or "" })
+  end
+  return parts
+end
+
 -- Pull the fields of one face (or the whole card for single-faced cards).
 local function faceFields(card, face)
-  local src = face or card
+  local src = face or firstPart(card, face) or card
   return {
     name = src.name or card.name,
     manaCost = src.mana_cost or card.mana_cost or "",
@@ -154,6 +177,12 @@ local function buildDescription(f)
   elseif f.loyalty then
     table.insert(lines, "Loyalty: " .. f.loyalty)
   end
+  for _, p in ipairs(f.parts or {}) do
+    table.insert(lines, "// " .. p.name .. (p.manaCost ~= "" and ("  " .. p.manaCost) or "") .. " (" .. p.typeLine .. ")")
+    if p.oracle ~= "" then
+      table.insert(lines, p.oracle)
+    end
+  end
   return table.concat(lines, "\n")
 end
 
@@ -173,6 +202,7 @@ local function buildCardData(card, f, isCommander)
     loyalty = f.loyalty,
     keywords = card.keywords or {},
     colors = card.colors or {},
+    parts = f.parts,
     colorIdentity = card.color_identity or {},
     isCommander = isCommander,
     layout = card.layout,
@@ -199,6 +229,7 @@ local function cardObject(card, faceIndex, isCommander)
     face = card.card_faces[faceIndex]
   end
   local f = faceFields(card, face)
+  f.parts = otherParts(card, face)
   local id = nextDeckId()
 
   local obj = {
