@@ -91,7 +91,7 @@ function LibSearch.xml()
     <VerticalScrollView id="lsScroll_%s" active="false" preferredHeight="204" scrollSensitivity="30" color="#00000000"
                         scrollbarColors="#5AF0FF|#8FF7FF|#5AF0FF|#00000000" scrollbarBackgroundColor="#141B26">
       <GridLayout id="lsGrid_%s" cellSize="144 204" spacing="8 8" constraint="FixedColumnCount" constraintCount="]] .. COLS .. [["
-                  childAlignment="UpperLeft" preferredHeight="204">]] .. table.concat(slots) .. [[</GridLayout>
+                  childAlignment="UpperLeft" preferredHeight="204" height="204">]] .. table.concat(slots) .. [[</GridLayout>
     </VerticalScrollView>
   </VerticalLayout>
 </Panel>
@@ -136,6 +136,10 @@ local function render(color, guids, faces, total, matched)
   UI.setAttribute("lsScroll_" .. color, "active", #guids > 0 and "true" or "false")
   UI.setAttribute("lsScroll_" .. color, "preferredHeight", view * 212)
   UI.setAttribute("lsGrid_" .. color, "preferredHeight", rows * 212)
+  -- The scroll view's content is sized by "height" (preferredHeight only counts
+  -- inside a layout group); without it the grid never outgrows the view and
+  -- the extra rows can't be scrolled to.
+  UI.setAttribute("lsGrid_" .. color, "height", rows * 212)
   UI.setAttribute("libsearch_" .. color, "height", 160 + (#guids > 0 and view * 212 or 0))
   for i = 1, MAX_SHOWN do
     local id = color .. "_" .. i
