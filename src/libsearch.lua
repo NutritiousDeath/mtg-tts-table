@@ -514,6 +514,8 @@ local function take(color, slot, toBattlefield, tapped, toTop)
     end
     if fromWhere == "graveyard" then
       printToAll("MTG > " .. color .. " returned " .. name .. " from their graveyard to their hand.", INFO)
+    elseif filters[color] and filters[color].reveal then
+      broadcastToAll(color .. " reveals " .. name .. " and puts it into their hand.", { 1, 0.85, 0.3 })
     else
       printToAll("MTG > " .. color .. " put a card from their library into their hand.", INFO)
     end

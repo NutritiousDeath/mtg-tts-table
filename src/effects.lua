@@ -905,6 +905,13 @@ function Effects.parse(text, sourceName)
       add("lose", "you", num(dw))
     end
   end
+  -- "As an additional cost to cast this spell, sacrifice a land" (Crop Rotation).
+  do
+    local kind = t:match("as an additional cost to cast this spell, sacrifice an? (%a+)")
+    if kind == "land" or kind == "artifact" then
+      table.insert(actions, { what = "addlSac", who = "you", n = 1, kind = kind })
+    end
+  end
   -- "As an additional cost to cast this spell, pay 3 life" (X filled in).
   do
     local pAt = t:find("pay %w+ life")
@@ -1006,7 +1013,9 @@ function Effects.parse(text, sourceName)
     local mvMax = tonumber(rest:match("mana value (%d+) or less") or "")
     table.insert(actions, { what = "search", who = "you", n = 1, query = q, where = where, mvMin = mvMin, mvMax = mvMax,
       tapped = rest:find("battlefield tapped", 1, true) ~= nil, phrase = phrase, anyOf = anyOf,
-      discardRandom = t:find("discard a card at random", 1, true) ~= nil })
+      discardRandom = t:find("discard a card at random", 1, true) ~= nil,
+      -- Shared Summons: "up to two creature cards ..., reveal them".
+      upTo = num(phrase:match("^up to (%w+) ") or ""), reveal = rest:find("reveal", 1, true) ~= nil })
   end
   -- "untap it" / "untap that permanent" (Amulet of Vigor): the card the
   -- trigger was about.
@@ -1732,6 +1741,8 @@ local function describe(a, target, controller)
     return "it goes " .. a.n .. "th from the top of the library"
   elseif a.what == "shuffleSelf" then
     return "it is shuffled into its owner's library"
+  elseif a.what == "addlSac" then
+    return "sacrifice a " .. tostring(a.kind) .. " (additional cost)"
   elseif a.what == "searchLibOrYard" then
     return "search your library or graveyard for a " .. tostring(a.query) .. " with mana value " .. tostring(a.mvMax) .. " or less"
   end
@@ -1882,7 +1893,8 @@ local function apply(it, plan, target)
           end
           LibSearch.open(seat, a.query, it.name .. " (" .. tostring(a.phrase) .. "): " .. how .. (a.where == "top" and "." or ", then CLOSE + SHUFFLE."),
             (a.where == "hand" or a.where == "top") and a.where or "battlefield", a.tapped,
-            { typeOnly = true, mvMin = a.mvMin, mvMax = a.mvMax, anyOf = a.anyOf, limit = a.where == "top" and 1 or nil,
+            { typeOnly = true, mvMin = a.mvMin, mvMax = a.mvMax, anyOf = a.anyOf, reveal = a.reveal,
+              limit = (a.where == "top" and 1) or a.upTo or nil,
               onClose = a.discardRandom and function()
                 Wait.time(function() Actions.discardRandom(seat, 1, it.name) end, 0.6)
               end or nil })
@@ -2290,6 +2302,17 @@ local function apply(it, plan, target)
         elseif a.what == "win" then
           broadcastToAll(seat .. " WINS THE GAME (" .. it.name .. ")!", { 1, 0.85, 0.2 })
           printToAll("MTG > " .. seat .. " wins the game (" .. it.name .. ").", GOOD)
+        elseif a.what == "addlSac" then
+          Effects.askChoice(seat, it.name .. ": sacrifice " .. (a.kind == "artifact" and "an " or "a ") .. a.kind,
+            "Click SACRIFICE on the " .. a.kind .. " you sacrifice (the additional cost of " .. it.name .. ").",
+            { { label = "ALREADY DONE", value = false } }, function(victim)
+              if victim and not victim.isDestroyed() then
+                printToAll("MTG > " .. seat .. " sacrifices " .. victim.getName() .. " (" .. it.name .. ").", GOOD)
+                Combat.removeCard(victim, "graveyard")
+              end
+            end, { filter = function(o, owner)
+              return owner == seat and Effects.cardTypes(o)[a.kind] == true
+            end, label = "SACRIFICE", protect = false })
         elseif a.what == "shuffleSelf" then
           local card = it.card and getObjectFromGUID(it.card)
           if card and not card.isDestroyed() then
