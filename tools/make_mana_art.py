@@ -27,7 +27,7 @@ def font(px):
     return f
 
 
-def chip(letter, rim, face, size=256, counter=True):
+def chip(letter, rim, face, size=256, counter=True, show_letter=True):
     S = size
     img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
@@ -57,6 +57,8 @@ def chip(letter, rim, face, size=256, counter=True):
         ImageDraw.Draw(img).ellipse([S * 0.3, S * 0.34, S * 0.7, S * 0.74], fill=(8, 10, 16, 255))
     else:
         f, pos = font(S * 0.46), (S / 2, S / 2 + 4)
+    if not show_letter:
+        return img
     t = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     ImageDraw.Draw(t).text(pos, letter, font=f, fill=rim + (255,), anchor="mm")
     img.alpha_composite(t.filter(ImageFilter.GaussianBlur(max(2, S // 50))))
@@ -89,7 +91,9 @@ def tile():
     img.alpha_composite(border)
     ImageDraw.Draw(img).text((W / 2, 22), "MANA", font=font(22), fill=(90, 240, 255, 255), anchor="mm")
     for (key, letter, rim, face), (_, x, z) in zip(CHIPS, CHIP_SLOTS):
-        c = chip(letter, rim, face, 128, counter=False)
+        # No letter on the tile: the chip's color says which mana it is, and
+        # the count mana.lua draws in the middle stays easy to read.
+        c = chip(letter, rim, face, 128, counter=False, show_letter=False)
         cx, cy = W / 2 + x * PPU, H / 2 + z * PPU
         img.alpha_composite(c, (int(cx - 64), int(cy - 64)))
     return img

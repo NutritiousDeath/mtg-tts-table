@@ -15,7 +15,7 @@
 ManaChips = {}
 
 local ART_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/mana/"
-local ART_VERSION = "?v=2"
+local ART_VERSION = "?v=3"
 local TILE_W = 6.4
 local INFO = { 0.75, 0.8, 0.9 }
 local ORDER = { "W", "U", "B", "R", "G", "C" }
@@ -119,7 +119,8 @@ renderTile = function(color)
     Trackers.tileButton(tile, { label = n > 0 and tostring(n) or "", click_function = fn,
       tooltip = string.upper(c.name) .. ": " .. n .. "\nClick: +1   Right-click: -1\nTapping lands and casting spells keep it up to date.",
       width = 440, height = 440, font_size = n >= 10 and 300 or 380,
-      color = n > 0 and { 0.02, 0.03, 0.06, 0.55 } or { 0, 0, 0, 0 },
+      -- The chip's dark middle (no letter since art v3) is the number's backing.
+      color = { 0, 0, 0, 0 },
       -- See-through buttons only draw their text with a font alpha far above 1.
       font_color = { 1, 1, 1, 100 },
       hover_color = { 1, 1, 1, 0.1 }, press_color = { 1, 1, 1, 0.2 } }, c.x, c.z)
