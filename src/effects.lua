@@ -4319,7 +4319,7 @@ Events.on("cardMoved", function(d)
         return true
       end
     end
-    return false
+    return type(data) == "table" and tostring(data.typeLine or ""):find("Land", 1, true) ~= nil
   end
   local hasLand = false
   for _, o in ipairs(Player[seat].getHandObjects() or {}) do
@@ -4328,12 +4328,15 @@ Events.on("cardMoved", function(d)
       hasLand = true
     end
   end
-  if not hasLand then
-    toGraveyard()
-    return
+  -- Always ask, so it's never silent; with no land in hand only NO is offered.
+  local choices = { { label = "NO", value = false } }
+  if hasLand then
+    table.insert(choices, 1, { label = "DISCARD A LAND", value = true })
   end
-  ask(seat, name .. ": discard a land?", "Discard a land card to keep " .. name .. " on the battlefield? If you don't, it goes to your graveyard.",
-    { { label = "DISCARD A LAND", value = true }, { label = "NO", value = false } }, function(yes)
+  ask(seat, name .. ": discard a land?", hasLand
+      and ("Discard a land card to keep " .. name .. " on the battlefield? If you don't, it goes to your graveyard.")
+      or ("You have no land card in hand, so " .. name .. " goes to your graveyard."),
+    choices, function(yes)
       if not yes then
         toGraveyard()
         return
