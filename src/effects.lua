@@ -915,6 +915,20 @@ function Effects.parse(text, sourceName)
   if t:find("you win the game", 1, true) then
     table.insert(actions, { what = "win", who = "you", n = 1 })
   end
+  -- Green Sun's Zenith: "Shuffle ~ into its owner's library."
+  if t:find("shuffle ~ into its owner's library", 1, true) then
+    table.insert(actions, { what = "shuffleSelf", who = "you", n = 1 })
+  end
+  -- Finale of Devastation: "Search your library and/or graveyard for a creature card with mana value X or less".
+  do
+    local phrase, mv = t:match("search your library and/or graveyard for (.-) cards? with mana value (%d+) or less")
+    if phrase then
+      local q = phrase:gsub("^an? ", "")
+      table.insert(actions, { what = "searchLibOrYard", who = "you", n = 1, query = q, mvMax = tonumber(mv),
+        where = t:find("onto the battlefield", 1, true) and "battlefield" or "hand",
+        bigX = tonumber(mv) >= 10 })
+    end
+  end
   do
     local ord = t:match("put ~ into its owner's library (%a+) from the top")
     local ORD = { second = 2, third = 3, fourth = 4, fifth = 5, sixth = 6, seventh = 7, eighth = 8, ninth = 9, tenth = 10 }
@@ -1716,6 +1730,10 @@ local function describe(a, target, controller)
     return "a " .. tostring(a.type) .. " exiled with it comes back"
   elseif a.what == "toLibrary" then
     return "it goes " .. a.n .. "th from the top of the library"
+  elseif a.what == "shuffleSelf" then
+    return "it is shuffled into its owner's library"
+  elseif a.what == "searchLibOrYard" then
+    return "search your library or graveyard for a " .. tostring(a.query) .. " with mana value " .. tostring(a.mvMax) .. " or less"
   end
   if a.what == "gain" then
     if a.thatMuch then
@@ -2272,6 +2290,41 @@ local function apply(it, plan, target)
         elseif a.what == "win" then
           broadcastToAll(seat .. " WINS THE GAME (" .. it.name .. ")!", { 1, 0.85, 0.2 })
           printToAll("MTG > " .. seat .. " wins the game (" .. it.name .. ").", GOOD)
+        elseif a.what == "shuffleSelf" then
+          local card = it.card and getObjectFromGUID(it.card)
+          if card and not card.isDestroyed() then
+            it.cardHandled = true
+            -- Into the library now (a creature search can't show it), shuffled
+            -- once any search from the same spell is closed.
+            card.setLock(false)
+            Library.putAt(seat, card, 0, function()
+              Wait.condition(function()
+                local lib = Library.find(seat)
+                if lib and lib.type == "Deck" then
+                  lib.shuffle()
+                end
+                printToAll("MTG > " .. it.name .. " is shuffled into " .. seat .. "'s library.", INFO)
+              end, function()
+                return not (LibSearch.isOpen and LibSearch.isOpen(seat))
+              end, 600)
+            end)
+          else
+            broadcastToColor(it.name .. ": shuffle it into your library yourself.", seat, INFO)
+          end
+        elseif a.what == "searchLibOrYard" then
+          local function go(zone)
+            local note = it.name .. ": take a " .. a.query .. " with mana value up to " .. a.mvMax
+              .. (a.where == "battlefield" and " onto the battlefield" or " into your hand")
+              .. (zone == "graveyard" and " from your graveyard, then CLOSE." or ", then CLOSE + SHUFFLE.")
+            LibSearch.open(seat, a.query, note, a.where, false,
+              { typeOnly = true, mvMax = a.mvMax, zone = zone, yardOf = zone == "graveyard" and seat or nil })
+          end
+          ask(seat, it.name .. ": search where?", "Search your library or your graveyard?",
+            { { label = "LIBRARY", value = "library" }, { label = "GRAVEYARD", value = "graveyard" } }, go)
+          if a.bigX and tostring(it.text or ""):lower():find("10 or more, creatures you control get", 1, true) then
+            broadcastToAll(it.name .. ": X is 10 or more, so " .. seat .. "'s creatures get +" .. a.mvMax .. "/+" .. a.mvMax
+              .. " and haste until end of turn (add it by hand).", GOOD)
+          end
         elseif a.what == "toLibrary" then
           local card = it.card and getObjectFromGUID(it.card)
           if card and not card.isDestroyed() then

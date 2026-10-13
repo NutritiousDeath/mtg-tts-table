@@ -375,6 +375,10 @@ function LibSearch.unstick()
   return n
 end
 
+function LibSearch.isOpen(color)
+  return open[color] == true
+end
+
 function LibSearch.close(color, quiet)
   if not open[color] then
     return
