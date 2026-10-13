@@ -44,7 +44,7 @@ The public page is live at www.uptight-shelf-smart-flow.com/commander-table.html
 2. **Relay redeploy after v1.62** not confirmed (needed for Attraction lit numbers and the multi-part card text).
 3. **Birthing Pod**: Andrew's tester saw "nothing to activate". The ability IS parsed (menu should read "Activate: {1}{G/P}, {T}, Sacrifice a crea.."); cause not found. Ask what exactly happened.
 4. **Mox Diamond** went straight to the graveyard in the test: only happens when no land is seen in hand. Not reproduced; v1.63 always asks now. Ask which land was in hand if it repeats.
-5. **Zoo test (Deck B) results so far**: B1 Wheel of Fortune works; B4 tutors all worked except Shared Summons and Crop Rotation (fixed in v1.63); B5 Worldly/Enlightened works; B6 Gamble works; Chord of Calling works. Continue from B6 onward in TEST_GUIDE.txt.
+5. **Zoo test (Deck B) results so far**: B1 Wheel of Fortune works; B4 tutors all worked except Shared Summons and Crop Rotation (fixed in v1.63); B5 Worldly/Enlightened works; B6 Gamble works; Chord of Calling works. Continue from B7 onward in TEST_GUIDE.txt (B2 and B3 need a retest with v1.63).
 6. Lifelink/trample combat question: Andrew said scrap it (the table already follows the rules).
 7. Older items still open: Black Waltz No. 3 (need the chat line), pop-up resolve box question, Cavern of Souls type badge.
 8. Possible future: `!attractions random` (build an Attraction deck from Scryfall) was offered, not requested.
