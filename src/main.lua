@@ -113,7 +113,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.62 (Attractions: own deck, open, roll to visit)"
+SCRIPT_VERSION = "1.63 (Zoo fixes: Mox, Pod, Eldritch, GSZ, Finale, Shared Summons, Crop Rotation, search scroll, mana tile, real table flip)"
 
 function onLoad(saved)
   GameLog.setup()

@@ -206,6 +206,10 @@ function Zones.refresh(obj)
   if not isCard(obj) or obj.held_by_color then
     return
   end
+  -- A table flip is tossing everything around and will put it all back.
+  if Flip and Flip.chaosOn then
+    return
+  end
   -- Clicking or rearranging a card in a hand also counts as a drop; it's
   -- still in the hand, not on the table.
   local owner = handOwner(obj)

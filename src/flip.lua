@@ -1,10 +1,10 @@
 --[[
   flip.lua
-  The table flip: a rage-quit animation on everyone's screen. Type !flip (or
-  click "Flip the table!" under TURN OPTIONS) and the table launches over,
-  cards and dice fly, the screen flashes red and shakes, and "<PLAYER> RAGE
-  QUIT!" is announced. !unflip puts
-  it back, gently. Pure screen fun: nothing on the real table is moved.
+  The table flip: a rage quit. Type !flip (or click "Flip the table!" under
+  TURN OPTIONS): the real cards and dice on the table are launched into the
+  air, the screen flashes red and shakes with a "<PLAYER> RAGE QUIT!" banner,
+  and a few seconds later everything glides back to where it was. !unflip puts
+  it back, gently (screen only).
 --]]
 
 Flip = {}
@@ -126,9 +126,61 @@ function Flip.play(color, reverse)
   end, STEP, FRAMES)
 end
 
+-- The real chaos: every loose face-up card, token and die on the table is
+-- launched into the air, spinning, then everything glides back to exactly
+-- where it was. Face-down cards, cards in hands, decks and locked tiles stay
+-- put (nothing hidden can flip over, no library scatters). Card tracking is
+-- paused meanwhile so nothing counts as a move.
+Flip.chaosOn = false
+
+function Flip.chaos()
+  if Flip.chaosOn then
+    return
+  end
+  local inHand = {}
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    for _, o in ipairs(Player[c].getHandObjects() or {}) do
+      inHand[o.getGUID()] = true
+    end
+  end
+  local list = {}
+  for _, o in ipairs(getObjects()) do
+    local kind = (o.type == "Card" and not o.is_face_down) or o.type == "Dice"
+    if kind and not o.getLock() and o.held_by_color == nil and not inHand[o.getGUID()] then
+      table.insert(list, { obj = o, pos = o.getPosition(), rot = o.getRotation() })
+    end
+  end
+  if #list == 0 then
+    return
+  end
+  Flip.chaosOn = true
+  for _, e in ipairs(list) do
+    local p = e.pos
+    -- Up and away from the middle, like the table went over under them.
+    e.obj.setVelocity({ p.x * 0.35 + math.random(-8, 8), math.random(22, 38), p.z * 0.35 + math.random(-8, 8) })
+    e.obj.setAngularVelocity({ math.random(-25, 25), math.random(-25, 25), math.random(-25, 25) })
+  end
+  Wait.time(function()
+    for _, e in ipairs(list) do
+      local o = e.obj
+      if not o.isDestroyed() then
+        o.setVelocity({ 0, 0, 0 })
+        o.setAngularVelocity({ 0, 0, 0 })
+        o.setPositionSmooth({ e.pos.x, e.pos.y + 0.5, e.pos.z }, false, false)
+        o.setRotationSmooth(e.rot, false, false)
+      end
+    end
+    Wait.time(function()
+      Flip.chaosOn = false
+    end, 2.5)
+  end, 3.5)
+end
+
 function Flip.flip(color)
   broadcastToAll((color or "Someone") .. " flipped the table!", { 1, 0.33, 0.45 })
   Flip.play(color or "Someone", false)
+  -- Launch everything as the table "tips" in the animation.
+  Wait.time(function() Flip.chaos() end, 0.6)
 end
 
 function Flip.unflip(color)
