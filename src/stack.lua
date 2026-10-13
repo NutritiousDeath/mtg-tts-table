@@ -821,6 +821,10 @@ function Stack.activate(obj, playerColor, ab)
           local pw = 0
           pcall(function() pw = tonumber(Counters.stats(victim).power) or 0 end)
           local vname = victim.getName()
+          -- Birthing Pod: the effect needs the sacrificed creature's mana value.
+          local vmv = 0
+          pcall(function() vmv = tonumber(CardData.get(victim).cmc) or 0 end)
+          GameState.data.lastSac = { seat = playerColor, mv = vmv, name = vname, at = os.time() }
           Combat.removeCard(victim, "graveyard")
           local eff = ab.effect
           local lowE = eff:lower()

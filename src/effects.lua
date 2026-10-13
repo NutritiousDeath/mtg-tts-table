@@ -2232,13 +2232,7 @@ local function apply(it, plan, target)
         elseif a.what == "sylvan" then
           Effects.sylvan(seat, it)
         elseif a.what == "sacTutor" then
-          Effects.askNumber(seat, it.name .. ": sacrificed creature's mana value?", "Type the mana value of the creature you sacrificed, then OK. The search is for mana value "
-            .. (a.exact and "exactly " or "") .. "that + " .. a.plus .. (a.exact and "." or " or less."), function(n)
-            local mv = (tonumber(n) or 0) + a.plus
-            LibSearch.open(seat, "creature", it.name .. ": take a creature with mana value " .. (a.exact and "" or "up to ") .. mv
-              .. " onto the battlefield, then CLOSE + SHUFFLE.", "battlefield", false,
-              { typeOnly = true, mvMin = a.exact and mv or nil, mvMax = mv })
-          end)
+          Effects.sacTutor(seat, a, it)
         elseif a.what == "windfall" then
           Effects.windfall(it, a.fixed)
         elseif a.what == "bite" then
@@ -3759,6 +3753,43 @@ function Effects.revealCopy(seat, a, it)
   else
     step(1)
   end
+end
+
+-- Birthing Pod / Eldritch Evolution: search for a creature worth N more than
+-- the sacrificed one. Pod's sacrifice was made while activating (stack.lua
+-- remembers it); for Eldritch Evolution the player clicks the creature now.
+function Effects.sacTutor(seat, a, it)
+  local function search(sacMv)
+    local mv = (tonumber(sacMv) or 0) + a.plus
+    LibSearch.open(seat, "creature", it.name .. ": take a creature with mana value " .. (a.exact and "" or "up to ") .. mv
+      .. " onto the battlefield, then CLOSE + SHUFFLE.", "battlefield", false,
+      { typeOnly = true, mvMin = a.exact and mv or nil, mvMax = mv })
+  end
+  local function typeIt()
+    Effects.askNumber(seat, it.name .. ": sacrificed creature's mana value?", "Type the mana value of the creature you sacrificed, then OK. The search is for mana value "
+      .. (a.exact and "exactly " or "") .. "that + " .. a.plus .. (a.exact and "." or " or less."), search)
+  end
+  local ls = GameState.data.lastSac
+  if ls and ls.seat == seat and os.time() - (ls.at or 0) < 300 then
+    GameState.data.lastSac = nil
+    printToAll("MTG > " .. it.name .. ": " .. tostring(ls.name) .. " was sacrificed (mana value " .. ls.mv .. ").", INFO)
+    search(ls.mv)
+    return
+  end
+  Effects.askChoice(seat, it.name .. ": sacrifice a creature", "Click SACRIFICE on the creature you sacrifice for " .. it.name
+    .. ". (TYPE IT if you already sacrificed it.)", { { label = "TYPE IT", value = false } }, function(obj)
+      if not obj or obj.isDestroyed() then
+        typeIt()
+        return
+      end
+      local mv = 0
+      pcall(function() mv = tonumber(CardData.get(obj).cmc) or 0 end)
+      printToAll("MTG > " .. seat .. " sacrifices " .. obj.getName() .. " (mana value " .. mv .. ") for " .. it.name .. ".", GOOD)
+      Combat.removeCard(obj, "graveyard")
+      search(mv)
+    end, { filter = function(o, owner)
+      return owner == seat and Effects.cardTypes(o).creature == true
+    end, label = "SACRIFICE", protect = false })
 end
 
 -- Put a copy of a spell on the stack. It resolves first (it's on top): an
