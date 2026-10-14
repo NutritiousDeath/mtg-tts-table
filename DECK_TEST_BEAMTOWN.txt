@@ -1,0 +1,201 @@
+MTG COMMANDER TABLE (TTS) - DECK TEST: THE BEAMTOWN BULLIES
+Version being tested: 1.65
+After loading, chat should say:  MTG > Scripts loaded: version 1.65 (Beamtown Bullies deck audit)
+
+HOW TO USE THIS
+- Two seats are enough: type  !solo on  and play Bullies at one seat and a "victim" deck at another.
+- Import the deck, start the game, then pull the cards you're testing into your hand
+  (right-click library > Search, or drag them out).
+- One line at a time:  DO this  ->  EXPECT that.  Mark each line OK or WRONG.
+- When something is WRONG, copy the chat lines from just before and after it into NOTES at the bottom.
+- The Bullies ability only works on an OPPONENT'S turn. For those tests, pass the turn to the other seat first
+  (in solo you can act for both).
+
+BEFORE YOU START
+[ ] 0a. DO: import the deck.  EXPECT: one warning, "Taiga x2: Commander is singleton". The list really has two
+        Taigas (3ED and 30A printings). That's a deck problem, not a table bug: swap one for another land.
+[ ] 0b. DO: check the import finished.  EXPECT: no MISS lines. If any card shows MISS (the "fra" printings of Forest /
+        Mountain / Swamp / Multiply by Zero are the most likely), copy the [ lines and send them.
+        Multiply by Zero: I couldn't check this card's text, so the table may not read it. Note what it does.
+
+
+=====================================================================
+PART A - THE COMMANDER: THE BEAMTOWN BULLIES
+=====================================================================
+[ ] A1. DO: on YOUR turn, right-click Bullies > "Activate: {T}".
+        EXPECT: chat says it only works on an opponent's turn. Nothing moves.
+[ ] A2. DO: on an OPPONENT's turn, with a creature in your graveyard, activate Bullies.
+        EXPECT: the search panel opens on YOUR graveyard, set to "TO: <OPPONENT>'S BATTLEFIELD" (fixed),
+        and legendary creatures are NOT offered.
+[ ] A3. DO: click a nonlegendary creature.
+        EXPECT: it lands on the OPPONENT's battlefield; chat says it's theirs, with haste, goaded by you, and
+        exiled at the next end step. The card shows GOADED and "haste".
+[ ] A4. DO: go to that turn's end step.
+        EXPECT: the creature goes to YOUR exile (you own it), not the opponent's.
+[ ] A5. DO: give the opponent a creature with an "enters" trigger (see Part B).
+        EXPECT: the trigger is the OPPONENT's (their name on the stack item, "you" = them).
+
+
+=====================================================================
+PART B - THE "GIFTS" (what Bullies hands to opponents)
+=====================================================================
+Do each of these twice: once cast by yourself (it should hurt YOU), once given away with Bullies
+(it should hurt THE OPPONENT). Watch that it's always the right player.
+
+BRONZE BOMBSHELL
+[ ] B1. DO: give Bronze Bombshell to an opponent with Bullies.
+        EXPECT: a trigger for the opponent; when it resolves they sacrifice it and lose 7 life.
+        Bombshell goes to YOUR graveyard (you own it), so you can give it again.
+[ ] B2. DO: cast Bombshell yourself.  EXPECT: nothing happens (you own it and control it).
+
+THORNBITE STAFF COMBO (Bullies + Thornbite Staff + Bombshell)
+[ ] B3. DO: equip Thornbite Staff to Bullies.
+        EXPECT: Bullies' right-click menu gains "Activate: {2}, {T}" (deal 1 damage). The Staff itself has NO
+        odd "Activate: Equipped creature has..." line any more.
+[ ] B4. DO: on an opponent's turn, Bullies gives them Bombshell; let the Bombshell trigger resolve.
+        EXPECT: Bombshell dies -> a "whenever a creature dies, untap this creature" trigger for Bullies
+        (chat: "[ability given by Thornbite Staff]") -> Bullies untaps. You can activate Bullies again and repeat.
+        Each loop is one click per step: the table must NOT run it by itself.
+[ ] B5. DO: also try Sting (untaps the equipped creature at the start of EACH combat, opponents' too)
+        and Patriar's Seal / Formidable Speaker (untap target).  EXPECT: each untaps Bullies.
+
+WORLDGORGER DRAGON
+[ ] B6. DO: cast Worldgorger Dragon yourself.
+        EXPECT: its trigger exiles ALL your other permanents (lands too). Chat says they come back when it leaves.
+[ ] B7. DO: remove Worldgorger (Terminate it, or drag it to the graveyard).
+        EXPECT: every exiled permanent comes back to its owner's battlefield (lands to the lands row), and their
+        "enters" triggers happen again.
+[ ] B8. DO: give Worldgorger to an opponent with Bullies, then go to the end step.
+        EXPECT: THEIR other permanents are exiled; at the end step Worldgorger is exiled (to YOUR exile) and their
+        permanents come back.
+        WATCH: TTS lag with a big board. If cards stay in the exile pile, send chat lines.
+
+HELLCARVER DEMON  (left BY HAND on purpose)
+[ ] B9. DO: Hellcarver (given or yours) deals combat damage to a player.
+        EXPECT: its trigger goes on the stack and is NOT done automatically. Its controller sacrifices their other
+        permanents, exiles six and casts what they want by hand. The table must not wipe anything by itself.
+
+EATER OF DAYS
+[ ] B10. DO: give Eater of Days to an opponent.  EXPECT: chat says THEY skip their next 2 turns. When play reaches
+         them, chat says "<seat> skips this turn (1 more to skip)", then the same with 0 more.
+[ ] B11. DO: cast it yourself.  EXPECT: YOU skip your next two turns.
+
+INVERTER OF TRUTH
+[ ] B12. DO: give Inverter to an opponent.
+         EXPECT: their whole library moves to their exile FACE DOWN, then their graveyard is shuffled in as
+         their new library (or chat says the graveyard was empty, so the library stays empty).
+
+LEVELER
+[ ] B13. DO: give Leveler to an opponent.  EXPECT: their whole library goes to their exile (face up).
+[ ] B14. DO: that opponent has to draw.  EXPECT: they lose for drawing from an empty library.
+         (If the table doesn't flag the loss, note it.)
+
+SIRE OF INSANITY
+[ ] B15. DO: Sire is on the battlefield (anyone's), go to the end step.
+         EXPECT: trigger; every player discards their whole hand.
+[ ] B16. DO: give Sire with Bullies.  EXPECT: at that end step BOTH happen: Sire's trigger (everyone discards)
+         and Sire is exiled.
+
+SOULGORGER ORGG
+[ ] B17. DO: give it to an opponent.  EXPECT: they drop to 1 life.
+[ ] B18. DO: end step (Orgg is exiled).  EXPECT: they gain back exactly what they lost.
+
+BANE OF PROGRESS / HAYWIRE MITE / DRAGON MAGE / MAGUS OF THE WHEEL
+[ ] B19. DO: Bane of Progress enters.  EXPECT: all artifacts and enchantments are destroyed (indestructible ones
+         stay). The +1/+1 counters for each are BY HAND (chat says so).
+[ ] B20. DO: Haywire Mite: {G}, sacrifice it.  EXPECT: you pick a NONCREATURE artifact or enchantment to exile
+         (no lands, no creatures offered). When it dies, you gain 2 life.
+[ ] B21. DO: Dragon Mage deals combat damage / Magus of the Wheel activates.
+         EXPECT: every player discards their hand and draws seven.
+
+
+=====================================================================
+PART C - TUTORS AND GRAVEYARD SETUP
+=====================================================================
+[ ] C1. Entomb.  EXPECT: search opens set to "TO: GRAVEYARD" (fixed). The card you click goes into your
+        graveyard, NOT your hand.
+[ ] C2. Buried Alive.  EXPECT: same, up to three creature cards, into the graveyard.
+[ ] C3. Dina's Guidance.  EXPECT: creature search; the TO: button switches HAND / GRAVEYARD.
+[ ] C4. Demonic Tutor -> hand. Vampiric Tutor -> you lose 2 and it goes on top after the shuffle.
+        Gamble -> hand, then a random discard.
+[ ] C5. Survival of the Fittest / Fauna Shaman.  EXPECT: creature search into your hand. Discarding the creature
+        card (the cost) is BY HAND.
+[ ] C6. Formidable Speaker enters.  EXPECT: "discard a card?" DISCARD -> you pick the discard, then a creature
+        search opens. NO -> nothing.
+[ ] C7. Bitter Reunion enters.  EXPECT: same question; DISCARD -> you draw two.
+[ ] C8. Tortured Existence: {B}, discard a creature card.  EXPECT: graveyard search, creature card back to hand.
+[ ] C9. Lively Dirge (Spree).  EXPECT: you pick the modes. "+ {1}" opens a search into the GRAVEYARD.
+        "+ {2}" (return two creature cards, total MV 4 or less) is BY HAND.
+[ ] C10. Malevolent Rumble.  EXPECT: a 0/1 Eldrazi Spawn token, and the TOP 4 open; take a permanent card to your
+         hand; CLOSE puts the rest into your GRAVEYARD (chat says so).
+[ ] C11. Ripples of Undeath, first main phase.  EXPECT: mill 3 (optional). Paying {1} + 3 life for one of them is
+         BY HAND.
+[ ] C12. Takenuma channel.  EXPECT: mill 3, then a graveyard search for a creature or planeswalker card.
+[ ] C13. Old Stickfingers.  EXPECT: its "when you cast" trigger goes on the stack; revealing until X creatures is BY HAND.
+
+
+=====================================================================
+PART D - REMOVAL AND PROTECTION
+=====================================================================
+[ ] D1. Force of Despair.  EXPECT: ONLY creatures that entered the battlefield THIS TURN are destroyed.
+        A creature that was already there stays.
+[ ] D2. Blasphemous Act.  EXPECT: a panel lists every creature with toughness 13 or less (not indestructible);
+        APPLY sends them all to the graveyard. Indestructible ones stay.
+[ ] D3. Heroic Intervention, then Blasphemous Act.  EXPECT: your permanents show "hexproof, indestructible" and
+        survive.
+[ ] D4. Beast Within.  EXPECT: destroy target permanent; its CONTROLLER gets a 3/3 green Beast token.
+[ ] D5. Assassin's Trophy.  EXPECT: destroy target permanent an opponent controls; THAT opponent gets a basic land
+        search (battlefield, optional).
+[ ] D6. Bitter Triumph.  EXPECT: first a choice: DISCARD A CARD or PAY 3 LIFE. Then destroy a creature or planeswalker.
+[ ] D7. Demand Answers.  EXPECT: choice: SACRIFICE ARTIFACT or DISCARD A CARD, then draw three.
+[ ] D8. Thrill of Possibility.  EXPECT: discard a card (the cost), then draw two.
+[ ] D9. Slaughter Pact.  EXPECT: only NONBLACK creatures can be picked. At your next upkeep: PAID / CAN'T PAY
+        (CAN'T PAY = you lose).
+[ ] D10. Terminate, Bedevil, Fell the Profane, Deadly Rollick (exile).  EXPECT: pick a target, it's removed.
+[ ] D11. Tamiyo's Safekeeping.  EXPECT: pick a permanent you control: hexproof + indestructible this turn; you gain 2.
+[ ] D12. Tyvar's Stand.  EXPECT: target creature you control gains hexproof and indestructible. The +X/+X is BY HAND.
+[ ] D13. Revitalizing Repast.  EXPECT: pick a creature: +1/+1 counter, hexproof, indestructible, and it untaps.
+[ ] D14. Untimely Malfunction.  EXPECT: pick a mode. "Destroy target artifact" works; the other two modes are
+         BY HAND.
+BY HAND (nothing should happen by itself): Fire Covenant, Shatterskull Smashing (X), Legolas's Quick Reflexes,
+Veil of Summer, Deflecting Swat, Boggart Trawler (exile a graveyard), Multiply by Zero (text not checked).
+
+
+=====================================================================
+PART E - MANA, DRAW, ENGINES
+=====================================================================
+[ ] E1. Tap Ancient Tomb / City of Brass / Mana Confluence.  EXPECT: you lose 2 / 1 / 1 life.
+[ ] E2. Tap Elves of Deep Shadow for mana.  EXPECT: {B} and you lose 1 life. It ATTACKING: no life loss.
+[ ] E3. The One Ring: right-click > Activate {T}.  EXPECT: 1 burden counter ("1 COUNTER" on the card), draw 1.
+        Next time: 2 counters, draw 2.
+[ ] E4. Your upkeep with The One Ring out.  EXPECT: you lose 1 life per burden counter.
+[ ] E5. Sylvan Library, draw step.  EXPECT: the Sylvan Library choice (draw 2 more, pay 4 life or put back).
+[ ] E6. Black Market Connections, first main phase.  EXPECT: YES / NO for each mode; each chosen one happens
+        (Treasure + 1 life, draw + 2 life, 3/2 changeling + 3 life).
+[ ] E7. Faithless Looting.  EXPECT: draw two, then pick two to discard. Flashback is BY HAND.
+BY HAND: Quest for Renewal (quest counters and the untap), Key to the City (the unblockable target and the
+"pay {2}: draw" when it untaps), Bitter Reunion's haste ability, Lightning Greaves / Dragonfire Blade
+equip costs, Reflecting Pool colors.
+
+
+=====================================================================
+PART F - STRESS TEST (the "will it stroke" test)
+=====================================================================
+[ ] F1. DO: build a big board (10+ permanents each side), give Worldgorger Dragon to the opponent, go to the end step.
+        EXPECT: no script errors (type !errors to check), every permanent ends up back where it belongs.
+[ ] F2. DO: loop Bullies + Thornbite Staff + Bronze Bombshell 5 times in a row.
+        EXPECT: the opponent loses 35 life, Bombshell is always back in YOUR graveyard, no errors, no lag build-up.
+[ ] F3. DO: Inverter of Truth given away, then the opponent draws.
+        EXPECT: they draw from the old graveyard (now their library); no errors.
+[ ] F4. After all of the above: type !errors.  EXPECT: no errors listed. If there are any, copy them all here.
+
+
+=====================================================================
+NOTES / BUGS (write here)
+=====================================================================
+Card:
+What I did:
+What I expected:
+What happened:
+Chat lines before and after:
+

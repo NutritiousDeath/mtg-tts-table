@@ -637,12 +637,20 @@ function Statics.grants(obj)
     return out
   end
   local srcs = grantSources()
-  if #srcs == 0 then
-    return out
-  end
   local ok, loc = pcall(function() return Zones.regionAt(obj.getPosition()) end)
   if not ok or loc == nil or not IN[loc.region] or loc.seat == nil then
     return out
+  end
+  -- Quoted abilities from its Equipment / Auras (Thornbite Staff).
+  if Equip and Equip.attachments and Equip.modsOf then
+    local oka, atts = pcall(Equip.attachments, obj)
+    for _, a in ipairs(oka and atts or {}) do
+      local m = Equip.modsOf(a)
+      for _, l in ipairs(m.lines or {}) do
+        table.insert(out.lines, l)
+        table.insert(out.from, a.getName())
+      end
+    end
   end
   local d = dataOf(obj)
   local q = { obj = obj, seat = loc.seat, tl = tostring(d.typeLine or ""):lower(), token = obj.hasTag("Token") }

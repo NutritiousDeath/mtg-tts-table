@@ -1307,7 +1307,8 @@ end
 
 local function sendToGraveyard(card, zone)
   zone = zone or "graveyard"
-  local seat = controller(card)
+  -- To its OWNER's graveyard / exile (a creature The Beamtown Bullies gave away goes home).
+  local seat = (Effects and Effects.ownerOf and Effects.ownerOf(card)) or controller(card)
   if seat == nil then
     return
   end

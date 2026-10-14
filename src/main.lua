@@ -113,7 +113,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.64 (playtest fixes: counters panel, card labels, combat glow, BLOCKS DONE, summoning sickness, tokens, storm, anthems, attractions)"
+SCRIPT_VERSION = "1.65 (Beamtown Bullies deck audit)"
 
 function onLoad(saved)
   GameLog.setup()

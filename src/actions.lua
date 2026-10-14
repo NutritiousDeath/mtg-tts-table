@@ -186,6 +186,13 @@ function Actions.onRotate(obj, spin, oldSpin, color)
       if ManaChips and ManaChips.onTap then
         ManaChips.onTap(obj, loc.seat)
       end
+      -- Elves of Deep Shadow: "{T}: Add {B}. This creature deals 1 damage to you." (not when it attacks)
+      local t2 = text:gsub(nm:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "~"):gsub("this creature", "~")
+      local pain = tonumber(t2:match("{t}: add {%a}%. ~ deals (%d+) damage to you") or "")
+      if pain and not (Combat and Combat.inCombat and Combat.inCombat(obj)) and Trackers and Trackers.changeLife then
+        Trackers.changeLife(loc.seat, -pain, obj.getName())
+        printToAll("MTG > " .. obj.getName() .. ": " .. loc.seat .. " loses " .. pain .. " life (tapped for mana).", { 0.75, 0.8, 0.9 })
+      end
       return
     end
     local painAsked = false

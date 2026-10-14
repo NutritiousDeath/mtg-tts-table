@@ -102,11 +102,22 @@ end
 -- Only its static lines ("Equipped creature gets +2/+2 and has ...").
 local function modsOf(att)
   local d = cardData(att)
-  local out = { dp = 0, dt = 0, kws = {}, list = {} }
+  local out = { dp = 0, dt = 0, kws = {}, list = {}, lines = {} }
   local oracle = tostring(d.oracle or "")
   for raw in (oracle .. "\n"):gmatch("([^\n]*)\n") do
     local line = raw:lower()
     local head = line:sub(1, 17)
+    -- Quoted abilities it gives (Thornbite Staff: 'Equipped creature has "Whenever a creature dies,
+    -- untap this creature."'): read as the creature's own abilities (statics.lua Statics.grants).
+    if (head == "equipped creature" or head == "enchanted creatur") and (line:find(' has "', 1, true) or line:find(' have "', 1, true)) then
+      for q in line:gmatch('"([^"]*)"') do
+        local t = q:gsub("%s+$", "")
+        if t:sub(-1) ~= "." then
+          t = t .. "."
+        end
+        table.insert(out.lines, t)
+      end
+    end
     if head == "equipped creature" or line:sub(1, 17) == "enchanted creatur" then
       if not line:find("whenever", 1, true) and not line:find("when ", 1, true) then
         local p, q = line:match("gets? ([%+%-]%d+)/([%+%-]%d+)")

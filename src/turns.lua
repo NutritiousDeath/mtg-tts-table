@@ -272,8 +272,31 @@ local function nextTurn()
   if ap == nil or ap.eliminated then
     anchor = nextPlayer(anchor)
   end
-  local seat = nextPlayer(t.activeSeat)
-  Turns.beginTurn(seat, nil, seat == anchor)
+  -- Eater of Days: seats with turns to skip are passed over (each skip used up).
+  local cur, newRound = t.activeSeat, false
+  for _ = 1, 12 do
+    local seat = nextPlayer(cur)
+    if seat == anchor then
+      newRound = true
+    end
+    local sk = t.skipTurns and t.skipTurns[seat] or 0
+    if sk > 0 then
+      t.skipTurns[seat] = sk - 1
+      broadcastToAll(seat .. " skips this turn (" .. (sk - 1) .. " more to skip).", { 1, 0.6, 0.3 })
+      cur = seat
+    else
+      Turns.beginTurn(seat, nil, newRound)
+      return
+    end
+  end
+  Turns.beginTurn(nextPlayer(t.activeSeat), nil, false)
+end
+
+-- "You skip your next N turns."
+function Turns.addSkip(seat, n)
+  local t = turn()
+  t.skipTurns = t.skipTurns or {}
+  t.skipTurns[seat] = (t.skipTurns[seat] or 0) + (n or 1)
 end
 
 -- Where "next step" goes from here (an extra combat loops End of combat back
@@ -821,6 +844,7 @@ Events.on("gameStarted", function(d)
   local t = turn()
   t.startingSeat = d.first
   t.extraTurns, t.extraCombats, t.reversed, t.pending = {}, 0, false, nil
+  t.skipTurns = {}
   t.taken = 0
   GameState.data.turnStartOf = {}
   Turns.beginTurn(d.first, 1)

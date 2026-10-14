@@ -670,6 +670,11 @@ function Stack.activatedAbilities(obj)
   local all = splitLines(text)
   for li, line in ipairs(all) do
     local colon = line:find(":", 1, true)
+    -- A colon inside quotes is an ability the card GIVES (Thornbite Staff), not its own.
+    local quote = line:find('"', 1, true)
+    if quote and colon and quote < colon then
+      colon = nil
+    end
     if colon and colon <= 100 then
       local cost = line:sub(1, colon - 1)
       -- Ability word in front ("Boast — {1}{R}"): keep just the cost.

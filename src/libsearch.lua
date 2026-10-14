@@ -253,6 +253,10 @@ function LibSearch.run(color)
     end
     local lo = math.max((f and f.mvMin) or -1, qmin or -1)
     local hi = math.min((f and f.mvMax) or 999, qmax or 999)
+    -- Beamtown Bullies: "nonlegendary creature card".
+    if ok and f and f.nonLegendary and tostring(gmField(e.gm_notes, "typeLine") or ""):lower():find("legendary", 1, true) then
+      ok = false
+    end
     if ok and (lo >= 0 or hi < 999) then
       local mv = tonumber(gmField(e.gm_notes, "cmc") or "") or 0
       if mv < lo or mv > hi then
@@ -305,7 +309,9 @@ local held = {}   -- [color] = card taken to go on top of the library after the 
 local function renderDest(color)
   local d = dest[color] or { where = "hand" }
   local label = d.where == "top" and "TO: TOP OF LIBRARY"
-    or (d.where == "battlefield" and ("TO: BATTLEFIELD" .. (d.tapped and " (T)" or "")) or "TO: HAND")
+    or (d.where == "graveyard" and "TO: GRAVEYARD")
+    or (d.where == "battlefield" and ("TO: " .. (d.toSeat and d.toSeat ~= color and (string.upper(d.toSeat) .. "'S ") or "")
+      .. "BATTLEFIELD" .. (d.tapped and " (T)" or "")) or "TO: HAND")
   UI.setValue("lsDest_" .. color, label)
   UI.setAttribute("lsDestBtn_" .. color, "color", d.where == "battlefield" and "#1B5A3A" or "#2A3346")
 end
@@ -315,8 +321,15 @@ function ui_libDest(player, c)
     return
   end
   local d = dest[c] or { where = "hand" }
-  if d.where == "top" then
-    return   -- fixed by the card ("put that card on top")
+  if d.where == "top" or d.fixed then
+    return   -- fixed by the card ("put that card on top", Entomb, Beamtown Bullies)
+  end
+  -- Dina's Guidance: "into your hand or graveyard".
+  if d.handOrYard then
+    d.where = d.where == "hand" and "graveyard" or "hand"
+    dest[c] = d
+    renderDest(c)
+    return
   end
   d.where = d.where == "hand" and "battlefield" or "hand"
   if d.where == "hand" then
@@ -335,7 +348,10 @@ function LibSearch.open(color, preset, note, where, tapped, opts)
   end
   open[color] = true
   searched[color] = false
-  dest[color] = { where = where or "hand", tapped = tapped and true or false }
+  dest[color] = { where = where or "hand", tapped = tapped and true or false,
+    -- "hand or graveyard" (the button switches), a fixed destination, another seat's battlefield.
+    handOrYard = opts and opts.handOrYard or nil, fixed = opts and opts.fixedDest or (where == "graveyard") or nil,
+    toSeat = opts and opts.toSeat or nil }
   -- An effect's search ("a basic land card") matches the TYPE LINE only,
   -- not rules text, plus any mana value limit; typing a new search clears it.
   filters[color] = opts
@@ -345,7 +361,7 @@ function LibSearch.open(color, preset, note, where, tapped, opts)
   yardOf[color] = opts and opts.yardOf or nil
   LibSearch.onTakeCb = LibSearch.onTakeCb or {}
   LibSearch.onTakeCb[color] = opts and opts.onTake or nil
-  look[color] = (opts and opts.topN) and { left = opts.topN, picks = opts.picks or 1 } or nil
+  look[color] = (opts and opts.topN) and { left = opts.topN, picks = opts.picks or 1, restToYard = opts.restToYard } or nil
   limit[color] = (opts and opts.limit) and { left = opts.limit } or nil
   UI.setValue("lsTitle_" .. color, look[color] and ("TOP " .. opts.topN .. " CARDS")
     or (zoneOf[color] == "graveyard" and "SEARCH GRAVEYARD" or "SEARCH LIBRARY"))
@@ -397,7 +413,18 @@ function LibSearch.close(color, quiet)
   look[color] = nil
   limit[color] = nil
   if lk then
-    -- Looked at the top cards: the rest go on the bottom, no shuffle.
+    -- Looked at the top cards: the rest go on the bottom, no shuffle (Malevolent Rumble: into the graveyard).
+    if lk.restToYard then
+      if lk.left > 0 then
+        local okm, errm = pcall(Library.mill, color, lk.left)
+        if not okm then
+          print("LibSearch: could not put the rest into the graveyard: " .. tostring(errm))
+        end
+      end
+      if not quiet then
+        printToAll("MTG > " .. color .. " put the rest (" .. lk.left .. ") into their graveyard.", INFO)
+      end
+    else
     if lk.left > 0 then
       local okb, errb = pcall(Library.topToBottom, color, lk.left)
       if not okb then
@@ -406,6 +433,7 @@ function LibSearch.close(color, quiet)
     end
     if not quiet then
       printToAll("MTG > " .. color .. " put the rest (" .. lk.left .. ") on the bottom of their library.", INFO)
+    end
     end
   elseif searched[color] and zoneOf[color] ~= "graveyard" then
     local okl, lib = pcall(Library.find, color)
@@ -440,7 +468,7 @@ function LibSearch.close(color, quiet)
 end
 
 -- Take a shown card: to the hand, or onto the battlefield (face up).
-local function take(color, slot, toBattlefield, tapped, toTop)
+local function take(color, slot, toBattlefield, tapped, toTop, toYard)
   local key = shown[color] and shown[color][slot]
   local lib = pileFor(color)
   local fromWhere = zoneOf[color] == "graveyard" and "graveyard" or "library"
@@ -462,8 +490,32 @@ local function take(color, slot, toBattlefield, tapped, toTop)
       name = lib.getName()   -- the only card: it is already on top
     end
     printToAll("MTG > " .. color .. " reveals " .. name .. " and will put it on top of their library after the shuffle.", INFO)
+  elseif toYard then
+    -- Entomb, Buried Alive: into the graveyard (merged into the pile).
+    local gpos = TableSetup.slot(color, "graveyard", TableSetup.SURFACE_TOP + 2)
+    local card = lib
+    if lib.type == "Deck" then
+      card = lib.takeObject({ index = index, position = gpos, rotation = { 0, s.yaw, 0 }, smooth = false })
+    else
+      lib.setPosition(gpos)
+    end
+    name = card and card.getName() or name
+    if card then
+      Wait.time(function()
+        if not card.isDestroyed() then
+          Zones.refresh(card)
+          Library.toGraveyard(color, card, function() end)
+        end
+      end, 0.3)
+    end
+    printToAll("MTG > " .. color .. " put " .. name .. " into their graveyard from their " .. fromWhere .. ".", INFO)
   elseif toBattlefield then
-    local pos = TableSetup.slot(color, "battlefield", 2)
+    -- Beamtown Bullies: onto ANOTHER player's battlefield, under their control.
+    local d0 = dest[color] or {}
+    local bseat = d0.toSeat or color
+    local bs = TableSetup.seat(bseat) or s
+    local pos = TableSetup.slot(bseat, "battlefield", 2)
+    s = bs
     if lib.type == "Deck" then
       local yaw = tapped and (s.yaw + 90) % 360 or s.yaw
       local card = lib.takeObject({ index = index, position = pos, rotation = { 0, yaw, 0 }, smooth = true })
@@ -489,7 +541,8 @@ local function take(color, slot, toBattlefield, tapped, toTop)
         pcall(onTake, lib)
       end
     end
-    printToAll("MTG > " .. color .. " put " .. name .. " onto the battlefield" .. (tapped and " tapped" or "")
+    printToAll("MTG > " .. color .. " put " .. name .. " onto " .. (bseat ~= color and (bseat .. "'s battlefield (under " .. bseat .. "'s control)") or "the battlefield")
+      .. (tapped and " tapped" or "")
       .. " from their " .. fromWhere .. ".", INFO)
   else
     local hand = Player[color].getHandTransform()
@@ -620,7 +673,7 @@ function ui_libPick(player, arg)
     return
   end
   local d = dest[c] or { where = "hand" }
-  take(c, tonumber(i), d.where == "battlefield", d.tapped, d.where == "top")
+  take(c, tonumber(i), d.where == "battlefield", d.tapped, d.where == "top", d.where == "graveyard")
 end
 
 -- Right-click menu on the library deck.
