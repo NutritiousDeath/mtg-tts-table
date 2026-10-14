@@ -1,6 +1,6 @@
 MTG COMMANDER TABLE (TTS) - TEST GUIDE
-Version being tested: 1.65
-After loading, chat should say:  MTG > Scripts loaded: version 1.65 (...)
+Version being tested: 1.66
+After loading, chat should say:  MTG > Scripts loaded: version 1.66 (...)
 
 HOW TO USE THIS
 - One person can test alone: type  !solo on  in chat. You can then act for every seat.

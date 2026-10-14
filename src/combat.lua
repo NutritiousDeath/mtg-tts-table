@@ -1858,3 +1858,222 @@ function Combat.restore()
     renderPanel()
   end
 end
+
+---------------------------------------------------------------------------
+-- Ninjutsu, commander ninjutsu and Sneak (TMNT): during the declare blockers step (once every defender
+-- clicked BLOCKS DONE), return an unblocked attacker you control to its owner's hand; the card from
+-- your hand (or command zone) is put onto the battlefield tapped and attacking the same player or
+-- planeswalker. Ninjutsu is an ability (on the stack, resolves to put it in); Sneak casts the spell
+-- (a creature spell enters attacking when it resolves; Splinter's Technique just resolves).
+---------------------------------------------------------------------------
+
+-- The card's ninjutsu / sneak options: list of { kind = "ninjutsu" | "commander ninjutsu" | "sneak", cost }.
+function Combat.ninjutsuOptions(card, seat)
+  local out = {}
+  local d = CardData.get(card)
+  local oracle = tostring(d.oracle or "")
+  for line in (oracle .. "\n"):gmatch("([^\n]*)\n") do
+    local low = line:lower():gsub("%b()", ""):gsub("%s+$", "")
+    for _, k in ipairs({ "commander ninjutsu", "ninjutsu", "sneak" }) do
+      if low:sub(1, #k + 1) == k .. " " then
+        local cost = line:sub(#k + 2):gsub("%b()", ""):gsub("%s+$", ""):gsub("^%s+", "")
+        if cost:find("^[{%dXWUBRGC]") then
+          table.insert(out, { kind = k, cost = cost })
+        end
+        break
+      end
+    end
+  end
+  -- Satoru Umezawa: "Each creature card in your hand has ninjutsu {2}{U}{B}."
+  if #out == 0 and seat and tostring(d.typeLine or ""):find("Creature", 1, true) then
+    for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+      if o.type == "Card" and not o.isDestroyed() and controller(o) == seat then
+        local ol = tostring(CardData.get(o).oracle or ""):lower()
+        local c2 = ol:match("each creature card in your hand has ninjutsu (%b{}[{}%w]*)")
+        if c2 then
+          table.insert(out, { kind = "ninjutsu", cost = c2:upper(), from = o.getName() })
+          break
+        end
+      end
+    end
+  end
+  return out
+end
+
+local function unblockedAttackers(seat)
+  local c = GameState.data.combat
+  local list = {}
+  if c == nil or c.attackers == nil then
+    return list
+  end
+  for _, g in ipairs(c.order or {}) do
+    local a = obj(g)
+    if a and controller(a) == seat and #(c.blockOrder[g] or {}) == 0 then
+      table.insert(list, a)
+    end
+  end
+  return list
+end
+
+-- Put a card onto the battlefield tapped and attacking `target` (a seat or "pw:<guid>").
+local function enterAttacking(card, seat, target, why)
+  local s = TableSetup.seat(seat)
+  card.setLock(false)
+  card.setRotation({ 0, (s.yaw + 90) % 360, 0 })
+  card.setPosition(TableSetup.slot(seat, "battlefield", TableSetup.SURFACE_TOP + 2))
+  Wait.time(function()
+    if card.isDestroyed() then
+      return
+    end
+    pcall(Zones.refresh, card)
+    local c = GameState.data.combat
+    if c and c.attackers and (stepId() == "blockers" or stepId() == "damage") then
+      local g = card.getGUID()
+      c.attackers[g] = target
+      table.insert(c.order, g)
+      c.blockOrder[g] = {}
+    end
+    if Counters and Counters.setup then
+      Counters.setup(card)
+    end
+    printToAll("MTG > " .. card.getName() .. " enters tapped and attacking " .. targetLabel(target) .. " (" .. why .. ").", { 0.55, 0.9, 0.6 })
+  end, 0.8)
+end
+Combat.enterAttacking = enterAttacking
+
+function Combat.ninjutsu(card, color, opt)
+  if card == nil or card.isDestroyed() then
+    return
+  end
+  local t = turn()
+  local seat = GameState.solo() and t.activeSeat or color
+  if seat ~= t.activeSeat then
+    broadcastToColor(opt.kind:upper() .. ": only the attacking player can do that.", color, WARN)
+    return
+  end
+  if stepId() ~= "blockers" then
+    broadcastToColor(opt.kind:upper() .. " is used in the BLOCK step, after blockers are declared.", color, WARN)
+    return
+  end
+  local wait = waitingBlockers()
+  if #wait > 0 and not GameState.solo() then
+    broadcastToColor("Wait until " .. table.concat(wait, ", ") .. " click BLOCKS DONE: only then is it known which attackers are unblocked.", color, WARN)
+    return
+  end
+  local list = unblockedAttackers(seat)
+  if #list == 0 then
+    broadcastToColor(opt.kind:upper() .. ": you have no unblocked attacker to return.", color, WARN)
+    return
+  end
+  local keep = {}
+  for _, a in ipairs(list) do
+    keep[a.getGUID()] = true
+  end
+  Effects.askChoice(color, card.getName() .. ": " .. opt.kind .. " " .. opt.cost,
+    "Click RETURN on an UNBLOCKED attacker you control (it goes back to your hand). Pay " .. opt.cost .. " yourself"
+      .. (opt.from and (" (ninjutsu from " .. opt.from .. ")") or "") .. ".",
+    { { label = "CANCEL", value = false } }, function(victim)
+      if not victim or victim.isDestroyed() or card.isDestroyed() then
+        return
+      end
+      local c = GameState.data.combat
+      local target = c and c.attackers and c.attackers[victim.getGUID()]
+      if target == nil then
+        broadcastToColor("That creature isn't attacking any more.", color, WARN)
+        return
+      end
+      -- The cost: the attacker goes back to its owner's hand (this also takes it out of combat).
+      local owner = (Effects.ownerOf and Effects.ownerOf(victim)) or seat
+      local vname = victim.getName()
+      if victim.hasTag("Token") then
+        removeAttacker(victim.getGUID())
+        Combat.tokenGone(victim, seat, "hand")
+      else
+        victim.setLock(false)
+        victim.setPosition(Player[owner].getHandTransform().position)
+      end
+      printToAll("MTG > " .. seat .. " returns " .. vname .. " to hand (" .. opt.kind .. ": " .. card.getName() .. ").", INFO)
+      if ManaChips and ManaChips.pay then
+        local _, covered = ManaChips.pay(seat, opt.cost, card.getName())
+        if not covered then
+          broadcastToColor("Pay " .. opt.cost .. " yourself (the pool didn't cover it).", color, INFO)
+        end
+      end
+      if opt.kind == "sneak" then
+        -- Sneak casts the spell; a creature spell enters tapped and attacking when it resolves.
+        GameState.data.sneakAttack = GameState.data.sneakAttack or {}
+        GameState.data.sneakAttack[card.getGUID()] = target
+        local s = TableSetup.seat(seat)
+        card.setLock(false)
+        card.setRotation({ 0, s.yaw, 0 })
+        Stack.pushCard(card, seat, { seat = seat, region = "hand" })
+        printToAll("MTG > " .. seat .. " casts " .. card.getName() .. " with Sneak (" .. opt.cost .. ").", INFO)
+        return
+      end
+      -- Ninjutsu: an activated ability. The ninja waits revealed beside the stack until it resolves.
+      Events.emit("ninjutsuActivated", { seat = seat, card = card })
+      card.setLock(false)
+      local face = ""
+      pcall(function()
+        for _, cd in pairs(card.getData().CustomDeck or {}) do
+          face = cd.FaceURL
+          break
+        end
+      end)
+      GameState.data.ninjutsuPending = GameState.data.ninjutsuPending or {}
+      GameState.data.ninjutsuPending[card.getGUID()] = { seat = seat, target = target }
+      Stack.pushAbility(seat, card.getName(), "Ninjutsu: put " .. card.getName() .. " onto the battlefield tapped and attacking "
+        .. targetLabel(target) .. ".", face, { activated = true, source = card.getGUID(), ninjutsu = true })
+    end, { filter = function(o) return keep[o.getGUID()] == true end, label = "RETURN", protect = false })
+end
+
+-- The ninjutsu ability resolved (effects.lua): in it goes, attacking.
+function Combat.ninjutsuResolve(guid)
+  local p = GameState.data.ninjutsuPending and GameState.data.ninjutsuPending[guid]
+  local card = getObjectFromGUID(guid)
+  if p == nil or card == nil or card.isDestroyed() then
+    return false
+  end
+  GameState.data.ninjutsuPending[guid] = nil
+  enterAttacking(card, p.seat, p.target, "ninjutsu")
+  return true
+end
+
+-- A Sneak creature spell resolved: it enters tapped and attacking.
+Events.on("cardMoved", function(d)
+  local m = GameState.data and GameState.data.sneakAttack
+  if m == nil or d.card == nil or d.to == nil or not ON_FIELD[d.to.region] then
+    return
+  end
+  local g = d.card.getGUID()
+  local target = m[g]
+  if target == nil then
+    return
+  end
+  m[g] = nil
+  local c = GameState.data.combat
+  if c and c.attackers and (stepId() == "blockers" or stepId() == "damage") then
+    tap(d.card)
+    c.attackers[g] = target
+    table.insert(c.order, g)
+    c.blockOrder[g] = {}
+    redraw(d.card)
+    printToAll("MTG > " .. d.card.getName() .. " enters tapped and attacking " .. targetLabel(target) .. " (sneak).", { 0.55, 0.9, 0.6 })
+  end
+end)
+
+function Combat.addNinjutsuMenu(obj, region)
+  if region ~= "hand" and region ~= "command" then
+    return
+  end
+  local loc = Zones and Zones.locationOf and Zones.locationOf(obj)
+  local seat = loc and loc.seat
+  for _, opt in ipairs(Combat.ninjutsuOptions(obj, seat)) do
+    if region == "hand" or opt.kind == "commander ninjutsu" then
+      local label = (opt.kind == "sneak" and "Sneak " or "Ninjutsu ") .. opt.cost
+      obj.addContextMenuItem(label, function(playerColor)
+        Combat.ninjutsu(obj, playerColor, opt)
+      end)
+    end
+  end
+end

@@ -704,7 +704,14 @@ function Counters.menuSig(obj)
   local sb = (Soulbond and Soulbond.menuKey) and Soulbond.menuKey(obj) or ""
   local pk = (Pile and Pile.menuKey) and Pile.menuKey(obj) or ""
   local prep = (Effects and Effects.preparedPart and Effects.preparedPart(obj)) and "|prepared" or ""
-  return region .. "|" .. step .. att .. sb .. pk .. prep
+  -- In a hand: whether it has ninjutsu right now (Satoru Umezawa gives it to every creature card).
+  local nj = ""
+  if region == "hand" and Combat and Combat.ninjutsuOptions then
+    local loc = Zones and Zones.locationOf and Zones.locationOf(obj)
+    local okn, opts = pcall(Combat.ninjutsuOptions, obj, loc and loc.seat)
+    nj = (okn and opts and #opts > 0) and "|nj" or ""
+  end
+  return region .. "|" .. step .. att .. sb .. pk .. prep .. nj
 end
 
 -- Rebuild the menu if what it was built for has changed.
@@ -779,6 +786,10 @@ function Counters.setup(obj)
         Effects.chooseType(obj, (Zones.locationOf(obj) or {}).seat or playerColor)
       end)
     end
+  end
+  -- Ninjutsu / commander ninjutsu / Sneak (combat.lua).
+  if Combat and Combat.addNinjutsuMenu then
+    Combat.addNinjutsuMenu(obj, region)
   end
   if region == "hand" and Effects and Effects.suspendInfo and Effects.suspendInfo(obj) then
     obj.addContextMenuItem("Suspend (pay cost, exile with time counters)", function(playerColor)

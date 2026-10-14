@@ -413,6 +413,10 @@ local function parseTrigger(p)
   if plainFind(p, "when you cast this spell") or plainFind(p, "when you cast ~") then
     return { kind = "castSelf" }
   end
+  -- Silver-Fur Master, Satoru Umezawa: "Whenever you activate a ninjutsu ability".
+  if plainFind(p, "whenever you activate a ninjutsu ability") then
+    return { kind = "ninjutsuAct" }
+  end
   -- Diamond Mare: "whenever you cast a spell of the chosen color" (chosen as it entered: effects.lua).
   if plainFind(p, "whenever you cast a spell of the chosen color") then
     return { kind = "cast", who = "you", spellType = "chosen color" }
@@ -500,6 +504,16 @@ local function parseCombat(p)
     add({ kind = "combatDamage", mine = true })
   elseif plainFind(p, "whenever one or more creatures you control deal combat damage to a player") then
     add({ kind = "combatDamage", mine = true, once = true })
+  elseif p:find("whenever one or more [%a ]- creatures you control deal combat damage to a player") then
+    -- Prosperous Thief: "Whenever one or more Ninja or Rogue creatures you control deal combat damage to a player".
+    local list = p:match("whenever one or more ([%a ]-) creatures you control deal combat damage to a player")
+    local subs = {}
+    for w in list:gmatch("%a+") do
+      if w ~= "or" and w ~= "and" then
+        table.insert(subs, "sub:" .. w)
+      end
+    end
+    add({ kind = "combatDamage", mine = true, once = true, subjects = subs, subject = subs[1] })
   else
     -- "Whenever an Army you control deals combat damage to a player" (Sauron).
     local subj = between(p, "whenever an ", " you control deals combat damage to a player")
@@ -746,6 +760,53 @@ local function entersTappedNow(card)
   return math.abs(diff) > 30
 end
 
+-- Is this permanent of creature type `w` (lowercase, "ninja")? Its type line, changeling, Arcane
+-- Adaptation ("creatures you control are the chosen type") and equipment such as Ninja's Blades
+-- ("is a Ninja in addition to its other types").
+function Triggers.hasCreatureType(obj, w)
+  local d = cardData(obj)
+  local tl = tostring(d and d.typeLine or ""):lower()
+  if tl:find(w, 1, true) then
+    return true
+  end
+  if not tl:find("creature", 1, true) then
+    return false
+  end
+  local ol = tostring(d and d.oracle or ""):lower()
+  if ol:find("changeling", 1, true) then
+    return true
+  end
+  local seat
+  pcall(function() seat = Zones.regionAt(obj.getPosition()).seat end)
+  if seat and Statics and Statics.chosenType then
+    for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+      if o ~= obj and o.type == "Card" and not o.isDestroyed() then
+        local loc = Zones.regionAt(o.getPosition())
+        if loc.seat == seat and (loc.region == "battlefield" or loc.region == "lands") then
+          local od = cardData(o)
+          local otext = tostring(od and od.oracle or ""):lower()
+          if otext:find("creatures you control are the chosen type", 1, true) then
+            local ty = Statics.chosenType(o)
+            if ty and tostring(ty):lower() == w then
+              return true
+            end
+          end
+        end
+      end
+    end
+  end
+  if Equip and Equip.attachments then
+    local oka, atts = pcall(Equip.attachments, obj)
+    for _, a in ipairs(oka and atts or {}) do
+      local ad = cardData(a)
+      if tostring(ad and ad.oracle or ""):lower():find("is a " .. w .. " in addition to its other types", 1, true) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 local function matchesSubject(obj, trig)
   local list = trig.subjects or { trig.subject }
   local types = typesOf(obj)
@@ -762,9 +823,7 @@ local function matchesSubject(obj, trig)
       return true
     end
     if type(sub) == "string" and sub:sub(1, 4) == "sub:" then
-      local d = cardData(obj)
-      local tl = tostring(d and d.typeLine or ""):lower()
-      if tl:find(sub:sub(5), 1, true) then
+      if Triggers.hasCreatureType(obj, sub:sub(5)) then
         return true
       end
     end
@@ -1629,6 +1688,24 @@ Events.on("spellCast", function(d)
     fc.seen[tostring(d.controller) .. "|nil"] = true
   end
   pushAll(found, d.controller)
+end)
+
+-- A ninjutsu ability was activated (combat.lua).
+Events.on("ninjutsuActivated", function(d)
+  if not enabled() or not GameState.data.started or d.seat == nil then
+    return
+  end
+  local found = {}
+  for _, p in ipairs(permanents()) do
+    if p.controller == d.seat then
+      for _, a in ipairs(abilitiesOf(p.obj)) do
+        if a.trig.kind == "ninjutsuAct" then
+          table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
+        end
+      end
+    end
+  end
+  pushAll(found, d.seat)
 end)
 
 ---------------------------------------------------------------------------

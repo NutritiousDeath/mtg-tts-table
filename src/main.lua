@@ -113,7 +113,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.65 (Beamtown Bullies deck audit)"
+SCRIPT_VERSION = "1.66 (Yuriko deck audit: ninjutsu, sneak, empty-library wins)"
 
 function onLoad(saved)
   GameLog.setup()

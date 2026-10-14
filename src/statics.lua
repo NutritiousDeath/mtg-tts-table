@@ -76,6 +76,12 @@ local function subjectMatches(subj, q, p)
   if q.tl:find("creature", 1, true) == nil then
     return false
   end
+  -- Changeling: every creature type (Changeling Outcast is a Ninja for Splinter, a Sliver for Sliver lords).
+  local changeling = tostring(dataOf(q.obj).oracle or ""):lower():find("changeling", 1, true) ~= nil
+  if changeling and subj ~= "creatures" and subj ~= "creature tokens" and subj ~= "nontoken creatures"
+      and not subj:find("artifact", 1, true) and not subj:find("legendary", 1, true) then
+    return true
+  end
   if subj == "creatures" then
     return true
   elseif subj == "creature tokens" then

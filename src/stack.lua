@@ -236,7 +236,7 @@ function Stack.pushAbility(controller, sourceName, text, image, opts)
   -- can't move on in the meantime.
   table.insert(items(), { guid = obj.getGUID(), kind = "ability", name = sourceName, controller = controller,
     text = text, trigger = opts.trigger, that = opts.that, source = opts.source, thatCard = opts.thatCard,
-    amount = opts.amount, copyOf = opts.copyOf,
+    amount = opts.amount, copyOf = opts.copyOf, ninjutsu = opts.ninjutsu,
     auto = (opts.trigger or opts.loyalty or opts.activated or opts.copyOf) and true or nil })
   Stack.render()
   if opts.copyOf then
@@ -673,6 +673,12 @@ function Stack.activatedAbilities(obj)
     -- A colon inside quotes is an ability the card GIVES (Thornbite Staff), not its own.
     local quote = line:find('"', 1, true)
     if quote and colon and quote < colon then
+      colon = nil
+    end
+    -- A colon inside reminder text ("Ninjutsu {1}{U} ({1}{U}, Return an unblocked attacker...: Put...)")
+    -- isn't an ability of its own (ninjutsu / sneak have their own menu items: combat.lua).
+    local paren = line:find("(", 1, true)
+    if paren and colon and paren < colon then
       colon = nil
     end
     if colon and colon <= 100 then

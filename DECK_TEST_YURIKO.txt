@@ -1,0 +1,159 @@
+MTG COMMANDER TABLE (TTS) - DECK TEST: YURIKO, THE TIGER'S SHADOW (NINJAS)
+Version being tested: 1.66
+After loading, chat should say:  MTG > Scripts loaded: version 1.66 (Yuriko deck audit: ninjutsu, sneak, empty-library wins)
+
+HOW TO USE THIS
+- Two seats are enough: type  !solo on  and play Yuriko at one seat against any deck at another.
+- Import the deck, start the game, then pull the cards you're testing into your hand
+  (right-click library > Search, or drag them out).
+- One line at a time:  DO this  ->  EXPECT that.  Mark each line OK or WRONG.
+- When something is WRONG, copy the chat lines from just before and after it into NOTES at the bottom.
+- Ninjutsu needs a real combat: attack with something small, let the other seat block (or not), and get to the
+  BLOCK step with BLOCKS DONE clicked.
+
+BEFORE YOU START
+[ ] 0a. DO: import the deck.  EXPECT: 100 cards, Yuriko in the command zone, no warnings.
+[ ] 0b. DO: check for MISS lines in the import chat. The newest printings (Reality Fracture "fra", TMNT "tmt",
+        Edge of Eternities "eoe", Marvel "msc") are the most likely to miss. Copy any [ lines and send them.
+CARDS WHOSE TEXT I COULDN'T CHECK (watch them, they may do nothing by themselves): Satoru, the Infiltrator,
+The Golden Throne, The Black Gate, Enter the Enigma (I assumed "target creature can't be blocked, draw a card").
+
+
+=====================================================================
+PART A - NINJUTSU (the heart of the deck)
+=====================================================================
+[ ] A1. DO: right-click Ninja of the Deep Hours in your hand.
+        EXPECT: a "Ninjutsu {1}{U}" line. NO broken "Activate: Ninjutsu {1}{U} ({1}{U}, Return..." line.
+[ ] A2. DO: click it in your main phase.  EXPECT: chat says ninjutsu is used in the BLOCK step. Nothing moves.
+[ ] A3. DO: attack with one creature, go to the BLOCK step, and click it BEFORE the defender clicks BLOCKS DONE.
+        EXPECT: "Wait until <seat> click BLOCKS DONE".
+[ ] A4. DO: after BLOCKS DONE, with your attacker UNBLOCKED, click "Ninjutsu {1}{U}".
+        EXPECT: RETURN buttons only on your unblocked attackers. Click one: it goes back to your hand, the mana is
+        taken from your pool if it's there (otherwise you're told to pay), and a "Ninjutsu: put ... tapped and
+        attacking <PLAYER>" item goes on the stack.
+[ ] A5. DO: let it resolve.  EXPECT: the ninja lands on your battlefield TAPPED, with the ATK > <PLAYER> strip and
+        the red glow, attacking the SAME player the returned creature attacked.
+[ ] A6. DO: with the attacker BLOCKED, try ninjutsu.  EXPECT: "you have no unblocked attacker to return".
+[ ] A7. DO: go to damage.  EXPECT: the ninja is in the COMBAT DAMAGE panel and its "deals combat damage" trigger
+        happens (Ninja of the Deep Hours: you may draw).
+[ ] A8. DO: an opponent's creature taps for ninjutsu?  EXPECT: only the ATTACKING player can use it.
+
+COMMANDER NINJUTSU
+[ ] A9. DO: right-click Yuriko in the command zone.  EXPECT: "Ninjutsu {U}{B}" (commander ninjutsu). Use it like
+        A4/A5: she comes from the command zone tapped and attacking. No commander tax (she wasn't cast).
+[ ] A10. DO: Yuriko in your HAND (she was returned).  EXPECT: the same "Ninjutsu {U}{B}" line from the hand.
+
+SNEAK (TMNT cards: cast the spell instead of ninjutsu)
+[ ] A11. DO: right-click Splinter, Hamato Yoshi in hand during the BLOCK step (after BLOCKS DONE).
+         EXPECT: "Sneak {B}". Pick an unblocked attacker to return; Splinter goes on the STACK as a spell
+         (chat: "casts Splinter, Hamato Yoshi with Sneak"). When it resolves it enters TAPPED AND ATTACKING.
+[ ] A12. DO: Splinter's Technique with Sneak {1}{B}.  EXPECT: same return, then the sorcery resolves: library search
+         for any card to your hand.
+
+NINJUTSU HELPERS
+[ ] A13. DO: with Silver-Fur Master out, use any ninjutsu.
+         EXPECT: trigger: each opponent loses 1, you gain 1. (Its "{1} less" discount: pay 1 less yourself.)
+[ ] A14. DO: with Satoru Umezawa out, right-click a NON-ninja creature card in your hand.
+         EXPECT: "Ninjutsu {2}{U}{B}" (from Satoru). It may take until the next step to show up after Satoru lands.
+[ ] A15. DO: with Satoru Umezawa out, use ninjutsu.  EXPECT: trigger: look at the top 3, pick one for your hand,
+         CLOSE puts the rest on the bottom. Only once per turn.
+[ ] A16. Thousand-Faced Shadow via ninjutsu.  EXPECT: its enter trigger asks if it entered from your hand attacking;
+         the token copy of another attacker is BY HAND if the table can't make it.
+[ ] A17. Sakashima's Student via ninjutsu: entering as a copy is BY HAND.
+
+
+=====================================================================
+PART B - COMBAT DAMAGE TRIGGERS
+=====================================================================
+[ ] B1. Yuriko's trigger: a Ninja hits a player.  EXPECT: you reveal the top card, it goes to your HAND (not a
+        "draw": no draw triggers), and EACH opponent loses life equal to its mana value. Chat shows the card and MV.
+[ ] B2. Two ninjas hit.  EXPECT: two Yuriko triggers (one per ninja).
+[ ] B3. Changeling Outcast hits.  EXPECT: Yuriko triggers (changeling = every creature type, so it's a Ninja).
+[ ] B4. Arcane Adaptation (choose Ninja) out, a non-ninja creature hits.  EXPECT: Yuriko triggers.
+[ ] B5. A creature wearing Ninja's Blades hits.  EXPECT: Yuriko triggers (Blades makes it a Ninja). Blades' own
+        "draw, discard, lose life" is BY HAND.
+[ ] B6. Ingenious Infiltrator out, any ninja hits.  EXPECT: draw a card per ninja that hit.
+[ ] B7. Prosperous Thief out, ninjas and/or Rogues hit.  EXPECT: ONE Treasure per combat (one or more).
+[ ] B8. Mistblade Shinobi hits.  EXPECT: you may bounce a creature that player controls.
+[ ] B9. Throat Slitter hits.  EXPECT: destroy a NONBLACK creature (black ones aren't offered).
+[ ] B10. Mist-Syndicate Naga hits.  EXPECT: a token copy of the Naga.
+[ ] B11. Moon-Circuit Hacker hits.  EXPECT: it asks about drawing; the discard ("unless it entered this turn") is
+         asked as a yes/no.
+BY HAND: Fallen Shinobi (exile their top two, play them free), Skullsnatcher (exile two cards from their graveyard),
+Fblthp's "draw two when opponents are dealt combat damage".
+
+
+=====================================================================
+PART C - WIN CONDITIONS
+=====================================================================
+[ ] C1. Laboratory Maniac out, library empty, draw a card.  EXPECT: "<SEAT> WINS THE GAME (Laboratory Maniac...)".
+[ ] C2. NO Lab Maniac, library empty, draw.  EXPECT: you're flagged as losing ("drawn from an empty library") on
+        your tracker, to confirm or dismiss.
+[ ] C3. Doctor Doom, Unrivaled: {T} with 1 card left in your library.
+        EXPECT: draw 1, lose 1 life, then "WINS THE GAME (library is empty)".
+[ ] C4. Doctor Doom with cards left.  EXPECT: draw, lose 1, chat says the library isn't empty (no win).
+[ ] C5. Triskaidekaphile: your upkeep with EXACTLY 13 cards in hand.  EXPECT: you win. With 12 or 14: chat says
+        how many you have, no win.
+[ ] C6. Triskaidekaphobia, your upkeep.  EXPECT: pick a mode; any player at exactly 13 life is flagged to lose,
+        then everyone gains / loses 1.
+[ ] C7. Fblthp, Impossibly Lost: "if your library has no cards in it, you win" is BY HAND (check it yourself).
+[ ] C8. Doomsday: BY HAND (pick five cards, exile the rest, lose half your life).
+
+
+=====================================================================
+PART D - SPELLS
+=====================================================================
+[ ] D1. Brainstorm.  EXPECT: draw 3, then you pick 2 cards from your hand to put on top.
+[ ] D2. Ponder.  EXPECT: draw a card; chat tells you to look at the top three and put them back (and shuffle
+        if you want) by hand.
+[ ] D3. Rhystic Study, an opponent casts a spell.
+        EXPECT: the OPPONENT gets "PAY {1} / DON'T PAY". DON'T PAY -> you get "DRAW / NO".
+[ ] D4. Temporal Trespass.  EXPECT: you get an extra turn after this one (chat says so).
+[ ] D5. Karn's Temporal Sundering.  EXPECT: pick who takes the extra turn, then you may bounce a nonland permanent.
+[ ] D6. Counterspell / Mana Drain / Swan Song / An Offer You Can't Refuse.
+        EXPECT: counters work; Mana Drain gives the colorless at your next main phase; Swan Song gives the caster a
+        2/2 flying Bird; An Offer gives the caster two Treasures.
+[ ] D7. Cyclonic Rift (normal).  EXPECT: bounce one nonland permanent you don't control.
+        Overloaded: BY HAND (bounce all of them yourself).
+[ ] D8. Damnation.  EXPECT: all creatures destroyed (indestructible stay).
+[ ] D9. Snap.  EXPECT: bounce a creature; untapping two lands is BY HAND.
+[ ] D10. Dark Ritual.  EXPECT: {B}{B}{B} in your mana pool.
+[ ] D11. Demonic Tutor -> hand. Vampiric Tutor -> lose 2, card goes on top after the shuffle.
+BY HAND: Consign // Oblivion, Sink into Stupor, Doomsday, Deadly Rollick's free cast, Draco's cost and upkeep,
+Shadow of Mortality's cost, Tree of Perdition (swap life and toughness), Smoke Bomb's "can't be blocked" target,
+Smoke Shroud returning, Cunning Evasion, Hydroelectric Specimen, Scroll Rack, Sensei's Divining Top {1},
+Samut's split second, Yuriko, Hope from the Shadows' first mode (-X/-0).
+
+
+=====================================================================
+PART E - ENGINES AND MANA
+=====================================================================
+[ ] E1. The One Ring: {T}.  EXPECT: burden counter + draw that many. Upkeep: lose 1 per burden counter.
+[ ] E2. Sensei's Divining Top: {T}.  EXPECT: draw a card. Putting the Top on top of your library is BY HAND.
+[ ] E3. Lotus Petal, Sol Ring, Arcane Signet, Thought Vessel.  EXPECT: mana goes in the pool.
+[ ] E4. Illvoi Galeblade: {2}, sacrifice.  EXPECT: it's sacrificed and you draw.
+[ ] E5. Inkrise Infiltrator: {3}{B}.  EXPECT: +2/+2 until end of turn on the card.
+[ ] E6. Azra Smokeshaper enters.  EXPECT: pick a creature you control: indestructible until end of turn.
+[ ] E7. Fourth Bridge Prowler enters.  EXPECT: you may give a creature -1/-1 until end of turn.
+[ ] E8. Splinter, Hamato Yoshi out.  EXPECT: OTHER Ninjas show "static +1/+1"; Changeling Outcast too.
+
+
+=====================================================================
+PART F - STRESS TEST
+=====================================================================
+[ ] F1. DO: attack with three creatures; ninjutsu twice in the same block step (two different unblocked attackers).
+        EXPECT: both ninjas end up attacking, both returned creatures are in hand, the damage panel lists the two
+        ninjas, and all their triggers happen. No errors.
+[ ] F2. DO: Mist-Syndicate Naga hits several turns in a row (copies make copies).  EXPECT: no lag build-up.
+[ ] F3. After all of the above: type !errors.  EXPECT: no errors listed. If there are any, copy them all here.
+
+
+=====================================================================
+NOTES / BUGS (write here)
+=====================================================================
+Card:
+What I did:
+What I expected:
+What happened:
+Chat lines before and after:
+

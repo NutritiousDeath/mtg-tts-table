@@ -303,12 +303,17 @@ function Library.draw(color, n, onDone)
     return 0
   end
   local lib = Library.find(color)
+  local count = lib == nil and 0 or (lib.type == "Deck" and #lib.getObjects() or 1)
+  if n > count and GameState.data and GameState.data.started then
+    -- Drawing from an empty library: Laboratory Maniac / Jace, Wielder of Mysteries win instead;
+    -- otherwise the player loses (state-based action, flagged on their tracker to confirm).
+    Library.emptyDraw(color)
+  end
   if lib == nil then
     broadcastToColor("Your library is empty.", color, { 1, 0.6, 0.2 })
     if onDone then onDone(0) end
     return 0
   end
-  local count = lib.type == "Deck" and #lib.getObjects() or 1
   n = math.min(n, count)
   if lib.type == "Deck" then
     lib.deal(n, color)
@@ -318,6 +323,28 @@ function Library.draw(color, n, onDone)
   end
   if onDone then onDone(n) end
   return n
+end
+
+-- "If you would draw a card while your library has no cards in it, you win the game instead."
+function Library.emptyDraw(color)
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" and not obj.isDestroyed() then
+      local loc = regionOf(obj)
+      if loc.seat == color and (loc.region == "battlefield" or loc.region == "lands") then
+        local ol = ""
+        pcall(function() ol = tostring(CardData.get(obj).oracle or ""):lower() end)
+        if ol:find("would draw a card while your library has no cards in it, you win the game instead", 1, true) then
+          broadcastToAll(color .. " WINS THE GAME (" .. obj.getName() .. ": drew from an empty library)!", { 1, 0.85, 0.2 })
+          printToAll("MTG > " .. color .. " wins the game (" .. obj.getName() .. ").", { 0.55, 0.9, 0.6 })
+          return true
+        end
+      end
+    end
+  end
+  if Trackers and Trackers.flagLoss then
+    Trackers.flagLoss(color, "drawn from an empty library")
+  end
+  return false
 end
 
 -- Put a card onto the seat's graveyard pile (it lands there first, then

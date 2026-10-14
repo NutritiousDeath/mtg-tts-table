@@ -154,6 +154,32 @@ function Effects.parse(text, sourceName)
     if tt == "you lose 1 life for each burden counter on ~." then
       return only({ { what = "loseBurden", who = "you", n = 1 } })
     end
+    -- Yuriko, the Tiger's Shadow.
+    if tt == "reveal the top card of your library and put that card into your hand. each opponent loses life equal to that card's mana value." then
+      return only({ { what = "yuriko", who = "you", n = 1 } })
+    end
+    -- Doctor Doom, Unrivaled: "You draw a card and lose 1 life. Then if your library has no cards in it, you win the game."
+    if tt == "you draw a card and lose 1 life. then if your library has no cards in it, you win the game." then
+      return only({ { what = "draw", who = "you", n = 1 }, { what = "lose", who = "you", n = 1 }, { what = "winIfEmpty", who = "you", n = 1 } })
+    end
+    -- Triskaidekaphile (at the beginning of your upkeep).
+    if tt == "if you have exactly thirteen cards in your hand, you win the game." then
+      return only({ { what = "winIfHand", who = "you", n = 13 } })
+    end
+    -- Rhystic Study: "you may draw a card unless that player pays {1}."
+    local unlessPay = tt:match("^you may draw a card unless that player pays (%b{})%.$")
+    if unlessPay then
+      return only({ { what = "rhystic", who = "you", n = 1, cost = unlessPay:upper() } })
+    end
+    -- Temporal Trespass and friends: "Take an extra turn after this one."
+    if tt:find("^take an extra turn after this one%.") then
+      return only({ { what = "extraTurn", who = "you", n = 1 } })
+    end
+    -- Karn's Temporal Sundering.
+    if tt:find("target player takes an extra turn after this one. return up to one target nonland permanent to its owner's hand.", 1, true) then
+      return only({ { what = "extraTurn", who = "you", n = 1, ask = true },
+        { what = "bounce", who = "you", n = 1, type = "nonland", mine = false, other = false, theirs = false } })
+    end
     -- Heroic Intervention.
     if tt == "permanents you control gain hexproof and indestructible until end of turn." then
       return only({ { what = "teamKw", who = "you", n = 1, kws = { "hexproof", "indestructible" } } })
@@ -1065,6 +1091,22 @@ function Effects.parse(text, sourceName)
       add("draw", "you", num(word))
     end
   end
+  -- Brainstorm: "then put two cards from your hand on top of your library in any order".
+  do
+    local hw = t:match("put (%w+) cards from your hand on top of your library")
+    if hw and num(hw) then
+      table.insert(actions, { what = "handToTop", who = "you", n = num(hw) })
+    end
+  end
+  -- Ponder / Sensei's Divining Top: rearranging the top cards is done by hand.
+  if t:find("then put them back in any order", 1, true) then
+    table.insert(notes, "look at the top cards and put them back in the order you want (right-click your library > Search)"
+      .. (t:find("you may shuffle", 1, true) and ", then shuffle if you want" or ""))
+  end
+  -- Mistblade Shinobi: "return target creature that player controls to its owner's hand".
+  if t:find("return target creature that player controls to its owner's hand", 1, true) then
+    table.insert(actions, { what = "bounce", who = "you", n = 1, type = "creature", mine = false, other = false, theirs = true })
+  end
   -- "search your library for a basic land card, put it onto the battlefield":
   -- opens the library search with the card type filled in.
   local a = t:find("search your library for ", 1, true)
@@ -1862,6 +1904,18 @@ local function describe(a, target, controller)
     return "a burden counter, then draw a card for each burden counter"
   elseif a.what == "loseBurden" then
     return "lose 1 life for each burden counter"
+  elseif a.what == "handToTop" then
+    return "put " .. a.n .. " cards from your hand on top of your library"
+  elseif a.what == "winIfHand" then
+    return "you win with exactly " .. a.n .. " cards in hand"
+  elseif a.what == "rhystic" then
+    return "you may draw a card unless that player pays " .. tostring(a.cost)
+  elseif a.what == "extraTurn" then
+    return (a.ask and "target player takes" or "you take") .. " an extra turn after this one"
+  elseif a.what == "yuriko" then
+    return "reveal the top card, put it into your hand; each opponent loses life equal to its mana value"
+  elseif a.what == "winIfEmpty" then
+    return "you win if your library is empty"
   elseif a.what == "teamKw" then
     return "your permanents gain " .. table.concat(a.kws, " and ") .. " until end of turn"
   elseif a.what == "kwTargetPerm" then
@@ -2233,6 +2287,65 @@ local function apply(it, plan, target)
             end)
         elseif a.what == "bullies" then
           Effects.bullies(seat, it)
+        elseif a.what == "handToTop" then
+          Actions.forceDiscard(seat, a.n, it.name, nil, "top")
+        elseif a.what == "winIfHand" then
+          local okh, hand = pcall(function() return Player[seat].getHandObjects() end)
+          local n = okh and hand and #hand or 0
+          if n == a.n then
+            broadcastToAll(seat .. " WINS THE GAME (" .. it.name .. ": exactly " .. a.n .. " cards in hand)!", { 1, 0.85, 0.2 })
+            printToAll("MTG > " .. seat .. " wins the game (" .. it.name .. ").", GOOD)
+          else
+            printToAll("MTG > " .. it.name .. ": " .. seat .. " has " .. n .. " cards in hand (needs exactly " .. a.n .. ").", INFO)
+          end
+        elseif a.what == "rhystic" then
+          local caster = it.that
+          if caster == nil or caster == seat then
+            broadcastToColor(it.name .. ": resolve it by hand (couldn't tell who cast the spell).", seat, INFO)
+          else
+            Effects.askChoice(caster, it.name .. " (" .. seat .. ")", "Pay " .. a.cost .. "? If you don't, " .. seat .. " may draw a card.",
+              { { label = "PAY " .. a.cost, value = true }, { label = "DON'T PAY", value = false } }, function(paid)
+                if paid then
+                  printToAll("MTG > " .. caster .. " pays " .. a.cost .. " for " .. it.name .. ".", INFO)
+                  if ManaChips and ManaChips.pay then
+                    ManaChips.pay(caster, a.cost, it.name)
+                  end
+                else
+                  printToAll("MTG > " .. caster .. " doesn't pay: " .. seat .. " may draw (" .. it.name .. ").", INFO)
+                  Effects.askChoice(seat, it.name .. ": draw a card?", caster .. " didn't pay.",
+                    { { label = "DRAW", value = true }, { label = "NO", value = false } }, function(yes)
+                      if yes then
+                        Actions.draw(seat, 1, it.name)
+                      end
+                    end)
+                end
+              end)
+          end
+        elseif a.what == "extraTurn" then
+          if a.ask then
+            local choices = {}
+            for _, c in ipairs(players()) do
+              table.insert(choices, { label = string.upper(c), value = c })
+            end
+            Effects.askChoice(seat, it.name .. ": who takes an extra turn?", "Target player takes an extra turn after this one.", choices, function(who)
+              if who then
+                Turns.addExtraTurn(who)
+              end
+            end)
+          else
+            Turns.addExtraTurn(seat)
+          end
+        elseif a.what == "yuriko" then
+          Effects.yurikoReveal(seat, it.name)
+        elseif a.what == "winIfEmpty" then
+          Wait.time(function()
+            if Library.count(seat) == 0 then
+              broadcastToAll(seat .. " WINS THE GAME (" .. it.name .. ": library is empty)!", { 1, 0.85, 0.2 })
+              printToAll("MTG > " .. seat .. " wins the game (" .. it.name .. ").", GOOD)
+            else
+              printToAll("MTG > " .. it.name .. ": " .. seat .. "'s library isn't empty (" .. Library.count(seat) .. " left), no win.", INFO)
+            end
+          end, 1.2)
         elseif a.what == "oneRing" or a.what == "loseBurden" then
           -- Burden counters are the card's "Other" counters.
           local src = it.source and getObjectFromGUID(it.source)
@@ -4802,6 +4915,40 @@ function Effects.damageAll(seat, n, name)
     end)
 end
 
+-- Yuriko, the Tiger's Shadow: the top card is revealed and put into the hand (not drawn); each
+-- opponent loses life equal to its mana value.
+function Effects.yurikoReveal(seat, name)
+  local lib = Library.find(seat)
+  if lib == nil then
+    printToAll("MTG > " .. name .. ": " .. seat .. "'s library is empty, nothing is revealed.", INFO)
+    return
+  end
+  local entry
+  if lib.type == "Deck" then
+    entry = (lib.getData().ContainedObjects or {})[1]
+  else
+    entry = lib.getData()
+    entry.GUID = lib.getGUID()
+  end
+  local mv, cname = 0, entry and entry.Nickname or "a card"
+  pcall(function() mv = tonumber(JSON.decode(entry.GMNotes).cmc) or 0 end)
+  -- Revealed and put into the hand: not a draw (no draw triggers, no Notion Thief).
+  if entry and entry.GUID then
+    GameState.data.searched = GameState.data.searched or {}
+    GameState.data.searched[entry.GUID] = true
+  end
+  Library.draw(seat, 1)
+  broadcastToAll(name .. ": " .. seat .. " reveals " .. cname .. " (mana value " .. mv .. ") and puts it into their hand.", { 1, 0.85, 0.3 })
+  if mv > 0 then
+    for _, c in ipairs(players()) do
+      if c ~= seat then
+        Trackers.changeLife(c, -mv, name)
+      end
+    end
+    printToAll("MTG > " .. name .. ": each opponent loses " .. mv .. " life.", { 1, 0.5, 0.4 })
+  end
+end
+
 -- Leveler / Inverter of Truth: the whole library goes to exile (Inverter: face down).
 function Effects.exileLibrary(seat, faceDown, name)
   local lib = Library.find(seat)
@@ -5359,6 +5506,13 @@ function Effects.resolve(it)
   Effects.currentSource = it.source or it.card
   if it.copyOf then
     Effects.resolveCopy(it)
+    return
+  end
+  -- Ninjutsu resolving: the ninja enters tapped and attacking (combat.lua).
+  if it.ninjutsu and it.source then
+    if not (Combat and Combat.ninjutsuResolve and Combat.ninjutsuResolve(it.source)) then
+      broadcastToColor(it.name .. ": the card wasn't found - put it onto the battlefield tapped and attacking yourself.", it.controller, INFO)
+    end
     return
   end
   -- Bronze Bombshell: its controller (not its owner) sacrifices it and takes the damage.
