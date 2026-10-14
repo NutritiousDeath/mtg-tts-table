@@ -4325,6 +4325,31 @@ function Effects.chooseType(obj, seat)
   end)
 end
 
+-- "As this creature enters, choose a color" (Diamond Mare): the color is kept per card.
+function Effects.chosenColor(obj)
+  local c = GameState.data and GameState.data.chosenColor
+  return c and obj and c[obj.getGUID()] or nil
+end
+
+function Effects.chooseColor(obj, seat)
+  if obj == nil or obj.isDestroyed() then
+    return
+  end
+  local nm = obj.getName()
+  local choices = {}
+  for _, col in ipairs({ "White", "Blue", "Black", "Red", "Green" }) do
+    table.insert(choices, { label = string.upper(col), value = col })
+  end
+  Effects.askChoice(seat, nm .. ": choose a color", "Pick the color for " .. nm .. ".", choices, function(col)
+    if not col or obj.isDestroyed() then
+      return
+    end
+    GameState.data.chosenColor = GameState.data.chosenColor or {}
+    GameState.data.chosenColor[obj.getGUID()] = col
+    printToAll("MTG > " .. seat .. " chooses " .. col .. " for " .. nm .. ".", { 0.55, 0.9, 0.6 })
+  end)
+end
+
 Events.on("cardMoved", function(d)
   if d.card == nil or d.to == nil or (d.to.region ~= "battlefield" and d.to.region ~= "lands") or d.to.seat == nil then
     return
@@ -4339,6 +4364,12 @@ Events.on("cardMoved", function(d)
   local low = tostring(CardData.get(obj).oracle or ""):lower()
   if low:find("choose a creature type", 1, true) and low:find("enters", 1, true) and not Statics.chosenType(obj) then
     Effects.chooseType(obj, d.to.seat)
+  end
+  if low:find("enters, choose a color", 1, true) then
+    if GameState.data.chosenColor then
+      GameState.data.chosenColor[obj.getGUID()] = nil   -- a new object: choose again
+    end
+    Effects.chooseColor(obj, d.to.seat)
   end
 end)
 
@@ -4798,6 +4829,21 @@ function Effects.resolve(it)
   Effects.currentSource = it.source or it.card
   if it.copyOf then
     Effects.resolveCopy(it)
+    return
+  end
+  -- Storm: a copy of the spell for each spell cast before it this turn (triggers.lua counts them).
+  if it.trigger and tostring(it.text or ""):sub(1, 12) == "Storm: copy " and it.thatCard then
+    local spell = getObjectFromGUID(it.thatCard)
+    local n = tonumber(it.amount) or 0
+    if spell == nil or spell.isDestroyed() then
+      broadcastToColor(it.name .. ": the spell wasn't found - make the " .. n .. " copies by hand.", it.controller, INFO)
+    elseif n <= 0 then
+      printToAll("MTG > " .. it.name .. ": no spells were cast before it this turn, so no copies.", INFO)
+    else
+      for _ = 1, n do
+        Effects.copySpell(spell, it.controller, it.name)
+      end
+    end
     return
   end
   -- "Choose one —" with "• mode" lines: the controller picks a mode first.

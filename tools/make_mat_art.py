@@ -22,7 +22,8 @@ AREAS = {
     "command1": (4.2, 5.5, "COMMANDER", None, 2.4),
     "command2": (4.2, 5.5, "PARTNER|OR BACKGROUND", None, 2.4),
     "battlefield": (39, 15.65, "BATTLEFIELD", "battlefield.png", 3.4),
-    "lands": (39, 5.5, "LANDS", "lands.png", 2.6),
+    "lands": (33, 5.5, "LANDS", "lands.png", 2.6),
+    "attractions": (5, 5.5, "ATTRACTIONS", "attractions.png", 2.6),
     "library": (6, 6.5, "LIBRARY", "library.png", 2.6),
     "graveyard": (6, 6.5, "GRAVEYARD", "graveyard.png", 2.6),
     "exile": (6, 6.5, "EXILE", "exile.png", 2.6),
@@ -196,9 +197,15 @@ def build_turnstrip():
 
 
 if __name__ == "__main__":
-    print(build_turnstrip())
+    import sys
+    # "python tools/make_mat_art.py lands attractions" rebuilds only those areas.
+    only = sys.argv[1:]
+    if not only:
+        print(build_turnstrip())
     for color in SEAT_RGB:
         for area in AREAS:
-            print(build(area, color))
-        for name in ACTIONS:
-            print(build_action(name, color))
+            if not only or area in only:
+                print(build(area, color))
+        if not only:
+            for name in ACTIONS:
+                print(build_action(name, color))

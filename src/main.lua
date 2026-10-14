@@ -113,7 +113,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.63 (Zoo fixes: Mox, Pod, Eldritch, GSZ, Finale, Shared Summons, Crop Rotation, search scroll, mana tile, real table flip)"
+SCRIPT_VERSION = "1.64 (playtest fixes: counters panel, card labels, combat glow, BLOCKS DONE, summoning sickness, tokens, storm, anthems, attractions)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -281,6 +281,26 @@ function onObjectSearchEnd(obj, playerColor)
         { 0.75, 0.8, 0.9 })
     end
   end)
+end
+
+-- A token never joins a library, graveyard or exile pile: when it would (dropped on the graveyard, or
+-- dying in combat), it stays a loose card for a moment so "dies" triggers see it, then it's removed
+-- (combat.lua Combat.tokenGone), as tokens cease to exist outside the battlefield.
+function tryObjectEnterContainer(container, obj)
+  local ok, res = pcall(function()
+    if obj == nil or obj.type ~= "Card" or not obj.hasTag("Token") or container == nil then
+      return true
+    end
+    local r = Zones.regionAt(container.getPosition()).region
+    if r == "graveyard" or r == "exile" or r == "library" then
+      return false
+    end
+    return true
+  end)
+  if not ok then
+    return true
+  end
+  return res
 end
 
 function onObjectEnterContainer(container, obj)

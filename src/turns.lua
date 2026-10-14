@@ -245,6 +245,9 @@ function Turns.beginTurn(seat, number, newRound)
     t.number = (t.number or 0) + 1
   end
   t.taken = (t.taken or 0) + 1   -- turns taken in the game, by anyone
+  -- When each seat's latest turn began: summoning sickness lasts until then (combat.lua isSick).
+  GameState.data.turnStartOf = GameState.data.turnStartOf or {}
+  GameState.data.turnStartOf[seat] = t.taken
   t.stepIndex = 1
   t.pending = nil
   t.autoThrough = nil
@@ -819,6 +822,7 @@ Events.on("gameStarted", function(d)
   t.startingSeat = d.first
   t.extraTurns, t.extraCombats, t.reversed, t.pending = {}, 0, false, nil
   t.taken = 0
+  GameState.data.turnStartOf = {}
   Turns.beginTurn(d.first, 1)
 end)
 

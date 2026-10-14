@@ -207,9 +207,34 @@ end
 local LABEL_Z = -0.75
 local LABEL_Y = 0.25
 local LABEL_FONT = 250
-local KW_FONT = 120      -- keyword list: smaller, so "indestructible, first strike" fits on the card
-local KW_WRAP = 18
+local INFO_FONT = 115    -- the smaller info label: breakdown, keywords, equipment
+local INFO_WRAP = 19     -- characters per line that fit across the card at INFO_FONT
 
+local function sgn(n)
+  return (n >= 0 and "+" or "") .. n
+end
+
+-- Split text into lines of at most `n` characters, breaking at spaces.
+local function wrap(text, n, out)
+  local cur = ""
+  for word in tostring(text):gmatch("%S+") do
+    if cur == "" then
+      cur = word
+    elseif #cur + 1 + #word <= n then
+      cur = cur .. " " .. word
+    else
+      table.insert(out, cur)
+      cur = word
+    end
+  end
+  if cur ~= "" then
+    table.insert(out, cur)
+  end
+end
+
+-- Two labels on the card, both inside its width:
+--   big:   the creature's power/toughness now (when anything changes it), loyalty, other counters
+--   small: where the change comes from, keywords it was given, equipment, protection, badges
 function Counters.render(obj)
   if not isCard(obj) then
     return
@@ -217,79 +242,102 @@ function Counters.render(obj)
   obj.clearButtons()
   if Library and Library.decorateRevealed then Library.decorateRevealed(obj) end
   local c = Counters.get(obj)
-  -- Each counter type is two short lines (name over number) so the text can
-  -- be large and still fit inside the card's width.
-  local lines = {}
-  local bonus = c.plus - c.minus
-  if bonus ~= 0 then
-    local sign = bonus > 0 and "+" or ""
-    table.insert(lines, sign .. bonus .. "/" .. sign .. bonus)
-  end
-  if c.pc ~= 0 or c.tc ~= 0 then
-    table.insert(lines, "+" .. c.pc .. "/+" .. c.tc .. " (ctr)")
-  end
-  if c.tp ~= 0 or c.tt ~= 0 then
-    local function sg(n)
-      return (n >= 0 and "+" or "") .. n
-    end
-    table.insert(lines, sg(c.tp) .. "/" .. sg(c.tt) .. " (turn)")
+  local big, info = {}, {}
+  local pileBadge = Pile and Pile.badge and Pile.badge(obj)
+  if pileBadge then
+    table.insert(big, pileBadge)
   end
   local eqP, eqT = 0, 0
   if Equip and Equip.bonus then
     eqP, eqT = Equip.bonus(obj)
   end
-  if eqP ~= 0 or eqT ~= 0 then
-    local function sg2(n)
-      return (n >= 0 and "+" or "") .. n
-    end
-    table.insert(lines, sg2(eqP) .. "/" .. sg2(eqT) .. " (equip)")
+  local sP, sT = 0, 0
+  if Statics and Statics.bonus then
+    sP, sT = Statics.bonus(obj)
   end
-  if bonus ~= 0 or c.pc ~= 0 or c.tc ~= 0 or c.tp ~= 0 or c.tt ~= 0 or eqP ~= 0 or eqT ~= 0 then
+  -- Where the change comes from, one short piece each.
+  local parts = {}
+  if c.plus > 0 then
+    table.insert(parts, c.plus .. "x +1/+1")
+  end
+  if c.minus > 0 then
+    table.insert(parts, c.minus .. "x -1/-1")
+  end
+  if c.pc ~= 0 then
+    table.insert(parts, c.pc .. "x +1/+0")
+  end
+  if c.tc ~= 0 then
+    table.insert(parts, c.tc .. "x +0/+1")
+  end
+  if c.tp ~= 0 or c.tt ~= 0 then
+    table.insert(parts, "turn " .. sgn(c.tp) .. "/" .. sgn(c.tt))
+  end
+  if eqP ~= 0 or eqT ~= 0 then
+    table.insert(parts, "gear " .. sgn(eqP) .. "/" .. sgn(eqT))
+  end
+  if sP ~= 0 or sT ~= 0 then
+    table.insert(parts, "static " .. sgn(sP) .. "/" .. sgn(sT))
+  end
+  if #parts > 0 then
     local st = Counters.stats(obj)
     if type(st.power) == "number" and type(st.toughness) == "number" then
-      table.insert(lines, st.power .. "/" .. st.toughness)
+      table.insert(big, st.power .. "/" .. st.toughness)
     end
+    wrap(table.concat(parts, " | "), INFO_WRAP, info)
   end
-  -- Keywords gained until end of turn, and from attached equipment.
-  local kws = Counters.tempKeywords(obj)
-  if Equip and Equip.keywordList then
-    for _, k in ipairs(Equip.keywordList(obj)) do
+  -- Planeswalkers on the battlefield show loyalty on their loyalty box (walkers.lua) instead.
+  if c.loyalty ~= 0 and not (Walkers and Walkers.handles(obj)) then
+    table.insert(big, "LOYALTY " .. c.loyalty)
+  end
+  if c.other ~= 0 then
+    table.insert(big, c.other .. (c.other == 1 and " COUNTER" or " COUNTERS"))
+  end
+  -- Keywords gained until end of turn, from equipment and from other permanents (Sliver lords...).
+  local kws, seenK = {}, {}
+  local function addKw(k)
+    if k and not seenK[k] then
+      seenK[k] = true
       table.insert(kws, k)
     end
   end
-  -- Keywords get their own smaller label (below), wrapped so a long list stays on the card.
+  for _, k in ipairs(Counters.tempKeywords(obj)) do
+    addKw(k)
+  end
+  if Equip and Equip.keywordList then
+    for _, k in ipairs(Equip.keywordList(obj)) do
+      addKw(k)
+    end
+  end
+  if #kws > 0 then
+    wrap(table.concat(kws, ", "), INFO_WRAP, info)
+  end
   local pro = Equip and Equip.protectionOf and Equip.protectionOf(obj) or {}
   if #pro > 0 then
-    table.insert(lines, "PRO " .. table.concat(pro, ", "))
+    wrap("protection from " .. table.concat(pro, ", "), INFO_WRAP, info)
+  end
+  -- Equipment and Auras: one name per line, so they can be read.
+  if Equip and Equip.hostOf and Equip.hostOf(obj) then
+    table.insert(info, "attached to:")
+    wrap(tostring(Equip.hostOf(obj).getName()), INFO_WRAP, info)
+  elseif Equip and Equip.attachments then
+    local list = Equip.attachments(obj)
+    if #list > 0 then
+      table.insert(info, "equipped / enchanted:")
+      for _, a in ipairs(list) do
+        table.insert(info, "- " .. tostring(a.getName()):sub(1, INFO_WRAP - 2))
+      end
+    end
   end
   local ringBadge = Ring and Ring.badge and Ring.badge(obj)
   if ringBadge then
-    table.insert(lines, ringBadge)
-  end
-  local pileBadge = Pile and Pile.badge and Pile.badge(obj)
-  if pileBadge then
-    table.insert(lines, 1, pileBadge)
+    wrap(ringBadge, INFO_WRAP, info)
   end
   local sbBadge = Soulbond and Soulbond.badge and Soulbond.badge(obj)
   if sbBadge then
-    table.insert(lines, sbBadge)
-  end
-  local badge = Equip and Equip.badge and Equip.badge(obj)
-  if badge then
-    table.insert(lines, badge)
-  end
-  -- Planeswalkers on the battlefield show loyalty on their loyalty box
-  -- (walkers.lua) instead.
-  if c.loyalty ~= 0 and not (Walkers and Walkers.handles(obj)) then
-    table.insert(lines, "Loyalty")
-    table.insert(lines, tostring(c.loyalty))
-  end
-  if c.other ~= 0 then
-    table.insert(lines, "Counters")
-    table.insert(lines, tostring(c.other))
+    wrap(sbBadge, INFO_WRAP, info)
   end
   if Actions and Actions.skipsUntap and Actions.skipsUntap(obj) then
-    table.insert(lines, "NO UNTAP")
+    table.insert(info, "DOESN'T UNTAP NEXT")
   end
   if Counters.goadedBy(obj) then
     -- GOADED badge across the top of the card.
@@ -305,14 +353,14 @@ function Counters.render(obj)
       color = { 0.85, 0.3, 0.1, 0.92 },
     })
   end
-  -- Summoning sickness: an animated "Zzz" badge (see Counters.animate).
+  -- Summoning sickness: a "Zzz" badge (see Counters.animate).
   sickIndex[obj.getGUID()] = nil
   if Combat and Combat.isSick and Combat.isSick(obj) then
     obj.createButton({
       click_function = "counters_noop",
       function_owner = Global,
       label = "Zzz",
-      tooltip = "Summoning sick: came in this turn, can't attack or use {T} abilities until its controller's next turn (unless it has haste).",
+      tooltip = "Summoning sick: can't attack or use {T} abilities until its controller's next turn starts (unless it has haste).",
       position = { 0.55, 0.3, 1.25 },
       rotation = { 0, 0, 0 },
       width = 520, height = 260, font_size = 190,
@@ -321,65 +369,44 @@ function Counters.render(obj)
     })
     sickIndex[obj.getGUID()] = #obj.getButtons() - 1
   end
-  local mainH = 0
-  if #lines > 0 then
-    mainH = 110 + math.floor(LABEL_FONT * 1.15) * #lines
+  local bigH = 0
+  if #big > 0 then
+    bigH = 90 + math.floor(LABEL_FONT * 1.15) * #big
     obj.createButton({
-    click_function = "counters_noop",
-    function_owner = Global,
-    label = table.concat(lines, "\n"),
-    tooltip = "Counters (right-click the card to change)",
-    position = { 0, LABEL_Y, LABEL_Z },
-    rotation = { 0, 0, 0 },
-    -- A real size: zero-size "label only" buttons weren't drawn in TTS.
-    -- Narrower than the card (about 1050 wide in button units) so the
-    -- label stays inside it.
-    width = 880,
-    height = mainH,
-    font_size = LABEL_FONT,
-    font_color = { 1, 1, 1 },
-    color = { 0, 0, 0, 0.8 },
-  })
+      click_function = "counters_noop",
+      function_owner = Global,
+      label = table.concat(big, "\n"),
+      tooltip = "Right-click the card > Counters... to change counters",
+      position = { 0, LABEL_Y, LABEL_Z },
+      rotation = { 0, 0, 0 },
+      -- A real size: zero-size "label only" buttons weren't drawn in TTS.
+      -- Narrower than the card (about 1050 wide in button units) so the label stays inside it.
+      width = 880,
+      height = bigH,
+      font_size = LABEL_FONT,
+      font_color = { 1, 1, 1 },
+      color = { 0, 0, 0, 0.8 },
+    })
   end
-  if #kws > 0 then
-    -- Wrap at about 18 characters a line: the most that fits across the card at this size.
-    local kwLines, cur, dup = {}, "", {}
-    for _, k in ipairs(kws) do
-      if dup[k] then
-        k = nil
-      end
-      if k then
-      dup[k] = true
-      local piece = (cur == "") and k or (cur .. ", " .. k)
-      if cur ~= "" and #piece > KW_WRAP then
-        table.insert(kwLines, cur .. ",")
-        cur = k
-      else
-        cur = piece
-      end
-      end
-    end
-    if cur ~= "" then
-      table.insert(kwLines, cur)
-    end
-    local kwH = 60 + math.floor(KW_FONT * 1.15) * #kwLines
-    -- Under the counters label when there is one (button units are about 500 to one card unit).
+  if #info > 0 then
+    local infoH = 60 + math.floor(INFO_FONT * 1.15) * #info
+    -- Under the big label when there is one (button units are about 500 to one card unit).
     local z = LABEL_Z
-    if mainH > 0 then
-      z = LABEL_Z + (mainH + kwH) / 1000 + 0.04
+    if bigH > 0 then
+      z = LABEL_Z + (bigH + infoH) / 1000 + 0.04
     end
     obj.createButton({
       click_function = "counters_noop",
       function_owner = Global,
-      label = table.concat(kwLines, "\n"),
-      tooltip = "Keywords it has from other cards, equipment, or until end of turn",
+      label = table.concat(info, "\n"),
+      tooltip = "Where its numbers come from, keywords it was given, and what's attached",
       position = { 0, LABEL_Y, z },
       rotation = { 0, 0, 0 },
       width = 900,
-      height = kwH,
-      font_size = KW_FONT,
+      height = infoH,
+      font_size = INFO_FONT,
       font_color = { 0.85, 0.95, 1 },
-      color = { 0, 0, 0, 0.8 },
+      color = { 0, 0, 0, 0.82 },
     })
   end
   Counters.decorate(obj)
@@ -726,32 +753,9 @@ function Counters.setup(obj)
   if onField and Soulbond and Soulbond.addMenu then Soulbond.addMenu(obj) end
   if onField and Pile and Pile.addMenu then Pile.addMenu(obj) end
   if onField then
-    for _, item in ipairs(menuFor(obj)) do
-      obj.addContextMenuItem(item[1], function(playerColor)
-        if Pile then Pile.touch(obj) end
-        Counters.change(obj, item[2], item[3], playerColor)
-      end, true)
-    end
-    obj.addContextMenuItem("Clear counters", function() if Pile then Pile.touch(obj) end Counters.clear(obj) end)
-    if cardData(obj).typeLine and cardData(obj).typeLine:find("Creature", 1, true) then
-      obj.addContextMenuItem("Goad / remove goad", function(playerColor)
-        if Pile then Pile.touch(obj) end
-        if Counters.goadedBy(obj) then
-          Counters.setGoad(obj, nil)
-          printToAll("MTG > " .. obj.getName() .. " isn't goaded any more.", { 0.75, 0.8, 0.9 })
-        else
-          Counters.setGoad(obj, playerColor)
-          printToAll("MTG > " .. obj.getName() .. " is goaded by " .. tostring(playerColor)
-            .. " (attacks each combat if able, and a player other than them if able).", { 1, 0.6, 0.2 })
-        end
-      end)
-    end
-    obj.addContextMenuItem("Skip next untap / untap normally", function(playerColor)
-      if Pile then Pile.touch(obj) end
-      local on = not Actions.skipsUntap(obj)
-      Actions.setSkipUntap(obj, on, playerColor)
-      printToAll("MTG > " .. obj.getName() .. (on and " won't untap in its next untap step." or " untaps normally again."),
-        { 0.75, 0.8, 0.9 })
+    -- One item for counters, goad, untap, clone and delete: the panel (Counters.openPanel) keeps the menu short.
+    obj.addContextMenuItem("Counters...", function(playerColor)
+      Counters.openPanel(obj, playerColor)
     end)
   end
   if Stack and (onField or region == "hand" or region == "graveyard" or region == "exile" or region == "command") then
@@ -807,17 +811,190 @@ function Counters.setup(obj)
       end)
     end
   end
-  -- Anyone can delete a card this way (TTS normally needs a promoted player).
-  obj.addContextMenuItem("Delete card", function(playerColor) Counters.deleteCard(obj, playerColor) end)
+  -- Anyone can delete a card this way (TTS normally needs a promoted player). On the battlefield it's in Counters...
+  if not onField then
+    obj.addContextMenuItem("Delete card", function(playerColor) Counters.deleteCard(obj, playerColor) end)
+  end
   Counters.render(obj)
+end
+
+---------------------------------------------------------------------------
+-- Counters panel: right-click a permanent > Counters... One panel per seat, only that player sees it.
+---------------------------------------------------------------------------
+
+local PANEL_ROWS = {
+  { "plus", "+1/+1" }, { "minus", "-1/-1" }, { "pc", "+1/+0" }, { "tc", "+0/+1" },
+  { "loyalty", "Loyalty" }, { "other", "Other" },
+}
+local panelTarget = {}   -- [seat] = guid of the card the panel is working on
+
+local function panelObj(color)
+  local g = panelTarget[color]
+  local obj = g and getObjectFromGUID(g)
+  if obj == nil or obj.isDestroyed() then
+    return nil
+  end
+  return obj
+end
+
+function Counters.refreshPanel(color)
+  local obj = panelObj(color)
+  if obj == nil then
+    UI.setAttribute("cardPanel_" .. color, "active", "false")
+    panelTarget[color] = nil
+    return
+  end
+  local c = Counters.get(obj)
+  UI.setValue("cpTitle_" .. color, tostring(obj.getName()):sub(1, 30))
+  for _, r in ipairs(PANEL_ROWS) do
+    UI.setValue("cpVal_" .. color .. "_" .. r[1], tostring(c[r[1]] or 0))
+  end
+  UI.setValue("cpGoad_" .. color, Counters.goadedBy(obj) and "UN-GOAD" or "GOAD")
+  UI.setValue("cpUntap_" .. color, (Actions and Actions.skipsUntap and Actions.skipsUntap(obj)) and "UNTAP NORMALLY" or "SKIP NEXT UNTAP")
+end
+
+function Counters.openPanel(obj, color)
+  if obj == nil or obj.isDestroyed() or color == nil or color == "Grey" or color == "Black" then
+    return
+  end
+  if Pile then Pile.touch(obj) end
+  panelTarget[color] = obj.getGUID()
+  UI.setAttribute("cardPanel_" .. color, "active", "true")
+  Counters.refreshPanel(color)
+end
+
+function ui_cardPanel(player, arg)
+  local color, what = tostring(arg):match("^(%a+)_(.+)$")
+  if color == nil or player.color ~= color then
+    return
+  end
+  if what == "close" then
+    panelTarget[color] = nil
+    UI.setAttribute("cardPanel_" .. color, "active", "false")
+    return
+  end
+  local obj = panelObj(color)
+  if obj == nil then
+    Counters.refreshPanel(color)
+    return
+  end
+  local kind, dir = what:match("^(%a+)_(%a+)$")
+  if kind and (dir == "add" or dir == "sub") then
+    Counters.change(obj, kind, dir == "add" and 1 or -1, color)
+  elseif what == "clear" then
+    Counters.clear(obj)
+  elseif what == "goad" then
+    if Counters.goadedBy(obj) then
+      Counters.setGoad(obj, nil)
+      printToAll("MTG > " .. obj.getName() .. " isn't goaded any more.", { 0.75, 0.8, 0.9 })
+    else
+      Counters.setGoad(obj, color)
+      printToAll("MTG > " .. obj.getName() .. " is goaded by " .. color
+        .. " (attacks each combat if able, and a player other than them if able).", { 1, 0.6, 0.2 })
+    end
+  elseif what == "untap" then
+    local on = not Actions.skipsUntap(obj)
+    Actions.setSkipUntap(obj, on, color)
+    printToAll("MTG > " .. obj.getName() .. (on and " won't untap in its next untap step." or " untaps normally again."),
+      { 0.75, 0.8, 0.9 })
+  elseif what == "clone" then
+    Counters.cloneObject(obj, color)
+  elseif what == "delete" then
+    panelTarget[color] = nil
+    UI.setAttribute("cardPanel_" .. color, "active", "false")
+    Counters.deleteCard(obj, color)
+    return
+  end
+  Counters.refreshPanel(color)
+end
+
+function Counters.xml()
+  local parts = {}
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    local rows = {}
+    for _, r in ipairs(PANEL_ROWS) do
+      table.insert(rows, ([[
+    <HorizontalLayout preferredHeight="30" spacing="6" childForceExpandWidth="false">
+      <Text fontSize="14" color="#E6F1FF" alignment="MiddleLeft" preferredWidth="96">%s</Text>
+      <Button onClick="ui_cardPanel(%s_%s_sub)" preferredWidth="40" fontStyle="Bold" fontSize="18" color="#3A1F2B">-</Button>
+      <Text id="cpVal_%s_%s" fontSize="17" fontStyle="Bold" color="#5AF0FF" preferredWidth="44">0</Text>
+      <Button onClick="ui_cardPanel(%s_%s_add)" preferredWidth="40" fontStyle="Bold" fontSize="18" color="#123A33">+</Button>
+    </HorizontalLayout>]]):format(r[2], c, r[1], c, r[1], c, r[1]))
+    end
+    table.insert(parts, ([[
+<Panel id="cardPanel_%s" visibility="%s" active="false" rectAlignment="MiddleRight" offsetXY="-30 40" width="280" height="430"
+       color="#0B0F17F5" outline="#5AF0FF" outlineSize="2 2" allowDragging="true" returnToOriginalPositionWhenReleased="false">
+  <VerticalLayout padding="12 12 10 10" spacing="5" childForceExpandHeight="false">
+    <Text id="cpTitle_%s" fontSize="15" fontStyle="Bold" color="#5AF0FF" preferredHeight="22">-</Text>
+%s
+    <HorizontalLayout preferredHeight="30" spacing="6">
+      <Button onClick="ui_cardPanel(%s_clear)" fontSize="12" fontStyle="Bold">CLEAR ALL</Button>
+      <Button id="cpGoad_%s" onClick="ui_cardPanel(%s_goad)" fontSize="12" fontStyle="Bold">GOAD</Button>
+    </HorizontalLayout>
+    <Button id="cpUntap_%s" onClick="ui_cardPanel(%s_untap)" preferredHeight="30" fontSize="12" fontStyle="Bold">SKIP NEXT UNTAP</Button>
+    <HorizontalLayout preferredHeight="30" spacing="6">
+      <Button onClick="ui_cardPanel(%s_clone)" fontSize="12" fontStyle="Bold" color="#1B3350">CLONE</Button>
+      <Button onClick="ui_cardPanel(%s_delete)" fontSize="12" fontStyle="Bold" color="#5A1020">DELETE</Button>
+      <Button onClick="ui_cardPanel(%s_close)" fontSize="12" fontStyle="Bold">CLOSE</Button>
+    </HorizontalLayout>
+  </VerticalLayout>
+</Panel>
+]]):format(c, c, c, table.concat(rows, "\n"), c, c, c, c, c, c, c, c))
+  end
+  return table.concat(parts)
+end
+
+-- Clone a card, token, die or other loose object for a player (TTS normally needs a promoted player).
+-- A cloned card is a fresh copy: no counters, untapped, beside the original.
+function Counters.cloneObject(obj, playerColor)
+  if obj == nil or obj.isDestroyed() then
+    return
+  end
+  if obj.getLock() and obj.type ~= "Card" then
+    broadcastToColor("That's part of the table: it can't be cloned.", playerColor, { 1, 0.6, 0.2 })
+    return
+  end
+  if obj.hasTag("StackAbility") then
+    broadcastToColor("Stack items can't be cloned (copy the spell or ability instead).", playerColor, { 1, 0.6, 0.2 })
+    return
+  end
+  local p = obj.getPosition()
+  local loc = Zones and Zones.regionAt(p)
+  local s = loc and loc.seat and TableSetup.seat(loc.seat)
+  local off = s and { x = s.right.x * 2.6, z = s.right.z * 2.6 } or { x = 2.6, z = 0 }
+  local copy = obj.clone({ position = { p.x + off.x, p.y + 1.5, p.z + off.z } })
+  if copy and obj.type == "Card" then
+    Wait.frames(function()
+      if copy and not copy.isDestroyed() then
+        copy.memo = ""
+        local r = copy.getRotation()
+        if s then
+          copy.setRotation({ r.x, s.yaw, r.z })
+        end
+        Counters.setup(copy)
+      end
+    end, 3)
+  end
+  printToAll("MTG > " .. tostring(playerColor) .. " cloned " .. tostring(obj.getName() ~= "" and obj.getName() or obj.type) .. ".",
+    { 0.75, 0.8, 0.9 })
 end
 
 -- Delete a card for a player (right-click "Delete card" or the hotkey).
 -- Done by the table's script, so it works without being promoted. Said in
 -- chat so everyone sees it.
 function Counters.deleteCard(obj, playerColor)
-  if obj == nil or obj.isDestroyed() or obj.type ~= "Card" then
+  if obj == nil or obj.isDestroyed() then
     return
+  end
+  -- Cards, tokens, dice and other loose pieces; never the table itself (locked) or a library / graveyard pile.
+  if obj.type ~= "Card" then
+    local region = Zones and Zones.regionAt(obj.getPosition()).region or ""
+    if obj.getLock() or obj.hasTag("StackAbility") or obj.hasTag("MatLabel")
+        or (obj.type == "Deck" and (region == "library" or region == "graveyard" or region == "exile")) then
+      broadcastToColor("That can't be deleted from here (it's part of the table or a library / graveyard pile).",
+        playerColor, { 1, 0.6, 0.2 })
+      return
+    end
   end
   printToAll("MTG > " .. tostring(playerColor) .. " deleted " .. obj.getName() .. ".", { 0.75, 0.8, 0.9 })
   if Zones and Zones.forget then
@@ -848,6 +1025,14 @@ function Counters.registerHotkeys()
   }
   addHotkey("MTG: delete card", function(playerColor, hovered)
     Counters.deleteCard(hovered, playerColor)
+  end)
+  addHotkey("MTG: clone", function(playerColor, hovered)
+    Counters.cloneObject(hovered, playerColor)
+  end)
+  addHotkey("MTG: counters panel", function(playerColor, hovered)
+    if hovered and hovered.type == "Card" then
+      Counters.openPanel(hovered, playerColor)
+    end
   end)
   for _, k in ipairs(keys) do
     addHotkey(k[1], function(playerColor, hovered)

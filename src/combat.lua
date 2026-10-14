@@ -398,62 +398,87 @@ end
 
 -- Draw this card's combat button (called from Counters.render, after it
 -- cleared the card's buttons and drew its counters).
+-- Cards the combat glow was put on, so only those lose it (other code uses highlights too).
+local glowing = {}
+
+local function glow(card, color)
+  local g = card.getGUID()
+  if color then
+    card.highlightOn(color)
+    glowing[g] = true
+  elseif glowing[g] then
+    card.highlightOff()
+    glowing[g] = nil
+  end
+end
+
+-- Combat shows as a colored glow around the card plus one slim strip along its bottom edge,
+-- so the rules text stays readable (the old box covered it).
 function Combat.decorate(card)
   local step = stepId()
   local c = GameState.data.combat
   if step == nil or c == nil or Faces.unknown(card) or not onField(card) then
+    glow(card, nil)
     return
   end
   if step ~= "attackers" and step ~= "blockers" and step ~= "damage" then
+    glow(card, nil)
     return
   end
   local guid = card.getGUID()
   local seat = controller(card)
-  local label, bg, tip
+  local label, bg, tip, fg, edge
   if c.attackers and c.attackers[guid] then
     local n = #(c.blockOrder[guid] or {})
-    label = "ATTACKING\n" .. targetLabel(c.attackers[guid])
+    label = "ATK > " .. tostring(targetLabel(c.attackers[guid])):sub(1, 12)
     if step ~= "attackers" and n > 0 then
       label = label .. "\nBLOCKED x" .. n
     end
-    bg = { 0.55, 0.06, 0.12, 0.92 }
+    bg = { 0.45, 0.04, 0.1, 0.78 }
+    edge = { 1, 0.2, 0.3 }
     tip = (step == "attackers" and not c.declared)
       and "Attacking. Click: next target. Right-click: don't attack."
       or "Attacking " .. targetLabel(c.attackers[guid])
   elseif c.blocks and c.blocks[guid] then
     local a = obj(c.blocks[guid])
-    label = "BLOCKING\n" .. short(a and a.getName())
+    label = "BLK > " .. short(a and a.getName()):sub(1, 12)
     if c.extra and c.extra[guid] and #c.extra[guid] > 0 then
       label = label .. " +" .. #c.extra[guid]
     end
-    bg = { 0.05, 0.3, 0.55, 0.92 }
+    bg = { 0.04, 0.22, 0.45, 0.78 }
+    edge = { 0.3, 0.65, 1 }
     tip = step == "blockers" and "Blocking. Click: next attacker. Right-click: not blocking." or "Blocking"
   elseif step == "attackers" and not c.declared and seat == turn().activeSeat
       and isCreature(card) and not isTapped(card) then
     label = "ATTACK?"
-    bg = { 0.08, 0.1, 0.14, 0.75 }
+    bg = { 0.08, 0.1, 0.14, 0.7 }
+    fg = { 1, 0.75, 0.78 }
     tip = "Click to attack (click again for the next target)."
   elseif step == "blockers" and seat ~= turn().activeSeat and isDefender(seat)
       and isCreature(card) and not isTapped(card) then
     label = "BLOCK?"
-    bg = { 0.08, 0.1, 0.14, 0.75 }
+    bg = { 0.08, 0.1, 0.14, 0.7 }
+    fg = { 0.75, 0.88, 1 }
     tip = "Click to block (click again for the next attacker)."
   end
+  glow(card, edge)
   if label == nil then
     return
   end
   local nLines = select(2, label:gsub("\n", "\n")) + 1
+  local h = 50 + 135 * nLines
   card.createButton({
     click_function = "combat_cardClick",
     function_owner = Global,
     label = label,
     tooltip = tip,
-    position = { 0, 0.3, 0.95 },
+    -- Along the bottom edge (grows upward), left of the power/toughness box.
+    position = { -0.2, 0.3, 1.36 - (h / 1000) },
     rotation = { 0, 0, 0 },
-    width = 900,
-    height = 60 + 175 * nLines,
-    font_size = 150,
-    font_color = { 1, 1, 1 },
+    width = 760,
+    height = h,
+    font_size = 110,
+    font_color = fg or { 1, 1, 1 },
     color = bg,
   })
 end
@@ -1046,6 +1071,22 @@ end
 -- The COMBAT DAMAGE panel
 ---------------------------------------------------------------------------
 
+function Combat.blockDoneXml()
+  local parts = {}
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    table.insert(parts, ([[
+<Panel id="blockDone_%s" visibility="%s" active="false" rectAlignment="LowerCenter" offsetXY="0 190" width="300" height="74"
+       color="#0B0F17F0" outline="#4FA8FF" outlineSize="2 2">
+  <VerticalLayout padding="8 8 6 6" spacing="4">
+    <Text fontSize="12" color="#9FC4FF" preferredHeight="16">Set your blocks with BLOCK? on your creatures, then:</Text>
+    <Button onClick="ui_blockDone(%s)" color="#1E5FA8" textColor="#FFFFFF" fontStyle="Bold" fontSize="18" preferredHeight="40">BLOCKS DONE</Button>
+  </VerticalLayout>
+</Panel>
+]]):format(c, c, c))
+  end
+  return table.concat(parts)
+end
+
 function Combat.xml()
   local rows = {}
   for i = 1, MAX_ROWS do
@@ -1075,7 +1116,7 @@ function Combat.xml()
     </HorizontalLayout>
   </VerticalLayout>
 </Panel>
-]]
+]] .. Combat.blockDoneXml()
 end
 
 -- Fill the panel from the current rows. View rows map panel lines to rows.
@@ -1188,10 +1229,15 @@ function Combat.isSick(card)
   end
   local t = turn()
   local g = card.getGUID()
-  if t.taken == nil or entered()[g] ~= t.taken then
+  local came = entered()[g]
+  if t.taken == nil or came == nil or not isCreature(card) then
     return false
   end
-  if controller(card) ~= t.activeSeat or not isCreature(card) then
+  -- Sick until its controller's next turn starts: it must have been under their control since the
+  -- start of their most recent turn (it stays sick through the other players' turns).
+  local ctrl = controller(card)
+  local started = GameState.data.turnStartOf and ctrl and GameState.data.turnStartOf[ctrl]
+  if started ~= nil and came < started then
     return false
   end
   -- Treasure, Food, Clue and friends are artifacts, never creatures.
@@ -1595,9 +1641,71 @@ end
 ---------------------------------------------------------------------------
 
 -- NEXT STEP by the active player. true = handled here (don't move on).
+-- BLOCKS DONE: each defending player confirms their blocks (a button on their screen) before the
+-- active player can move on to damage. NEXT STEP a second time moves on anyway (someone is away).
+local function waitingBlockers()
+  local c = GameState.data.combat
+  local out = {}
+  if c == nil or stepId() ~= "blockers" then
+    return out
+  end
+  c.blockDone = c.blockDone or {}
+  for _, seat in ipairs(othersInOrder(turn().activeSeat)) do
+    if isDefender(seat) and not c.blockDone[seat] then
+      table.insert(out, seat)
+    end
+  end
+  return out
+end
+
+local function showBlockDone()
+  local c = GameState.data.combat
+  local inBlock = stepId() == "blockers" and c ~= nil
+  for _, seat in ipairs(TableSetup.activeSeats()) do
+    local on = inBlock and seat ~= turn().activeSeat and isDefender(seat) and not (c.blockDone or {})[seat]
+    UI.setAttribute("blockDone_" .. seat, "active", on and "true" or "false")
+  end
+end
+Combat.showBlockDone = showBlockDone
+
+function ui_blockDone(player, seat)
+  seat = tostring(seat)
+  if player.color ~= seat and not GameState.solo() then
+    return
+  end
+  local c = GameState.data.combat
+  if c == nil or stepId() ~= "blockers" then
+    showBlockDone()
+    return
+  end
+  c.blockDone = c.blockDone or {}
+  c.blockDone[seat] = true
+  local n = 0
+  for _ in pairs(c.blocks or {}) do
+    n = n + 1
+  end
+  broadcastToAll(seat .. " is done declaring blockers.", { 0.4, 0.7, 1 })
+  showBlockDone()
+  if #waitingBlockers() == 0 then
+    broadcastToColor("All blocks are in: click NEXT STEP for combat damage.", turn().activeSeat, { 0.55, 0.9, 0.6 })
+  end
+end
+
 function Combat.onNext(color)
   local step = stepId()
   local c = GameState.data.combat
+  if step == "blockers" and c and not GameState.solo() then
+    local wait = waitingBlockers()
+    if #wait > 0 and not c.blockNagged then
+      c.blockNagged = true
+      broadcastToColor("Waiting for " .. table.concat(wait, ", ") .. " to click BLOCKS DONE. Click NEXT STEP again to move on anyway.",
+        color, WARN)
+      for _, seat in ipairs(wait) do
+        broadcastToColor(color .. " wants to move to damage: set your blocks, then click BLOCKS DONE.", seat, { 0.4, 0.7, 1 })
+      end
+      return true
+    end
+  end
   if step == "attackers" then
     c = state()
     if not c.declared then
@@ -1634,7 +1742,7 @@ end
 -- Extra line for the response pop-up (defenders: block first).
 function Combat.promptNote()
   if stepId() == "blockers" then
-    return "Defenders: set your blocks (BLOCK? on your creatures) before you pass."
+    return "Defenders: set your blocks (BLOCK? on your creatures) and click BLOCKS DONE before you pass."
   end
   return nil
 end
@@ -1654,6 +1762,9 @@ local function clear()
   local had = GameState.data.combat ~= nil
   GameState.data.combat = nil
   UI.setAttribute("combatPanel", "active", "false")
+  for _, seat in ipairs(TableSetup.activeSeats()) do
+    UI.setAttribute("blockDone_" .. seat, "active", "false")
+  end
   if had then
     Combat.refresh()
   end
@@ -1670,13 +1781,19 @@ Events.on("stepStarted", function(d)
     broadcastToColor("ATTACK: click ATTACK? on your creatures (again = next target), then NEXT STEP to declare.",
       d.seat, RED)
   elseif step == "blockers" then
+    local cs = GameState.data.combat
+    if cs then
+      cs.blockDone, cs.blockNagged = {}, nil
+    end
     Combat.refresh()
+    showBlockDone()
     for _, seat in ipairs(othersInOrder(d.seat)) do
       if isDefender(seat) then
-        broadcastToColor("BLOCK: click BLOCK? on your untapped creatures (again = next attacker).", seat, { 0.4, 0.7, 1 })
+        broadcastToColor("BLOCK: click BLOCK? on your untapped creatures (again = next attacker), then BLOCKS DONE.", seat, { 0.4, 0.7, 1 })
       end
     end
   elseif step == "damage" then
+    showBlockDone()
     lockBlocks()
     Combat.refresh()
     startDamage()

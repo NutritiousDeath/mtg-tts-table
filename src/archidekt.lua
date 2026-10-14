@@ -97,7 +97,7 @@ function Archidekt.toDecklist(deck)
     end
   end
 
-  local commanders, main = {}, {}
+  local commanders, main, attractions = {}, {}, {}
   for _, entry in ipairs(deck.cards or {}) do
     local card = entry.card or {}
     local name = card.oracleCard and card.oracleCard.name
@@ -117,6 +117,23 @@ function Archidekt.toDecklist(deck)
         end
       end
 
+      -- Attractions sit in their own category (often "outside the deck"): keep them, the importer
+      -- moves them to the Attraction deck.
+      local oc = card.oracleCard or {}
+      local isAttraction = false
+      for _, st in ipairs(oc.subTypes or {}) do
+        if tostring(st) == "Attraction" then
+          isAttraction = true
+        end
+      end
+      for _, c in ipairs(cats) do
+        if tostring(c):lower():find("attraction", 1, true) then
+          isAttraction = true
+        end
+      end
+      if isAttraction then
+        inDeck = true
+      end
       if inDeck or isCommander then
         local line = tostring(entry.quantity or 1) .. " " .. name
         local set = card.edition and card.edition.editioncode
@@ -126,7 +143,7 @@ function Archidekt.toDecklist(deck)
             line = line .. " " .. card.collectorNumber
           end
         end
-        table.insert(isCommander and commanders or main, line)
+        table.insert(isCommander and commanders or (isAttraction and attractions or main), line)
       end
     end
   end
@@ -139,6 +156,13 @@ function Archidekt.toDecklist(deck)
   table.insert(lines, "Deck")
   for _, l in ipairs(main) do
     table.insert(lines, l)
+  end
+  if #attractions > 0 then
+    table.insert(lines, "")
+    table.insert(lines, "Attractions")
+    for _, l in ipairs(attractions) do
+      table.insert(lines, l)
+    end
   end
   return table.concat(lines, "\n"), deck.name
 end

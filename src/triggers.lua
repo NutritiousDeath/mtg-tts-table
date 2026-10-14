@@ -413,6 +413,10 @@ local function parseTrigger(p)
   if plainFind(p, "when you cast this spell") or plainFind(p, "when you cast ~") then
     return { kind = "castSelf" }
   end
+  -- Diamond Mare: "whenever you cast a spell of the chosen color" (chosen as it entered: effects.lua).
+  if plainFind(p, "whenever you cast a spell of the chosen color") then
+    return { kind = "cast", who = "you", spellType = "chosen color" }
+  end
   -- Gandalf, Westward Voyager: "whenever you cast a spell with mana value 5 or greater".
   do
     local mv = p:match("whenever you cast a spell with mana value (%d+) or greater")
@@ -1451,9 +1455,37 @@ function Triggers.onLife(seat, delta)
 end
 
 -- A spell was cast (put on the stack).
-local function spellMatches(card, spellType)
+local COLOR_LETTER = { white = "W", blue = "U", black = "B", red = "R", green = "G" }
+
+-- The spell's colors as letters ("W", "U"...): Scryfall colors, else the mana cost's symbols.
+local function spellColors(card)
+  local dd = cardData(card)
+  local out = {}
+  if dd and type(dd.colors) == "table" then
+    for _, c in pairs(dd.colors) do
+      out[tostring(c)] = true
+    end
+  end
+  if next(out) == nil and dd and dd.manaCost then
+    for sym in tostring(dd.manaCost):gmatch("{([^}]*)}") do
+      for l in sym:gmatch("[WUBRG]") do
+        out[l] = true
+      end
+    end
+  end
+  return out
+end
+
+local function spellMatches(card, spellType, source)
   if spellType == nil then
     return true
+  end
+  if spellType == "chosen color" then
+    local chosen = source and Effects and Effects.chosenColor and Effects.chosenColor(source)
+    if chosen == nil then
+      return false
+    end
+    return spellColors(card)[COLOR_LETTER[chosen:lower()] or "?"] == true
   end
   local t = typesOf(card)
   if spellType == "noncreature" then
@@ -1534,7 +1566,7 @@ Events.on("spellCast", function(d)
             firstOk = false
           end
         end
-        if firstOk and ((t.who == "you" and mine) or (t.who == "opp" and not mine)) and spellMatches(d.card, t.spellType) then
+        if firstOk and ((t.who == "you" and mine) or (t.who == "opp" and not mine)) and spellMatches(d.card, t.spellType, p.obj) then
           -- "That spell" (Gandalf copies it) is the spell that was cast.
           local that = tostring(a.text):lower():find("that spell", 1, true) and d.card.getGUID() or nil
           table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, thatCard = that })
@@ -1579,8 +1611,14 @@ Events.on("spellCast", function(d)
         text = "Cascade: exile cards from the top of your library until you exile a nonland card with mana value less than "
           .. tostring(mv or "that spell's") .. ". You may cast it without paying its mana cost. Put the exiled cards on the bottom of your library in a random order." })
     end
+    if Statics and Statics.spellGrantCount and not storm then
+      local oks, extraS = pcall(Statics.spellGrantCount, d.card, d.controller, "storm")
+      storm = oks and extraS and extraS > 0 or false
+    end
     if storm then
+      -- Resolves by itself (effects.lua): `amount` copies of the spell (thatCard) go on the stack.
       table.insert(found, { obj = d.card, controller = d.controller, name = "Storm (" .. d.card.getName() .. ")", guid = gid, face = face,
+        thatCard = gid, amount = before, storm = true,
         text = "Storm: copy " .. d.card.getName() .. " for each spell cast before it this turn (" .. before .. "). You may choose new targets for the copies." })
     end
   end

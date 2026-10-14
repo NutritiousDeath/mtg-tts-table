@@ -1,7 +1,7 @@
 --[[
   attractions.lua
   Attractions (Unfinity). Each seat keeps its Attraction cards in their own
-  face-down deck in the ATTRACTIONS spot above the library, not in the library.
+  face-down deck in the ATTRACTIONS spot at the left end of the lands row, not in the library.
 
     - Import: Attraction cards in the list are taken out of the library into
       the Attraction deck, which is shuffled.
@@ -136,7 +136,7 @@ function Attractions.sortOut(color)
   if #guids > 0 then
     tidy(color)
     broadcastToAll(color .. ": " .. #guids .. " Attraction" .. (#guids == 1 and "" or "s")
-      .. " moved to the Attraction deck (above the library).", INFO)
+      .. " moved to the Attraction deck (ATTRACTIONS, left of your lands).", INFO)
   end
   return #guids
 end

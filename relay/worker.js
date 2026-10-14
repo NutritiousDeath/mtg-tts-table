@@ -527,7 +527,11 @@ async function handleMoxfield(request) {
     return out;
   };
   const commanders = entries(boards.commanders || deck.commanders).map(line);
+  // Attractions have their own Moxfield board; the table moves them to the Attraction deck on import.
   const main = entries(boards.mainboard || deck.mainboard).map(line);
+  // Attractions have their own Moxfield board: sent as an "Attractions" section (not part of the 100;
+  // the table puts them in the Attraction deck).
+  const attractions = entries(boards.attractions || deck.attractions).map(line);
   // Tokens: the deck's own token list (cards the deck makes), one each.
   const tokenSrc = boards.tokens ? entries(boards.tokens).map((e) => e.card)
     : (Array.isArray(deck.tokens) ? deck.tokens : []);
@@ -541,6 +545,7 @@ async function handleMoxfield(request) {
     tokens.push("1 " + clean(t.name) + (t.set ? " (" + t.set + ")" + (t.cn ? " " + t.cn : "") : ""));
   }
   const out = ["Commander", ...commanders, "", "Deck", ...main];
+  if (attractions.length) out.push("", "Attractions", ...attractions);
   if (tokens.length) out.push("", "Tokens", ...tokens);
   return new Response("#NAME\t" + clean(deck.name || "Moxfield deck") + "\n" + out.join("\n"), {
     headers: { "Content-Type": "text/plain; charset=utf-8" },
@@ -594,6 +599,7 @@ function archidektToDecklist(deck) {
   const commanders = [];
   const main = [];
   const tokens = [];   // "Tokens & Extras" etc.: go to the seat's TOKENS tile
+  const attractions = [];   // Attraction cards: their own section (the Attraction deck)
   for (const entry of deck.cards || []) {
     // Cards removed from an Archidekt deck stay in its data, marked deleted.
     if (entry.deletedAt) continue;
@@ -615,6 +621,11 @@ function archidektToDecklist(deck) {
     // Cards outside the deck are skipped, except tokens: anything in a
     // "Tokens & Extras"-style category, or a token card in any other
     // excluded category, goes to the TOKENS tile (never the library).
+    // Attractions often sit in a category marked outside the deck: keep them (the table moves
+    // them to the Attraction deck on import).
+    const oc = card.oracleCard || {};
+    const isAttraction = (Array.isArray(oc.subTypes) && oc.subTypes.includes("Attraction")) || cats.some((c) => /attraction/i.test(c));
+    if (isAttraction) inDeck = true;
     const toTokens = !inDeck && !isCommander && (tokenCategory || archidektIsToken(card.oracleCard));
     if (!inDeck && !isCommander && !toTokens) continue;
 
@@ -624,10 +635,11 @@ function archidektToDecklist(deck) {
       line += " (" + set + ")";
       if (card.collectorNumber) line += " " + card.collectorNumber;
     }
-    (isCommander ? commanders : toTokens ? tokens : main).push(line);
+    (isCommander ? commanders : toTokens ? tokens : isAttraction ? attractions : main).push(line);
   }
 
   const out = ["Commander", ...commanders, "", "Deck", ...main];
+  if (attractions.length) out.push("", "Attractions", ...attractions);
   if (tokens.length) out.push("", "Tokens", ...tokens);
   return out.join("\n");
 }

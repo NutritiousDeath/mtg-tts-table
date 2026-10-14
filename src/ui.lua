@@ -70,7 +70,7 @@ end
 function TableUI.build()
   local panels = { importPanel() }
   local xml = HEADER .. table.concat(panels) .. GameFlow.xml() .. Turns.xml() .. Actions.xml() .. Flip.xml()
-    .. Dice.xml() .. Tokens.xml() .. LibSearch.xml() .. Stack.xml() .. Combat.xml() .. Triggers.orderXml() .. Effects.xml()
+    .. Dice.xml() .. Tokens.xml() .. LibSearch.xml() .. Stack.xml() .. Combat.xml() .. Triggers.orderXml() .. Effects.xml() .. Counters.xml()
   -- Remember every element that's shown to one seat only (see
   -- TableUI.refreshVisibility).
   TableUI.privateIds = {}

@@ -37,7 +37,17 @@ function Statics.bonus(obj)
 end
 
 -- "elves" -> elf, "wolves" -> wolf, "allies" -> ally, "zombies" -> zombie, "soldiers" -> soldier.
+-- Plurals that don't just add an "s" (Thurid: "Other Pegasi, Unicorns, and Horses you control get +1/+1").
+local IRREGULAR = { pegasi = "pegasus", mice = "mouse", fungi = "fungus", octopi = "octopus", cacti = "cactus",
+  djinn = "djinn", efreet = "efreet", sphinxes = "sphinx", foxes = "fox", lynxes = "lynx", oxen = "ox",
+  homunculi = "homunculus", phoenixes = "phoenix", allies = "ally", dwarves = "dwarf", elves = "elf",
+  wolves = "wolf", werewolves = "werewolf", sheep = "sheep", fish = "fish", lizardfolk = "lizardfolk",
+  mercenaries = "mercenary", faeries = "faerie", zombies = "zombie", jellyfish = "jellyfish" }
+
 local function singular(w)
+  if IRREGULAR[w] then
+    return { IRREGULAR[w] }
+  end
   if w:sub(-3) == "ves" then
     return { w:sub(1, -4) .. "f", w:sub(1, -2) }
   elseif w:sub(-3) == "ies" then
@@ -718,8 +728,17 @@ function Statics.spellGrantCount(card, seat, word)
         local at = line:find(" spells you cast have " .. word, 1, true)
         if at and at <= 30 then
           local subj = line:sub(1, at - 1):gsub("^%s+", "")
-          local base = subj:gsub("s$", "")
-          if base ~= "" and tl:find(base, 1, true) then
+          -- "Sliver spells", "Instant and sorcery spells": any of the named types.
+          local hit = false
+          for w in subj:gmatch("[%a%-]+") do
+            if w ~= "and" and w ~= "or" then
+              local base = w:gsub("s$", "")
+              if base ~= "" and tl:find(base, 1, true) then
+                hit = true
+              end
+            end
+          end
+          if hit then
             n = n + 1
           end
         end

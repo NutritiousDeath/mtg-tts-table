@@ -41,6 +41,11 @@ local SECTIONS = {
   ["tokens & extras"] = "tokens",
   ["extras"] = "tokens",
   ["about"] = "skip",
+  -- Attractions (Unfinity): read with the deck; the importer moves them to their own Attraction deck.
+  ["attractions"] = "attraction",
+  ["attraction"] = "attraction",
+  ["attraction deck"] = "attraction",
+  ["stickers"] = "skip",
 }
 
 local BASICS = {
@@ -156,6 +161,7 @@ function DeckParser.parse(text)
   local block = 1          -- groups of lines separated by blank lines
   local sawCard = false
   local sideboard = {}
+  local attractions = {}   -- an "Attractions" section: imported, then moved to the Attraction deck
 
   for rawLine in (text .. "\n"):gmatch("(.-)\r?\n") do
     lineNo = lineNo + 1
@@ -184,6 +190,9 @@ function DeckParser.parse(text)
         elseif section == "tokens" then
           entry.token = true
           table.insert(deck.tokens, entry)
+        elseif section == "attraction" then
+          entry.attraction = true
+          table.insert(attractions, entry)
         else
           entry.block = block
           sawCard = true
@@ -202,6 +211,10 @@ function DeckParser.parse(text)
   -- deck.tokens is not merged: two different tokens can share a name
   -- (a white Soldier and a red/white Soldier with haste).
   deck.total = countCards(deck.commanders) + countCards(deck.main)
+  -- Attractions aren't part of the 100 (they're their own deck), but they're imported with it.
+  for _, e in ipairs(mergeDuplicates(attractions)) do
+    table.insert(deck.main, e)
+  end
   return deck
 end
 

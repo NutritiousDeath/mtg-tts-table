@@ -76,15 +76,16 @@ local REGIONS = {
   battlefield = { side = -3.5, depth = 17.83, w = 39, d = 15.65 },
   -- turn strip between the battlefield and the top row (turns.lua)
   turnstrip = { side = -0.9, depth = 26.95, w = 30.4, d = 1.6 },
-  lands = { side = -3.5, depth = 6.75, w = 39, d = 5.5 },
+  -- lands row; the Attraction deck sits at its left end (attractions, below)
+  lands = { side = -0.5, depth = 6.75, w = 33, d = 5.5 },
   -- action tiles in a strip beside the library column (actions.lua)
   act_draw = { side = 25.3, depth = 24.6, w = 3, d = 4.2 },
   act_scry = { side = 25.3, depth = 19.9, w = 3, d = 4.2 },
   act_mill = { side = 25.3, depth = 15.2, w = 3, d = 4.2 },
   act_untap = { side = 25.3, depth = 10.5, w = 3, d = 4.2 },
   act_tokens = { side = 25.3, depth = 5.8, w = 3, d = 4.2 },
-  -- Attraction deck (attractions.lua), above the library column.
-  attractions = { side = 20.5, depth = 31, w = 5, d = 5.5 },
+  -- Attraction deck (attractions.lua), at the left end of the lands row.
+  attractions = { side = -20.25, depth = 6.75, w = 5, d = 5.5 },
   -- Mana chip dispenser (mana.lua), left of the command zones.
   mana = { side = -19.8, depth = 30, w = 6.4, d = 4.4 },
   -- CAST mat above the tracker: a card dropped here goes onto the stack.

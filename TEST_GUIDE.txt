@@ -1,6 +1,6 @@
 MTG COMMANDER TABLE (TTS) - TEST GUIDE
-Version being tested: 1.59
-After loading, chat should say:  MTG > Scripts loaded: version 1.59 (...)
+Version being tested: 1.64
+After loading, chat should say:  MTG > Scripts loaded: version 1.64 (...)
 
 HOW TO USE THIS
 - One person can test alone: type  !solo on  in chat. You can then act for every seat.
@@ -12,6 +12,25 @@ HOW TO USE THIS
 - When you report a bug, copy the chat lines from just before and after it. That's the most useful thing you can send.
 
 
+
+=====================================================================
+NEW IN 1.64 - PLAYTEST FIXES (test these first)
+=====================================================================
+BEFORE TESTING: redeploy relay/worker.js to Cloudflare (Attractions from Moxfield / Archidekt), then re-import any deck with Attractions.
+
+[ ] P1. DO: right-click a creature on the battlefield.  EXPECT: one "Counters..." line instead of the eight counter lines, Clear, Goad and Skip untap. Click it: a panel on the right with - / + for +1/+1, -1/-1, +1/+0, +0/+1, Loyalty, Other, and CLEAR ALL, GOAD, SKIP NEXT UNTAP, CLONE, DELETE, CLOSE.
+[ ] P2. DO: in the panel, add two +1/+1 counters.  EXPECT: the card shows its new power/toughness big (e.g. 4/4) and under it, smaller, "2x +1/+1".
+[ ] P3. DO: CLONE a token from the panel.  EXPECT: a fresh copy (no counters) appears beside it; chat says who cloned it. DELETE removes it.
+[ ] P4. DO: bind Options > Game Keys "MTG: clone" and "MTG: delete card", hover a die or token, press them.  EXPECT: cloned / deleted. Locked table pieces and library / graveyard piles refuse.
+[ ] P5. DO: equip a creature with two pieces of Equipment.  EXPECT: small text "gear +x/+y", then "equipped / enchanted:" and one name per line, all inside the card. Big text = the final power/toughness.
+[ ] P6. DO: cast Thurid, Mare of Destiny with Diamond Mare out.  EXPECT: Diamond Mare shows 2/4 big and "static +1/+1" small. (Any "creatures you control get +N/+N" anthem shows the same way.)
+[ ] P7. DO: attack.  EXPECT: attackers glow red, blockers glow blue; a slim strip at the bottom of the card says ATK > RED / BLK > name. The rules text stays readable.
+[ ] P8. DO: in the block step as the defender.  EXPECT: a BLOCKS DONE button at the bottom of your screen. Attacker clicking NEXT STEP before you click it: they're told who they're waiting on (a second NEXT STEP moves on anyway). After you click it: the attacker is told all blocks are in.
+[ ] P9. DO: cast a creature, end your turn.  EXPECT: Zzz stays on it through everyone else's turns and goes away when YOUR next turn starts.
+[ ] P10. DO: a token dies in combat, or drag a token onto your graveyard.  EXPECT: it never joins the graveyard pile; "dies" triggers still happen; the token is removed.
+[ ] P11. DO: cast two spells, then a storm spell (Grapeshot).  EXPECT: Storm trigger; when it resolves, two copies go on the stack by themselves.
+[ ] P12. DO: Diamond Mare enters.  EXPECT: a color choice pop-up. Then cast a spell of that color THROUGH THE STACK (CAST mat).  EXPECT: Diamond Mare triggers, you gain 1 life. A spell of another color: no trigger.
+[ ] P13. DO: import a deck with 10 Attractions (Moxfield Attractions board, an Archidekt Attractions category, or a pasted list with an "Attractions" header).  EXPECT: all 10 go to the ATTRACTIONS spot at the LEFT END OF YOUR LANDS ROW; the deck still counts as 100.
 
 =====================================================================
 NEW IN 1.59 - SLIVER FIXES (test these first)
