@@ -431,6 +431,11 @@ local function tileReady(obj, color, regionName, width, draw)
   local r = TableSetup.region(color, regionName)
   local thick = obj.getBoundsNormalized().size.y
   obj.setPosition({ r.center.x, TableSetup.SURFACE_TOP + thick / 2 + 0.01, r.center.z })
+  -- Facing its seat: a tile kept from another layout (!layout) was turned for its old seat.
+  local s = TableSetup.seat(color)
+  if s then
+    obj.setRotation({ 0, s.yaw, 0 })
+  end
   obj.setLock(true)
   draw()
   -- Draw again once the tile has settled, in case the first pass came too early.
