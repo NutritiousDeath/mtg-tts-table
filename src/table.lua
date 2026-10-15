@@ -704,5 +704,8 @@ function TableSetup.setLayout(layout)
   for _, color in ipairs(TableSetup.activeSeats()) do
     TableSetup.lookAtSeat(color)
   end
+  if Planechase and Planechase.placeChest then
+    pcall(Planechase.placeChest)
+  end
   return true
 end

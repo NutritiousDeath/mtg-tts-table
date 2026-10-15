@@ -43,6 +43,16 @@ local VERSION = "?v=1"
 local DIE_IMAGE = "https://i.imgur.com/ptrUeHV.jpg"
 
 local CHEST = { x = 38, z = -38, yaw = 135 }       -- between White (south) and Blue (east)
+-- Two-Headed Giant: the corners are seats' battlefields, so the chest goes at the east end of the
+-- open band down the middle of the table (between the two teams).
+local CHEST_2HG = { x = 46, z = 0, yaw = 90 }
+
+local function chestSpot()
+  if TableSetup.layout and TableSetup.layout() == "twohg" then
+    return CHEST_2HG
+  end
+  return CHEST
+end
 local DECK_AT = { x = -8.5, z = 3.8 }              -- west of the stack mat
 local PLANE_AT = { x = -8.5, z = -3.8 }
 local LAND = { x = 8.5, z = 3.8 }                    -- the planar die's spot, east of the stack mat (empty until UNPACK)
@@ -658,6 +668,21 @@ local function ensureSpot()
   obj.setCustomObject({ image = img, thickness = 0.05, merge_distance = 0, stackable = false })
 end
 
+-- Put the chest where it belongs for the current layout (called on load and when the layout changes).
+function Planechase.placeChest(o)
+  o = o or getObjectsWithTag("PlanechaseChest")[1]
+  if o == nil or o.isDestroyed() then
+    return
+  end
+  local spot = chestSpot()
+  local p = o.getPosition()
+  if math.abs(p.x - spot.x) > 0.5 or math.abs(p.z - spot.z) > 0.5 then
+    o.setLock(true)
+    o.setPosition({ spot.x, p.y, spot.z })
+    o.setRotation({ 0, spot.yaw, 0 })
+  end
+end
+
 function Planechase.ensure()
   if PLANECHASE_CARDS == nil then
     return
@@ -673,15 +698,17 @@ function Planechase.ensure()
     local co = o.getCustomObject()
     if co and co.mesh == mesh then
       o.setLock(true)
+      Planechase.placeChest(o)
       addButtons(o)
       return
     end
     o.destruct()
   end
+  local spot = chestSpot()
   local obj = spawnObject({
     type = "Custom_Model",
-    position = { CHEST.x, TableSetup.SURFACE_TOP + 0.02, CHEST.z },
-    rotation = { 0, CHEST.yaw, 0 },
+    position = { spot.x, TableSetup.SURFACE_TOP + 0.02, spot.z },
+    rotation = { 0, spot.yaw, 0 },
     scale = { 1, 1, 1 },
     sound = false,
     callback_function = function(o)
