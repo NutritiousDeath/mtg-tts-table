@@ -315,19 +315,10 @@ function Counters.render(obj)
   if #pro > 0 then
     wrap("protection from " .. table.concat(pro, ", "), INFO_WRAP, info)
   end
-  -- Equipment and Auras: one name per line, so they can be read.
-  if Equip and Equip.hostOf and Equip.hostOf(obj) then
-    table.insert(info, "attached to:")
-    wrap(tostring(Equip.hostOf(obj).getName()), INFO_WRAP, info)
-  elseif Equip and Equip.attachments then
-    local list = Equip.attachments(obj)
-    if #list > 0 then
-      table.insert(info, "equipped / enchanted:")
-      for _, a in ipairs(list) do
-        table.insert(info, "- " .. tostring(a.getName()):sub(1, INFO_WRAP - 2))
-      end
-    end
-  end
+  -- Equipment and Auras: the creature shows what they do to its numbers and keywords (above);
+  -- for the rest of their text, a small RTFC tag points at the attached card (drawn below).
+  local eqHost = Equip and Equip.hostOf and Equip.hostOf(obj)
+  local eqList = (not eqHost and Equip and Equip.attachments) and Equip.attachments(obj) or {}
   local ringBadge = Ring and Ring.badge and Ring.badge(obj)
   if ringBadge then
     wrap(ringBadge, INFO_WRAP, info)
@@ -368,6 +359,60 @@ function Counters.render(obj)
       color = { 0.1, 0.18, 0.4, 0.88 },
     })
     sickIndex[obj.getGUID()] = #obj.getButtons() - 1
+  end
+  -- Attached gear: "RTFC" (read the card) on the creature's edge, with an arrow toward where the
+  -- equipment / aura peeks out. The attached card itself just says what it's on.
+  if #eqList > 0 then
+    local lz, lx = 1, 1
+    pcall(function()
+      local lp = obj.positionToLocal(eqList[1].getPosition())
+      lz = (lp.z or 0) >= 0 and 1 or -1
+      lx = (lp.x or 0) >= 0 and 1 or -1
+    end)
+    local names, tips = {}, {}
+    for _, a in ipairs(eqList) do
+      table.insert(names, tostring(a.getName()))
+      local m = Equip.modsOf and Equip.modsOf(a)
+      local line = tostring(a.getName())
+      if m and (m.dp ~= 0 or m.dt ~= 0) then
+        line = line .. ": " .. sgn(m.dp) .. "/" .. sgn(m.dt)
+      end
+      if m and #m.list > 0 then
+        line = line .. (line:find(":", 1, true) and ", " or ": ") .. table.concat(m.list, ", ")
+      end
+      table.insert(tips, line)
+    end
+    -- On the side away from the gear (so it isn't covered), clear of the Zzz badge.
+    local x = -lx * 0.5
+    local z = lz * 1.25
+    if sickIndex[obj.getGUID()] ~= nil and x > 0 and lz > 0 then
+      z = 0.92
+    end
+    obj.createButton({
+      click_function = "counters_noop",
+      function_owner = Global,
+      label = "RTFC " .. (lz > 0 and "▼" or "▲") .. (#eqList > 1 and (" x" .. #eqList) or ""),
+      tooltip = "Read the attached card" .. (#eqList > 1 and "s" or "") .. " for the rest of what " .. (#eqList > 1 and "they do" or "it does")
+        .. ":\n" .. table.concat(tips, "\n"),
+      position = { x, LABEL_Y, z },
+      rotation = { 0, 0, 0 },
+      width = 520, height = 170, font_size = 120,
+      font_color = { 1, 0.85, 0.4 },
+      color = { 0.08, 0.06, 0.02, 0.9 },
+    })
+  end
+  if eqHost then
+    obj.createButton({
+      click_function = "counters_noop",
+      function_owner = Global,
+      label = "ON " .. tostring(eqHost.getName()):sub(1, 16),
+      tooltip = "Attached to " .. tostring(eqHost.getName()) .. ". Its numbers and keywords show on that creature.",
+      position = { 0, LABEL_Y, -1.28 },
+      rotation = { 0, 0, 0 },
+      width = 860, height = 150, font_size = 105,
+      font_color = { 1, 0.85, 0.4 },
+      color = { 0.08, 0.06, 0.02, 0.9 },
+    })
   end
   local bigH = 0
   if #big > 0 then

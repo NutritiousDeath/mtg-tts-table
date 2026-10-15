@@ -454,8 +454,25 @@ local function afkSeconds()
   return a
 end
 
+-- I HAVE A RESPONSE clicked by mistake: what was being asked, so that player can take it back
+-- (NO RESPONSE AFTER ALL) as long as nothing has happened since.
+local held = nil
+local heldToken = 0
+
+local function showUndo(color, show)
+  UI.setAttribute("undoRespond_" .. color, "active", show and "true" or "false")
+end
+
+local function dropHeld()
+  if held then
+    showUndo(held.color, false)
+  end
+  held = nil
+end
+
 local function hideAllPrompts()
   afkToken = afkToken + 1
+  dropHeld()
   for _, c in ipairs(TableSetup.activeSeats()) do
     showPrompt(c, false)
     UI.setValue("respondTimer_" .. c, "")
@@ -679,6 +696,55 @@ function Turns.forcePass(color)
   commit(t.pending.kind)
 end
 
+-- Remember a pass that was just stopped, and offer its player the take-back button for 20 seconds.
+local function rememberHeld(color, p, t)
+  heldToken = heldToken + 1
+  local tok = heldToken
+  held = { color = color, pending = p, action = pendingAction, resume = t.resume, step = t.stepIndex,
+    taken = t.taken, active = t.activeSeat, stack = (Stack and Stack.size) and Stack.size() or 0, tok = tok }
+  showUndo(color, true)
+  Wait.time(function()
+    if held and held.tok == tok then
+      dropHeld()
+    end
+  end, 20)
+end
+
+-- NO RESPONSE AFTER ALL: put the question back where it was and count this player as passing.
+function Turns.undoRespond(color)
+  local h = held
+  if h == nil or h.color ~= color then
+    return
+  end
+  dropHeld()
+  local t = turn()
+  if t.pending ~= nil or t.stepIndex ~= h.step or t.taken ~= h.taken or t.activeSeat ~= h.active then
+    broadcastToColor("Too late to take it back: the game has moved on.", color, WARN)
+    return
+  end
+  if Stack and Stack.size and Stack.size() ~= h.stack then
+    broadcastToColor("Too late to take it back: something went on the stack since.", color, WARN)
+    return
+  end
+  t.pending = h.pending
+  pendingAction = h.action
+  t.resume = h.resume
+  broadcastToAll(color .. " clicked I HAVE A RESPONSE by mistake: no response after all.", INFO)
+  local p = t.pending
+  if p.queue[p.at] == color then
+    Turns.respond(color, false)
+  else
+    promptNext()
+  end
+end
+
+function ui_undoRespond(player, arg)
+  if player.color ~= tostring(arg) then
+    return
+  end
+  Turns.undoRespond(player.color)
+end
+
 -- A player answered their pop-up.
 function Turns.respond(color, hasResponse)
   local t = turn()
@@ -687,9 +753,13 @@ function Turns.respond(color, hasResponse)
     return
   end
   if hasResponse and p.kind == "ask" then
+    local action = pendingAction
     t.pending = nil
     pendingAction = nil
     hideAllPrompts()
+    pendingAction = action
+    rememberHeld(color, p, t)
+    pendingAction = nil
     broadcastToAll(color .. " has a response! Put it on the stack. " .. tostring(p.from)
       .. " can try again when it's done.", WARN)
     Turns.render()
@@ -699,9 +769,12 @@ function Turns.respond(color, hasResponse)
     -- Remember what the active player was doing: after an END TURN is
     -- answered with a response, the next NEXT STEP / END TURN click carries
     -- on ending the turn (it doesn't start walking through the steps).
-    t.resume = p.kind
+    local prevResume = t.resume
     t.pending = nil
     hideAllPrompts()
+    t.resume = prevResume
+    rememberHeld(color, p, t)
+    t.resume = p.kind
     local again = p.kind == "end" and "END TURN" or (p.kind == "endstep" and "END STEP") or "NEXT STEP"
     broadcastToAll(color .. " has a response! " .. t.activeSeat .. ": click " .. again .. " when it's done.", WARN)
     Turns.render()
@@ -751,7 +824,15 @@ function Turns.respondXml()
     </HorizontalLayout>
   </VerticalLayout>
 </Panel>
-]]):format(c, c, c, c, c, c))
+<Panel id="undoRespond_%s" visibility="%s" active="false" rectAlignment="MiddleCenter" offsetXY="0 140" width="460" height="120"
+       color="#0B0F17F0" outline="#FFB347" outlineSize="2 2">
+  <VerticalLayout padding="14 14 10 10" spacing="8" childForceExpandHeight="false">
+    <Text fontSize="15" color="#E6F1FF" preferredHeight="40">You clicked I HAVE A RESPONSE.
+Misclick? Take it back (only until something happens).</Text>
+    <Button onClick="ui_undoRespond(%s)" color="#00B3A4" textColor="#06130B" fontStyle="Bold" fontSize="16" preferredHeight="44">NO RESPONSE AFTER ALL</Button>
+  </VerticalLayout>
+</Panel>
+]]):format(c, c, c, c, c, c, c, c, c))
   end
   return table.concat(parts)
 end
