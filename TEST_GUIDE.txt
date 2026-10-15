@@ -1,6 +1,6 @@
 MTG COMMANDER TABLE (TTS) - TEST GUIDE
-Version being tested: 1.66
-After loading, chat should say:  MTG > Scripts loaded: version 1.66 (...)
+Version being tested: 1.67
+After loading, chat should say:  MTG > Scripts loaded: version 1.67 (...)
 
 HOW TO USE THIS
 - One person can test alone: type  !solo on  in chat. You can then act for every seat.
@@ -12,6 +12,28 @@ HOW TO USE THIS
 - When you report a bug, copy the chat lines from just before and after it. That's the most useful thing you can send.
 
 
+
+=====================================================================
+NEW IN 1.67 - TWO-HEADED GIANT TABLE (part 1 of 3: layout, teams, shared life)
+=====================================================================
+Push to GitHub FIRST: the wider table frame and the 2HG tracker images load from there.
+Not in this part yet (coming in parts 2 and 3): shared turns, team combat, and cards' "each opponent" meaning
+only the other team. Until then turns still go player by player, and "each opponent" still includes the teammate.
+
+[ ] H1. With no game running, type  !layout 2hg.  EXPECT: a wider table (120 x 100) with its stone frame; White and
+        Red side by side on one long side, Green and Blue on the other; chat explains the teams and 60 life.
+[ ] H2. Sit at each of the four seats.  EXPECT: each camera faces that seat; every zone (library, graveyard, exile,
+        command zones, battlefield, lands, ATTRACTIONS, tiles, tracker) fits on the table and nothing overlaps
+        between teammates.
+[ ] H3. Look at the trackers.  EXPECT: each shows 60 and only TWO crowns: the other team's colors.
+[ ] H4. The Deck Importer cards.  EXPECT: at the two short ends of the middle strip, not on anyone's battlefield.
+[ ] H5. Import four decks and Start Game.  EXPECT: life 60 on all four trackers.
+[ ] H6. Change White's life by -5.  EXPECT: White AND Red both show 55 (one shared total); chat says
+        "team White + Red life 60 -> 55". Green and Blue stay at 60.
+[ ] H7. Give Green 15 poison.  EXPECT: Green and Blue both show 15 and both are flagged. Confirm one: BOTH are out.
+[ ] H8. Give Blue 21 commander damage from White's commander.  EXPECT: the team's life goes down 21; Blue is flagged.
+        Confirm: Green is out too. Undo on one brings both back.
+[ ] H9. Type  !layout 4.  EXPECT: back to the square table and frame, four single seats, 40 life.
 
 =====================================================================
 NEW IN 1.64 - PLAYTEST FIXES (test these first)

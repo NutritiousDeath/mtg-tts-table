@@ -17,10 +17,19 @@ local CORNER = 37       -- distance from the table center along x and z
 
 -- Corner spots. yaw faces the card toward the corner between the two seats
 -- (same rule as cards at a seat: yaw = viewer's compass angle + 180).
-local SPOTS = {
+local SPOTS_SQUARE = {
   { x = -CORNER, z = -CORNER, yaw = 225 },  -- between White (south) and Red (west)
   { x = CORNER, z = CORNER, yaw = 45 },     -- between Green (north) and Blue (east)
 }
+-- Two-Headed Giant (120 x 100 table): at the west and east ends of the open strip between the teams.
+local SPOTS_2HG = {
+  { x = -50, z = 0, yaw = 90 },
+  { x = 50, z = 0, yaw = 270 },
+}
+
+local function spots()
+  return TableSetup.layout() == "twohg" and SPOTS_2HG or SPOTS_SQUARE
+end
 
 function importcards_click(obj, playerColor)
   TableUI.openImport(playerColor)
@@ -58,11 +67,20 @@ end
 function ImportCards.ensure()
   -- Keep the two cards if they're already on the table with this image
   -- (respawning them is slow); otherwise replace them.
+  local SPOTS = spots()
   local found = getObjectsWithTag("DeckImporter")
   local good = #found == #SPOTS
   for _, obj in ipairs(found) do
     local co = obj.getCustomObject()
     good = good and co ~= nil and co.image == IMAGE
+    -- On one of this layout's spots (a layout change moves them).
+    local p, on = obj.getPosition(), false
+    for _, spot in ipairs(SPOTS) do
+      if math.abs(p.x - spot.x) < 1 and math.abs(p.z - spot.z) < 1 then
+        on = true
+      end
+    end
+    good = good and on
   end
   if good then
     for _, obj in ipairs(found) do

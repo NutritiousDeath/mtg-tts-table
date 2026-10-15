@@ -6,7 +6,8 @@ the play surface's top is at y = 1.0 and the model sits around it.
 The frame has no real collision: table.lua gives it assets/table/collider.obj,
 a tiny cube far below the table (TTS turned the full shape into one big
 invisible box that cards landed on).
-Run: python tools/make_table_model.py"""
+Also writes assets/table/frame_2hg.obj for the 120 x 100 Two-Headed Giant table.
+Run: python tools/make_table_model.py   (add --no-texture to keep stone.png)"""
 import math
 import os
 import numpy as np
@@ -15,7 +16,7 @@ from PIL import Image, ImageFilter
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, "assets", "table")
 TOP = 1.0          # play surface top
-HALF = 50.0        # play surface half size
+HALF = 50.0        # play surface half size (square table)
 RIM = 4.0          # rim width
 TILE = 8.0         # texture repeats every TILE units
 
@@ -94,74 +95,86 @@ def cap_bottom(cx, cz, h, y):
     quad((cx - h, y, cz - h), (cx + h, y, cz - h), (cx + h, y, cz + h), (cx - h, y, cz + h))
 
 
-# --- Rim: four slabs around the surface, raised a little above it, with an
-# inner chamfer down to the play surface.
-lip = TOP + 0.6
-bot = TOP - 2.0
-O = HALF + RIM
-for s in (-1, 1):
-    # along x (north/south sides)
-    box(-O, O, bot, lip, s * HALF if s > 0 else -O, O if s > 0 else -HALF)
-    box(s * HALF if s > 0 else -O, O if s > 0 else -HALF, bot, lip, -HALF, HALF)
-# Inner chamfer strips (from the lip down to the surface edge)
-c = 0.6
-for s in (-1, 1):
-    quad((-HALF, TOP, s * HALF), (HALF, TOP, s * HALF), (HALF + c, lip, s * (HALF + c)), (-HALF - c, lip, s * (HALF + c))) if s < 0 else \
-        quad((HALF, TOP, s * HALF), (-HALF, TOP, s * HALF), (-HALF - c, lip, s * (HALF + c)), (HALF + c, lip, s * (HALF + c)))
-    quad((s * HALF, TOP, HALF), (s * HALF, TOP, -HALF), (s * (HALF + c), lip, -HALF - c), (s * (HALF + c), lip, HALF + c)) if s < 0 else \
-        quad((s * HALF, TOP, -HALF), (s * HALF, TOP, HALF), (s * (HALF + c), lip, HALF + c), (s * (HALF + c), lip, -HALF - c))
 
-# --- Small gothic spikes along the outer edge of the rim (low, so they don't
-# block the view), skipping the corners where the pillars stand.
-for k in np.arange(-HALF + 9, HALF - 8, 6.0):
-    for (cx, cz) in ((k, O - 0.7), (k, -O + 0.7), (O - 0.7, k), (-O + 0.7, k)):
+def build_frame(HX, HZ, name):
+    """The frame around an HX*2 x HZ*2 play surface, written to assets/table/<name>."""
+    V.clear()
+    VT.clear()
+    F.clear()
+    # --- Rim: four slabs around the surface, raised a little above it, with an
+    # inner chamfer down to the play surface.
+    lip = TOP + 0.6
+    bot = TOP - 2.0
+    OX, OZ = HX + RIM, HZ + RIM
+    box(-OX, OX, bot, lip, HZ, OZ)        # +z side
+    box(-OX, OX, bot, lip, -OZ, -HZ)      # -z side
+    box(HX, OX, bot, lip, -HZ, HZ)        # +x side
+    box(-OX, -HX, bot, lip, -HZ, HZ)      # -x side
+    c = 0.6
+    quad((-HX, TOP, -HZ), (HX, TOP, -HZ), (HX + c, lip, -HZ - c), (-HX - c, lip, -HZ - c))
+    quad((HX, TOP, HZ), (-HX, TOP, HZ), (-HX - c, lip, HZ + c), (HX + c, lip, HZ + c))
+    quad((-HX, TOP, HZ), (-HX, TOP, -HZ), (-HX - c, lip, -HZ - c), (-HX - c, lip, HZ + c))
+    quad((HX, TOP, -HZ), (HX, TOP, HZ), (HX + c, lip, HZ + c), (HX + c, lip, -HZ - c))
+    # --- Small gothic spikes along the outer edge of the rim, skipping the corners.
+    def spike(cx, cz):
         box(cx - 0.45, cx + 0.45, lip, lip + 0.5, cz - 0.45, cz + 0.45, bottom=False)
         pyramid(cx, cz, 0.45, lip + 0.5, lip + 1.6)
+    for k in np.arange(-HX + 9, HX - 8, 6.0):
+        spike(k, OZ - 0.7)
+        spike(k, -OZ + 0.7)
+    for k in np.arange(-HZ + 9, HZ - 8, 6.0):
+        spike(OX - 0.7, k)
+        spike(-OX + 0.7, k)
+    # --- Corner pillars with spires and four pinnacles each.
+    PX, PZ = OX - 1.5, OZ - 1.5
+    for sx in (-1, 1):
+        for sz in (-1, 1):
+            cx, cz = sx * PX, sz * PZ
+            box(cx - 4.2, cx + 4.2, bot, lip + 0.8, cz - 4.2, cz + 4.2)
+            box(cx - 3.0, cx + 3.0, lip + 0.8, lip + 8.0, cz - 3.0, cz + 3.0, bottom=False)
+            for ox in (-1, 1):
+                for oz in (-1, 1):
+                    bx, bz = cx + ox * 3.0, cz + oz * 3.0
+                    frustum(bx, bz, 0.9, 0.5, lip + 0.8, lip + 9.0)
+                    pyramid(bx, bz, 0.5, lip + 9.0, lip + 11.5)
+            box(cx - 3.4, cx + 3.4, lip + 8.0, lip + 8.8, cz - 3.4, cz + 3.4)
+            box(cx - 2.2, cx + 2.2, lip + 8.8, lip + 12.0, cz - 2.2, cz + 2.2, bottom=False)
+            for ox in (-1, 1):
+                for oz in (-1, 1):
+                    px, pz = cx + ox * 2.6, cz + oz * 2.6
+                    box(px - 0.4, px + 0.4, lip + 8.8, lip + 10.0, pz - 0.4, pz + 0.4, bottom=False)
+                    pyramid(px, pz, 0.4, lip + 10.0, lip + 13.0)
+            pyramid(cx, cz, 2.2, lip + 12.0, lip + 22.0)
+    # --- Under the table: a thick slab, then a pedestal flaring down into the mist.
+    box(-HX, HX, bot - 1.5, bot, -HZ, HZ)
+    frustum(0, 0, 30, 14, bot - 1.5, bot - 6)
+    frustum(0, 0, 14, 10, bot - 6, bot - 24)
+    frustum(0, 0, 10, 22, bot - 24, bot - 30)
+    for sx in (-1, 1):
+        for sz in (-1, 1):
+            lx, lz = sx * (HX - 10), sz * (HZ - 10)
+            frustum(lx, lz, 3.0, 2.0, bot - 1.5, bot - 26)
+            cap_bottom(lx, lz, 2.0, bot - 26)
+    cap_bottom(0, 0, 22, bot - 30)
+    # --- Write OBJ (y up, like TTS).
+    os.makedirs(OUT, exist_ok=True)
+    with open(os.path.join(OUT, name), "w") as f:
+        f.write("# MTG table frame (tools/make_table_model.py)\n")
+        for v in V:
+            f.write("v %.4f %.4f %.4f\n" % (v[0], v[1], v[2]))
+        for t in VT:
+            f.write("vt %.5f %.5f\n" % (t[0], t[1]))
+        for face in F:
+            f.write("f " + " ".join("%d/%d" % (i, i) for i in face) + "\n")
+    print(name + ":", len(V), "vertices,", len(F), "faces")
 
-# --- Corner pillars with spires and four pinnacles each.
-P = O - 1.5
-for sx in (-1, 1):
-    for sz in (-1, 1):
-        cx, cz = sx * P, sz * P
-        box(cx - 4.2, cx + 4.2, bot, lip + 0.8, cz - 4.2, cz + 4.2)                 # plinth
-        box(cx - 3.0, cx + 3.0, lip + 0.8, lip + 8.0, cz - 3.0, cz + 3.0, bottom=False)   # shaft
-        for ox in (-1, 1):                                                           # corner buttresses
-            for oz in (-1, 1):
-                bx, bz = cx + ox * 3.0, cz + oz * 3.0
-                frustum(bx, bz, 0.9, 0.5, lip + 0.8, lip + 9.0)
-                pyramid(bx, bz, 0.5, lip + 9.0, lip + 11.5)
-        box(cx - 3.4, cx + 3.4, lip + 8.0, lip + 8.8, cz - 3.4, cz + 3.4)          # cornice
-        box(cx - 2.2, cx + 2.2, lip + 8.8, lip + 12.0, cz - 2.2, cz + 2.2, bottom=False)  # belfry
-        for ox in (-1, 1):                                                           # pinnacles
-            for oz in (-1, 1):
-                px, pz = cx + ox * 2.6, cz + oz * 2.6
-                box(px - 0.4, px + 0.4, lip + 8.8, lip + 10.0, pz - 0.4, pz + 0.4, bottom=False)
-                pyramid(px, pz, 0.4, lip + 10.0, lip + 13.0)
-        pyramid(cx, cz, 2.2, lip + 12.0, lip + 22.0)                                # main spire
 
-# --- Under the table: a thick slab, then a pedestal flaring down into the mist.
-box(-HALF, HALF, bot - 1.5, bot, -HALF, HALF)
-frustum(0, 0, 30, 14, bot - 1.5, bot - 6)
-frustum(0, 0, 14, 10, bot - 6, bot - 24)
-frustum(0, 0, 10, 22, bot - 24, bot - 30)
-for sx in (-1, 1):
-    for sz in (-1, 1):
-        # buttress legs under each corner
-        frustum(sx * 40, sz * 40, 3.0, 2.0, bot - 1.5, bot - 26)
-        cap_bottom(sx * 40, sz * 40, 2.0, bot - 26)
-cap_bottom(0, 0, 22, bot - 30)
+build_frame(HALF, HALF, "frame.obj")
+build_frame(60.0, HALF, "frame_2hg.obj")     # Two-Headed Giant table: 120 x 100
 
-# --- Write OBJ (y up, like TTS).
-os.makedirs(OUT, exist_ok=True)
-with open(os.path.join(OUT, "frame.obj"), "w") as f:
-    f.write("# MTG table frame (tools/make_table_model.py)\n")
-    for v in V:
-        f.write("v %.4f %.4f %.4f\n" % (v[0], v[1], v[2]))
-    for t in VT:
-        f.write("vt %.5f %.5f\n" % (t[0], t[1]))
-    for face in F:
-        f.write("f " + " ".join("%d/%d" % (i, i) for i in face) + "\n")
-print("frame.obj:", len(V), "vertices,", len(F), "faces")
+import sys
+if "--no-texture" in sys.argv:
+    raise SystemExit(0)
 
 # --- Texture: tileable dark carved stone blocks, mortar lines, and faint
 # cyan glow in some of the joints and cracks.

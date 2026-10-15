@@ -12,6 +12,8 @@
     "four"  one player per side of a square table, everyone facing the middle
             (White south, Red west, Green north, Blue east = clockwise)
     "two"   White and Green facing each other across the table
+    "twohg" Two-Headed Giant: a 120 x 100 table, team White + Red side by side on the south edge,
+            team Green + Blue on the north edge
 
   Seat areas (a playmat layout, from the seated player's view; far = toward
   the table center, near = the player's edge):
@@ -43,15 +45,32 @@ TableSetup.SURFACE_TOP = 1.0   -- height of the play surface's top face
 
 -- Seat compass directions per layout. Angle = where the seat sits around the
 -- table, in degrees: 0 = south (-z), 90 = west (-x), 180 = north, 270 = east.
+-- A seat is its compass angle, or { angle, offset } for two seats on one side (offset = how far along
+-- the edge, to the seated player's right).
 local LAYOUTS = {
   four = { White = 0, Red = 90, Green = 180, Blue = 270 },
   two = { White = 0, Green = 180 },
+  -- Two-Headed Giant: team White + Red on the south side, team Green + Blue on the north side.
+  twohg = { White = { 0, -29 }, Red = { 0, 29 }, Green = { 180, -29 }, Blue = { 180, 29 } },
+}
+
+-- Play surface size per layout (x by z). The 2HG table is wider so two full seats fit on each side.
+local SURFACE = {
+  four = { 100, 100 },
+  two = { 100, 100 },
+  twohg = { 120, 100 },
+}
+
+-- Teams (Two-Headed Giant only).
+local TEAMS = {
+  twohg = { White = "A", Red = "A", Green = "B", Blue = "B" },
 }
 
 -- Order seats take turns in each layout (clockwise from above).
 local SEAT_ORDER = {
   four = { "White", "Red", "Green", "Blue" },
   two = { "White", "Green" },
+  twohg = { "White", "Red", "Green", "Blue" },
 }
 
 -- Areas in seat-local units: side = along the player's right (+) / left (-)
@@ -132,24 +151,72 @@ end
 --            convention the importer has always used (south seat = 180)
 --   angle:   the seat's compass angle (south seat = 0)
 function TableSetup.seat(color)
-  local angle = LAYOUTS[TableSetup.layout()][color]
-  if angle == nil then
+  local entry = LAYOUTS[TableSetup.layout()][color]
+  if entry == nil then
     return nil
+  end
+  local angle, offset = entry, 0
+  if type(entry) == "table" then
+    angle, offset = entry[1], entry[2]
   end
   local rad = math.rad(angle)
   -- Seat position direction from the center (angle 0 = south = -z).
   local ox, oz = -math.sin(rad), -math.cos(rad)
-  local half = TableSetup.SIZE / 2
+  local sw, sd = TableSetup.surfaceSize()
+  -- Distance from the middle to this seat's edge: half the depth for north / south seats, half the width
+  -- for east / west ones.
+  local half = (math.abs(oz) > 0.5) and (sd / 2) or (sw / 2)
+  local rx, rz = -oz, ox
+  local cx, cz = ox * half + rx * offset, oz * half + rz * offset
 
   return {
-    center = { x = ox * half, y = TableSetup.SURFACE_TOP, z = oz * half },
+    center = { x = cx, y = TableSetup.SURFACE_TOP, z = cz },
     inward = { x = -ox, z = -oz },
-    right = { x = -oz, z = ox },
+    right = { x = rx, z = rz },
     yaw = (angle + 180) % 360,
     angle = angle,
     handDist = half - 1.5,
     outward = { x = ox, z = oz },
   }
+end
+
+-- The play surface's size for the current layout: width (x), depth (z).
+function TableSetup.surfaceSize()
+  local sz = SURFACE[TableSetup.layout()] or { TableSetup.SIZE, TableSetup.SIZE }
+  return sz[1], sz[2]
+end
+
+-- Two-Headed Giant: the team a seat is on ("A" / "B"), or nil outside 2HG.
+function TableSetup.teamOf(color)
+  local t = TEAMS[TableSetup.layout()]
+  return t and t[color] or nil
+end
+
+function TableSetup.isTeamGame()
+  return TEAMS[TableSetup.layout()] ~= nil
+end
+
+-- The other player on a seat's team (2HG), or nil.
+function TableSetup.teammate(color)
+  local team = TableSetup.teamOf(color)
+  if team == nil then
+    return nil
+  end
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    if c ~= color and TableSetup.teamOf(c) == team then
+      return c
+    end
+  end
+  return nil
+end
+
+-- Both seats of a team (or just the seat itself outside 2HG).
+function TableSetup.teamSeats(color)
+  local mate = TableSetup.teammate(color)
+  if mate then
+    return { color, mate }
+  end
+  return { color }
 end
 
 -- An area for a seat: { center = world position, w, d, yaw }, or nil.
@@ -219,7 +286,7 @@ local function handTarget(color)
   local s = TableSetup.seat(color)
   if s then
     return {
-      position = { x = s.outward.x * s.handDist, y = TableSetup.SURFACE_TOP + 3, z = s.outward.z * s.handDist },
+      position = { x = s.center.x - s.outward.x * 1.5, y = TableSetup.SURFACE_TOP + 3, z = s.center.z - s.outward.z * 1.5 },
       rotation = { x = 0, y = s.angle, z = 0 },
       scale = { x = 30, y = 6, z = 5 },
     }
@@ -351,7 +418,7 @@ local function spawnSurface(state)
     type = "BlockSquare",
     position = { 0, 0, 0 },
     rotation = { 0, 0, 0 },
-    scale = { TableSetup.SIZE, 1, TableSetup.SIZE },
+    scale = { (TableSetup.surfaceSize()), 1, select(2, TableSetup.surfaceSize()) },
     callback_function = function(obj)
       obj.setLock(true)
       obj.setName("Play Surface")
@@ -368,6 +435,22 @@ local function spawnSurface(state)
   })
 end
 
+-- Resize the play surface to the layout (the 2HG table is wider).
+function TableSetup.fitSurface()
+  local state = GameState.data.table or {}
+  local obj = state.surface and getObjectFromGUID(state.surface)
+  if obj == nil then
+    return
+  end
+  local w, d = TableSetup.surfaceSize()
+  local sc = obj.getScale()
+  if math.abs(sc.x - w) > 0.01 or math.abs(sc.z - d) > 0.01 then
+    obj.setLock(true)
+    obj.setScale({ w, sc.y, d })
+    obj.setPosition({ 0, obj.getPosition().y, 0 })
+  end
+end
+
 -- The 3D frame around the play surface: a gothic stone rim, spired corner
 -- towers and stone legs (tools/make_table_model.py). One locked custom model,
 -- kept between loads; replaced when its files change version.
@@ -376,7 +459,7 @@ local FRAME_VERSION = "?v=3"
 
 function TableSetup.ensureFrame()
   local state = GameState.data.table
-  local mesh = FRAME_BASE .. "frame.obj" .. FRAME_VERSION
+  local mesh = FRAME_BASE .. (TableSetup.layout() == "twohg" and "frame_2hg.obj" or "frame.obj") .. FRAME_VERSION
   local frame = state.frame and getObjectFromGUID(state.frame)
   local co = frame and frame.getCustomObject()
   if frame and co and co.mesh == mesh then
@@ -463,6 +546,8 @@ function TableSetup.ensure()
 
   if not (state.surface and getObjectFromGUID(state.surface)) then
     spawnSurface(state)
+  else
+    TableSetup.fitSurface()
   end
   TableSetup.ensureFrame()
   TableSetup.ignorePointer()
@@ -601,13 +686,15 @@ function TableSetup.lookAtSeat(color)
   })
 end
 
--- Switch layout ("four" or "two") and reposition hand zones.
+-- Switch layout ("four", "two" or "twohg") and reposition hand zones.
 function TableSetup.setLayout(layout)
   if LAYOUTS[layout] == nil then
     return false
   end
   GameState.data.table = GameState.data.table or {}
   GameState.data.table.layout = layout
+  TableSetup.fitSurface()
+  TableSetup.ensureFrame()
   applyHandZones()
   TableSetup.drawMats()
   if Zones then

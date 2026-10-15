@@ -39,6 +39,30 @@ Trackers = {}
 
 local POISON_LETHAL = 10
 local COMMANDER_LETHAL = 21
+-- Two-Headed Giant (CR 810): a team shares one life total and one poison count; 15 poison kills the team.
+-- Commander version used here: 60 team life, 15 team poison, 21 damage from one commander to one player.
+local POISON_LETHAL_2HG = 15
+Trackers.TEAM_LIFE_2HG = 60
+
+local function poisonLethal()
+  return (TableSetup.isTeamGame and TableSetup.isTeamGame()) and POISON_LETHAL_2HG or POISON_LETHAL
+end
+
+-- The seats that share this seat's life / poison (its team in 2HG, else just itself).
+local function sharing(color)
+  if TableSetup.teamSeats then
+    return TableSetup.teamSeats(color)
+  end
+  return { color }
+end
+
+local function teamLabel(color)
+  local seats = sharing(color)
+  if #seats > 1 then
+    return "team " .. table.concat(seats, " + ")
+  end
+  return color
+end
 
 -- Button tints per seat (also used for commander damage counters).
 local SEAT_TINT = {
@@ -72,11 +96,19 @@ local CROWN_ORDER = {
   Red = { "Blue", "Green", "White" },
   Green = { "Blue", "White", "Red" },
 }
+-- Two-Headed Giant: only the other team's commanders (tools/make_tracker_art.py CROWN_ORDER_2HG).
+local CROWN_ORDER_2HG = {
+  White = { "Green", "Blue" },
+  Red = { "Green", "Blue" },
+  Green = { "White", "Red" },
+  Blue = { "White", "Red" },
+}
 
--- Opponents of a seat in crown order (seats not in the layout are skipped).
+-- Opponents of a seat in crown order (seats not in the layout are skipped; in 2HG, teammates too).
 local function opponentsInOrder(color)
   local list = {}
-  for _, other in ipairs(CROWN_ORDER[color] or TableSetup.activeSeats()) do
+  local order = (TableSetup.layout() == "twohg") and CROWN_ORDER_2HG or CROWN_ORDER
+  for _, other in ipairs(order[color] or TableSetup.activeSeats()) do
     if other ~= color and TableSetup.isActive(other) then
       table.insert(list, other)
     end
@@ -122,8 +154,8 @@ local function lossReason(p)
   if p.life <= 0 then
     return "0 life"
   end
-  if p.poison >= POISON_LETHAL then
-    return POISON_LETHAL .. " poison"
+  if p.poison >= poisonLethal() then
+    return poisonLethal() .. " poison"
   end
   for key, dmg in pairs(p.commanderDamage) do
     if dmg >= COMMANDER_LETHAL then
@@ -178,7 +210,13 @@ function Trackers.changeLife(color, delta, byColor)
     return
   end
   local before = p.life
-  p.life = p.life + delta
+  -- 2HG: the team's shared life (kept the same on both teammates).
+  for _, c in ipairs(sharing(color)) do
+    local q = player(c)
+    if q then
+      q.life = before + delta
+    end
+  end
   do
     local rec = Trackers.lifeThisTurn(color)
     if delta > 0 then
@@ -187,9 +225,11 @@ function Trackers.changeLife(color, delta, byColor)
       rec.lost = rec.lost - delta
     end
   end
-  log(byColor, color .. " life " .. before .. " -> " .. p.life)
-  checkLoss(color)
-  Trackers.render(color)
+  log(byColor, teamLabel(color) .. " life " .. before .. " -> " .. p.life .. (#sharing(color) > 1 and (" (" .. color .. ")") or ""))
+  for _, c in ipairs(sharing(color)) do
+    checkLoss(c)
+    Trackers.render(c)
+  end
   if Triggers and Triggers.onLife then
     Triggers.onLife(color, delta)
   end
@@ -201,13 +241,21 @@ function Trackers.changePoison(color, delta, byColor)
     return
   end
   local before = p.poison
-  p.poison = math.max(0, p.poison + delta)
-  if p.poison == before then
+  local after = math.max(0, p.poison + delta)
+  if after == before then
     return
   end
-  log(byColor, color .. " poison " .. before .. " -> " .. p.poison)
-  checkLoss(color)
-  Trackers.render(color)
+  for _, c in ipairs(sharing(color)) do
+    local q = player(c)
+    if q then
+      q.poison = after
+    end
+  end
+  log(byColor, teamLabel(color) .. " poison " .. before .. " -> " .. after)
+  for _, c in ipairs(sharing(color)) do
+    checkLoss(c)
+    Trackers.render(c)
+  end
 end
 
 -- Commander damage also reduces (or, when undone, restores) life.
@@ -223,11 +271,19 @@ function Trackers.changeCommanderDamage(color, key, delta, byColor)
     return
   end
   p.commanderDamage[key] = after
-  p.life = p.life - applied
+  local lifeBefore = p.life
+  for _, c in ipairs(sharing(color)) do
+    local q = player(c)
+    if q then
+      q.life = lifeBefore - applied
+    end
+  end
   log(byColor, color .. " commander damage from " .. commanderLabel(key) .. " "
-    .. before .. " -> " .. after .. ", life " .. (p.life + applied) .. " -> " .. p.life)
-  checkLoss(color)
-  Trackers.render(color)
+    .. before .. " -> " .. after .. ", " .. teamLabel(color) .. " life " .. lifeBefore .. " -> " .. p.life)
+  for _, c in ipairs(sharing(color)) do
+    checkLoss(c)
+    Trackers.render(c)
+  end
 end
 
 -- A card says this player loses the game ("each player with exactly 13
@@ -251,6 +307,16 @@ function Trackers.confirmLoss(color, byColor)
   end
   p.eliminated = true
   broadcastToAll(color .. " is out of the game (" .. p.lossFlag .. ").", WARN)
+  -- 2HG: a team loses together (CR 810.8a).
+  for _, c in ipairs(sharing(color)) do
+    local q = player(c)
+    if c ~= color and q and not q.eliminated then
+      q.eliminated = true
+      q.lossFlag, q.lossForced = nil, nil
+      broadcastToAll(c .. " is out too: their team lost.", WARN)
+      Trackers.render(c)
+    end
+  end
   if p.contract then
     broadcastToAll(color .. " had a contract counter: " .. tostring(p.contract) .. " creates a token that's a copy of each artifact and creature " .. color .. " controlled (by hand).", { 1, 0.75, 0.3 })
   end
@@ -293,6 +359,14 @@ function Trackers.revive(color, byColor)
   p.eliminated = false
   log(byColor, color .. " is back in the game")
   Trackers.render(color)
+  for _, c in ipairs(sharing(color)) do
+    local q = player(c)
+    if c ~= color and q and q.eliminated then
+      q.eliminated = false
+      log(byColor, c .. " (teammate) is back in the game")
+      Trackers.render(c)
+    end
+  end
 end
 
 ---------------------------------------------------------------------------
@@ -577,7 +651,7 @@ function Trackers.render(color)
 
   -- Poison on the drop.
   outlined(tile, tostring(p.poison), POISON_SLOT.x, POISON_SLOT.z + POISON_NUMBER_DZ, 300,
-    p.poison >= POISON_LETHAL - 3 and WARN or INK,
+    p.poison >= poisonLethal() - 3 and WARN or INK,
     handler(key .. "poison", function(pc, alt) Trackers.changePoison(color, alt and -1 or 1, pc) end),
     "Poison: click +1, right-click -1", 700, 700)
 

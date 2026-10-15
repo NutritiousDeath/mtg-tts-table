@@ -31,6 +31,7 @@
     !endturn     end your turn (active player)
     !layout 4    four players, one per side (White, Red, Green, Blue)
     !layout 2    two players facing each other (White, Green)
+    !layout 2hg  Two-Headed Giant: White + Red vs Green + Blue, two seats per side, 60 shared life per team
     !search      search your library by name, type or rules text
     !triggers off / on   turn trigger detection off / on
     !order off / on      stop / start asking you to order simultaneous triggers
@@ -113,7 +114,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.66 (Yuriko deck audit: ninjutsu, sneak, empty-library wins)"
+SCRIPT_VERSION = "1.67 (Two-Headed Giant table: layout, teams, shared life and poison)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -660,17 +661,45 @@ function onChat(message, sender)
     return false
   end
 
-  if message == "!layout 4" or message == "!layout 2" then
-    local layout = message == "!layout 4" and "four" or "two"
+  -- Any case and spacing: "!layout 2HG", "!Layout 2hg ", "!layout 4".
+  local lay = message:lower():gsub("^%s+", ""):gsub("%s+$", ""):gsub("%s+", " ")
+  if lay:sub(1, 7) == "!layout" then
+    local arg = lay:sub(9)
+    local layout = (arg == "4" and "four") or (arg == "2" and "two") or ((arg == "2hg" or arg == "twohg") and "twohg") or nil
+    if layout == nil then
+      broadcastToColor("Layouts: !layout 4 (four players), !layout 2 (two players), !layout 2hg (Two-Headed Giant).",
+        sender.color, { 1, 0.6, 0.2 })
+      return false
+    end
+    if GameState.data.started then
+      broadcastToColor("A game is running: the layout can't change mid-game. Type !reset first (clears the game: life, turns,"
+        .. " mulligans; the cards stay where they are), then !layout " .. arg .. ".", sender.color, { 1, 0.6, 0.2 })
+      return false
+    end
     TableSetup.setLayout(layout)
+    -- Starting life for the layout (Start Game sets it again).
+    for _, c in ipairs(TableSetup.activeSeats()) do
+      local p = GameState.player(c)
+      if p then
+        p.life = (layout == "twohg") and Trackers.TEAM_LIFE_2HG or GameState.format().startingLife
+        p.poison = 0
+      end
+    end
+    ImportCards.ensure()
     Trackers.ensureTableDisplay()
     Actions.ensure()
     Turns.ensureStrips()
     ManaChips.ensure()
     Stack.ensure()
     TableUI.build()
-    broadcastToAll("Table layout: " .. (layout == "four" and "4 players" or "2 players")
-      .. " (" .. table.concat(TableSetup.activeSeats(), ", ") .. ")", { 0.7, 0.85, 1 })
+    if layout == "twohg" then
+      broadcastToAll("Table layout: Two-Headed Giant. Team White + Red (south) vs team Green + Blue (north). Each team shares "
+        .. Trackers.TEAM_LIFE_2HG .. " life and 15 poison; 21 damage from one commander to one player still knocks out that player's team.",
+        { 0.7, 0.85, 1 })
+    else
+      broadcastToAll("Table layout: " .. (layout == "four" and "4 players" or "2 players")
+        .. " (" .. table.concat(TableSetup.activeSeats(), ", ") .. ")", { 0.7, 0.85, 1 })
+    end
     return false
   end
 

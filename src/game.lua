@@ -260,7 +260,8 @@ end
 local function resetPlayer(color)
   local p = GameState.player(color)
   local f = GameState.format()
-  p.life = f.startingLife
+  -- Two-Headed Giant: each team shares 60 life (Commander's 40, times 1.5 like 2HG's 30 for 20).
+  p.life = (TableSetup.isTeamGame and TableSetup.isTeamGame()) and Trackers.TEAM_LIFE_2HG or f.startingLife
   p.poison = 0
   p.commanderDamage = {}
   p.eliminated = false

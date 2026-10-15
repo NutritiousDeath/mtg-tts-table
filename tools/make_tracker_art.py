@@ -17,7 +17,10 @@ W, H, PX = 1400, 480, 100
 SEAT_RGB = {"White": (205, 212, 230), "Red": (230, 70, 80), "Green": (70, 220, 120), "Blue": (80, 150, 255)}
 CROWN_ORDER = {"Blue": ["White", "Red", "Green"], "White": ["Blue", "Green", "Red"],
                "Red": ["Blue", "Green", "White"], "Green": ["Blue", "White", "Red"]}
-LAYOUTS = {"four": ["White", "Red", "Green", "Blue"], "two": ["White", "Green"]}
+LAYOUTS = {"four": ["White", "Red", "Green", "Blue"], "two": ["White", "Green"], "twohg": ["White", "Red", "Green", "Blue"]}
+# Two-Headed Giant: teams White + Red (south) and Green + Blue (north). Crowns are only the other team's
+# commanders; the life number is the team's shared life.
+CROWN_ORDER_2HG = {"White": ["Green", "Blue"], "Red": ["Green", "Blue"], "Green": ["White", "Red"], "Blue": ["White", "Red"]}
 
 HEART = (0.0, 0.0, 4.2)
 POISON = (-5.0, 0.0, 1.8)
@@ -90,7 +93,8 @@ def build(layout, color):
     paste_icon(img, "tracker_poison.png", *POISON[:2], POISON[2])
     ring(img, -PLUS_MINUS_X, 0, rgb)
     ring(img, PLUS_MINUS_X, 0, rgb)
-    opponents = [c for c in CROWN_ORDER[color] if c in LAYOUTS[layout] and c != color]
+    order = CROWN_ORDER_2HG if layout == "twohg" else CROWN_ORDER
+    opponents = [c for c in order[color] if c in LAYOUTS[layout] and c != color]
     for z, opp in zip(ROWS[len(opponents)], opponents):
         paste_icon(img, "tracker_crown_%s.png" % opp, CROWN_X, z, CROWN_SIZE)
     out = os.path.join(ICONS, "tracker_bg_%s_%s.png" % (layout, color))
@@ -150,6 +154,12 @@ def build_crownchip(color):
 
 
 if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1:
+        # "python tools/make_tracker_art.py twohg" rebuilds only that layout's tiles.
+        for color in LAYOUTS[sys.argv[1]]:
+            print(build(sys.argv[1], color))
+        raise SystemExit(0)
     for color in SEAT_RGB:
         print(build_crownchip(color))
     for color in SEAT_RGB:
