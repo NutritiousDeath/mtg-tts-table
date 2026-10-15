@@ -354,8 +354,40 @@ function ManaChips.landTypes(seat)
   return out
 end
 
+-- "{T}, Sacrifice this token: Add one mana of any color." (Treasure, Lotus Petal, Gold...): a mana
+-- ability, so no stack. Tapping it adds the mana and the card is sacrificed right away.
+function ManaChips.isSacMana(obj)
+  local text = oracleOf(obj)
+  return text:find("{t}, sacrifice [^:]*: add") ~= nil
+end
+
+local function sacAfterMana(obj, seat)
+  Wait.time(function()
+    if obj and not obj.isDestroyed() then
+      printToAll("MTG > " .. seat .. " sacrifices " .. obj.getName() .. " for mana.", { 0.75, 0.8, 0.9 })
+      Combat.removeCard(obj, "graveyard")
+    end
+  end, 0.6)
+end
+
+-- Right-click "Sacrifice for mana": tap it, add the mana, sacrifice it (no stack).
+function ManaChips.sacForMana(obj, seat)
+  if obj == nil or obj.isDestroyed() then
+    return
+  end
+  local s = TableSetup.seat(seat)
+  if s then
+    local r = obj.getRotation()
+    obj.setRotation({ r.x, (s.yaw + 90) % 360, r.z })
+  end
+  ManaChips.onTap(obj, seat)
+end
+
 function ManaChips.onTap(obj, seat)
   local text = oracleOf(obj)
+  if text:find("{t}, sacrifice [^:]*: add") then
+    sacAfterMana(obj, seat)
+  end
   -- Bloom Tender: one mana of each color among your permanents.
   if text:find("for each color among permanents you control, add one mana of that color", 1, true) then
     local cols = ManaChips.colorsAmong(seat)
