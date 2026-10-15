@@ -114,7 +114,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.67 (Two-Headed Giant table: layout, teams, shared life and poison)"
+SCRIPT_VERSION = "1.68 (ninjutsu fixes, equipment tucks under creatures, table flip, 2HG Planechase chest)"
 
 function onLoad(saved)
   GameLog.setup()
