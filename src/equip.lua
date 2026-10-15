@@ -215,15 +215,51 @@ local function refresh(obj)
   end
 end
 
-local function offsetFor(host, att)
+local TUCK_STEP = 0.6   -- how much of each tucked attachment peeks out past the creature's top edge
+
+-- Where the creature's "top" points (toward the table centre for its seat; the card's own top
+-- when the seat is unknown), as a flat unit vector.
+local function topDir(host)
   local _, seat = onField(host)
   local s = seat and TableSetup.seat(seat)
-  local p = host.getPosition()
-  if s == nil then
-    return { x = p.x + 0.9, y = p.y + 0.1, z = p.z + 0.9 }
+  if s then
+    return s.inward.x, s.inward.z, s.yaw
   end
-  -- Peeks out toward the owner and to the right.
-  return { x = p.x + s.right.x * 0.9 + s.outward.x * 0.9, y = p.y + 0.15, z = p.z + s.right.z * 0.9 + s.outward.z * 0.9 }
+  local ok, w = pcall(function() return host.positionToWorld({ 0, 0, -1 }) end)
+  local p = host.getPosition()
+  if ok and w then
+    local dx, dz = w.x - p.x, w.z - p.z
+    local len = math.sqrt(dx * dx + dz * dz)
+    if len > 0.001 then
+      return dx / len, dz / len, host.getRotation().y
+    end
+  end
+  return 0, 1, host.getRotation().y
+end
+
+-- Tuck a creature's Equipment / Auras UNDER it, fanned out past its top edge so only each one's
+-- name bar shows: the creature stays on top and its labels stay readable. The first attachment is
+-- nearest, each later one peeks out a little further (and sits lower).
+function Equip.tuck(host)
+  if host == nil or host.isDestroyed() then
+    return
+  end
+  local list = Equip.attachments(host)
+  if #list == 0 then
+    return
+  end
+  local p = host.getPosition()
+  local ix, iz, yaw = topDir(host)
+  local n = #list
+  for i, a in ipairs(list) do
+    if a.held_by_color == nil then
+      a.setLock(false)
+      a.setRotation({ 0, yaw, 0 })
+      a.setPosition({ x = p.x + ix * TUCK_STEP * i, y = p.y + 0.03 * (n - i), z = p.z + iz * TUCK_STEP * i })
+    end
+  end
+  -- The creature settles back down on top of its gear.
+  host.setPosition({ x = p.x, y = p.y + 0.03 * n + 0.15, z = p.z })
 end
 
 function Equip.attach(att, host, byColor, quiet)
@@ -235,7 +271,7 @@ function Equip.attach(att, host, byColor, quiet)
     return
   end
   attached()[att.getGUID()] = host.getGUID()
-  att.setPositionSmooth(offsetFor(host, att), false, true)
+  Equip.tuck(host)
   if not quiet then
     printToAll("MTG > " .. att.getName() .. " is attached to " .. host.getName() .. ".", GOOD)
   end
@@ -300,13 +336,10 @@ function Equip.onDrop(color, obj)
         Equip.detach(obj, "moved away")
       elseif current then
         -- Dropped back near its creature: tuck it back into place.
-        obj.setPositionSmooth(offsetFor(current, obj), false, true)
+        Equip.tuck(current)
       end
     elseif isCreature(obj) then
-      for _, a in ipairs(Equip.attachments(obj)) do
-        a.setPositionSmooth(offsetFor(obj, a), false, true)
-        a.setRotationSmooth(obj.getRotation(), false, true)
-      end
+      Equip.tuck(obj)
     end
   end, 0.9)
 end

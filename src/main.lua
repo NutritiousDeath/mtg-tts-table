@@ -289,10 +289,18 @@ end
 -- (combat.lua Combat.tokenGone), as tokens cease to exist outside the battlefield.
 function tryObjectEnterContainer(container, obj)
   local ok, res = pcall(function()
-    if obj == nil or obj.type ~= "Card" or not obj.hasTag("Token") or container == nil then
+    if obj == nil or obj.type ~= "Card" or container == nil then
       return true
     end
     local r = Zones.regionAt(container.getPosition()).region
+    -- Permanents never merge into a deck on the battlefield (Equipment dropped on a creature,
+    -- an Aura, two creatures bumped together): they stay separate cards.
+    if (r == "battlefield" or r == "lands") and obj.hasTag("MTGCard") then
+      return false
+    end
+    if not obj.hasTag("Token") then
+      return true
+    end
     if r == "graveyard" or r == "exile" or r == "library" then
       return false
     end

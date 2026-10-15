@@ -272,18 +272,45 @@ function Counters.render(obj)
   if c.tp ~= 0 or c.tt ~= 0 then
     table.insert(parts, "turn " .. sgn(c.tp) .. "/" .. sgn(c.tt))
   end
-  if eqP ~= 0 or eqT ~= 0 then
-    table.insert(parts, "gear " .. sgn(eqP) .. "/" .. sgn(eqT))
-  end
   if sP ~= 0 or sT ~= 0 then
     table.insert(parts, "static " .. sgn(sP) .. "/" .. sgn(sT))
   end
-  if #parts > 0 then
+  -- Equipment / Auras on it (they're tucked under it): one gold EQUIPPED line, drawn below.
+  local eqHost = Equip and Equip.hostOf and Equip.hostOf(obj)
+  local eqList = (not eqHost and Equip and Equip.attachments) and Equip.attachments(obj) or {}
+  local gearKw, gearSeen, gearTips = {}, {}, {}
+  local gearP, gearT = 0, 0
+  for _, a in ipairs(eqList) do
+    local m = Equip.modsOf and Equip.modsOf(a)
+    if m then
+      gearP, gearT = gearP + m.dp, gearT + m.dt
+    end
+    local line = tostring(a.getName())
+    if m and (m.dp ~= 0 or m.dt ~= 0) then
+      line = line .. ": " .. sgn(m.dp) .. "/" .. sgn(m.dt)
+    end
+    if m and #m.list > 0 then
+      line = line .. (line:find(":", 1, true) and ", " or ": ") .. table.concat(m.list, ", ")
+      for _, k in ipairs(m.list) do
+        if k ~= "protection" and not gearSeen[k] then
+          gearSeen[k] = true
+          table.insert(gearKw, k)
+        end
+      end
+    end
+    table.insert(gearTips, line)
+  end
+  if eqP - gearP ~= 0 or eqT - gearT ~= 0 then
+    table.insert(parts, "paired " .. sgn(eqP - gearP) .. "/" .. sgn(eqT - gearT))
+  end
+  if #parts > 0 or eqP ~= 0 or eqT ~= 0 then
     local st = Counters.stats(obj)
     if type(st.power) == "number" and type(st.toughness) == "number" then
       table.insert(big, st.power .. "/" .. st.toughness)
     end
-    wrap(table.concat(parts, " | "), INFO_WRAP, info)
+    if #parts > 0 then
+      wrap(table.concat(parts, " | "), INFO_WRAP, info)
+    end
   end
   -- Planeswalkers on the battlefield show loyalty on their loyalty box (walkers.lua) instead.
   if c.loyalty ~= 0 and not (Walkers and Walkers.handles(obj)) then
@@ -294,6 +321,9 @@ function Counters.render(obj)
   end
   -- Keywords gained until end of turn, from equipment and from other permanents (Sliver lords...).
   local kws, seenK = {}, {}
+  for k in pairs(gearSeen) do
+    seenK[k] = true   -- shown on the gold EQUIPPED line instead
+  end
   local function addKw(k)
     if k and not seenK[k] then
       seenK[k] = true
@@ -315,10 +345,6 @@ function Counters.render(obj)
   if #pro > 0 then
     wrap("protection from " .. table.concat(pro, ", "), INFO_WRAP, info)
   end
-  -- Equipment and Auras: the creature shows what they do to its numbers and keywords (above);
-  -- for the rest of their text, a small RTFC tag points at the attached card (drawn below).
-  local eqHost = Equip and Equip.hostOf and Equip.hostOf(obj)
-  local eqList = (not eqHost and Equip and Equip.attachments) and Equip.attachments(obj) or {}
   local ringBadge = Ring and Ring.badge and Ring.badge(obj)
   if ringBadge then
     wrap(ringBadge, INFO_WRAP, info)
@@ -360,61 +386,8 @@ function Counters.render(obj)
     })
     sickIndex[obj.getGUID()] = #obj.getButtons() - 1
   end
-  -- Attached gear: "RTFC" (read the card) on the creature's edge, with an arrow toward where the
-  -- equipment / aura peeks out. The attached card itself just says what it's on.
-  if #eqList > 0 then
-    local lz, lx = 1, 1
-    pcall(function()
-      local lp = obj.positionToLocal(eqList[1].getPosition())
-      lz = (lp.z or 0) >= 0 and 1 or -1
-      lx = (lp.x or 0) >= 0 and 1 or -1
-    end)
-    local names, tips = {}, {}
-    for _, a in ipairs(eqList) do
-      table.insert(names, tostring(a.getName()))
-      local m = Equip.modsOf and Equip.modsOf(a)
-      local line = tostring(a.getName())
-      if m and (m.dp ~= 0 or m.dt ~= 0) then
-        line = line .. ": " .. sgn(m.dp) .. "/" .. sgn(m.dt)
-      end
-      if m and #m.list > 0 then
-        line = line .. (line:find(":", 1, true) and ", " or ": ") .. table.concat(m.list, ", ")
-      end
-      table.insert(tips, line)
-    end
-    -- On the side away from the gear (so it isn't covered), clear of the Zzz badge.
-    local x = -lx * 0.5
-    local z = lz * 1.25
-    if sickIndex[obj.getGUID()] ~= nil and x > 0 and lz > 0 then
-      z = 0.92
-    end
-    obj.createButton({
-      click_function = "counters_noop",
-      function_owner = Global,
-      label = "RTFC " .. (lz > 0 and "▼" or "▲") .. (#eqList > 1 and (" x" .. #eqList) or ""),
-      tooltip = "Read the attached card" .. (#eqList > 1 and "s" or "") .. " for the rest of what " .. (#eqList > 1 and "they do" or "it does")
-        .. ":\n" .. table.concat(tips, "\n"),
-      position = { x, LABEL_Y, z },
-      rotation = { 0, 0, 0 },
-      width = 520, height = 170, font_size = 120,
-      font_color = { 1, 0.85, 0.4 },
-      color = { 0.08, 0.06, 0.02, 0.9 },
-    })
-  end
-  if eqHost then
-    obj.createButton({
-      click_function = "counters_noop",
-      function_owner = Global,
-      label = "ON " .. tostring(eqHost.getName()):sub(1, 16),
-      tooltip = "Attached to " .. tostring(eqHost.getName()) .. ". Its numbers and keywords show on that creature.",
-      position = { 0, LABEL_Y, -1.28 },
-      rotation = { 0, 0, 0 },
-      width = 860, height = 150, font_size = 105,
-      font_color = { 1, 0.85, 0.4 },
-      color = { 0.08, 0.06, 0.02, 0.9 },
-    })
-  end
   local bigH = 0
+  local edge = nil   -- bottom edge (card z) of the labels drawn so far
   if #big > 0 then
     bigH = 90 + math.floor(LABEL_FONT * 1.15) * #big
     obj.createButton({
@@ -432,6 +405,7 @@ function Counters.render(obj)
       font_color = { 1, 1, 1 },
       color = { 0, 0, 0, 0.8 },
     })
+    edge = LABEL_Z + bigH / 1000
   end
   if #info > 0 then
     local infoH = 60 + math.floor(INFO_FONT * 1.15) * #info
@@ -452,6 +426,37 @@ function Counters.render(obj)
       font_size = INFO_FONT,
       font_color = { 0.85, 0.95, 1 },
       color = { 0, 0, 0, 0.82 },
+    })
+    edge = z + infoH / 1000
+  end
+  -- EQUIPPED: what the tucked gear adds in total, and the keywords it gives. Hover for each piece.
+  if #eqList > 0 then
+    local gold = {}
+    local head = "EQUIPPED"
+    if gearP ~= 0 or gearT ~= 0 then
+      head = head .. " " .. sgn(gearP) .. "/" .. sgn(gearT)
+    end
+    table.insert(gold, head)
+    if #gearKw > 0 then
+      wrap(table.concat(gearKw, ", "), INFO_WRAP, gold)
+    end
+    local goldH = 60 + math.floor(INFO_FONT * 1.15) * #gold
+    local z = LABEL_Z
+    if edge then
+      z = edge + 0.04 + goldH / 1000
+    end
+    obj.createButton({
+      click_function = "counters_noop",
+      function_owner = Global,
+      label = table.concat(gold, "\n"),
+      tooltip = "Tucked under this creature (read those cards for the rest of their text):\n" .. table.concat(gearTips, "\n"),
+      position = { 0, LABEL_Y, z },
+      rotation = { 0, 0, 0 },
+      width = 900,
+      height = goldH,
+      font_size = INFO_FONT,
+      font_color = { 1, 0.85, 0.4 },
+      color = { 0.1, 0.07, 0.01, 0.9 },
     })
   end
   Counters.decorate(obj)
