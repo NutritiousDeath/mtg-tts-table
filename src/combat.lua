@@ -1751,7 +1751,14 @@ end
 function Combat.onStackEmpty()
   local c = GameState.data.combat
   if c and c.waitingStack and stepId() == "damage" then
-    startDamage()
+    -- A moment's wait: whatever just resolved (a ninja, a Sneak creature) is still landing and
+    -- joins the attack once it does; the damage list has to include it.
+    Wait.time(function()
+      local c2 = GameState.data.combat
+      if c2 and c2.waitingStack and stepId() == "damage" and (Stack == nil or Stack.isEmpty()) then
+        startDamage()
+      end
+    end, 1.2)
   end
 end
 
@@ -1916,30 +1923,43 @@ local function unblockedAttackers(seat)
 end
 
 -- Put a card onto the battlefield tapped and attacking `target` (a seat or "pw:<guid>").
-local function enterAttacking(card, seat, target, why)
+-- It joins combat right away (not after it settles): the stack emptying can open combat damage
+-- in the same moment, and the damage list must already include it.
+local function enterAttackingTarget(card, seat, target, why)
   local s = TableSetup.seat(seat)
   card.setLock(false)
   card.setRotation({ 0, (s.yaw + 90) % 360, 0 })
   card.setPosition(TableSetup.slot(seat, "battlefield", TableSetup.SURFACE_TOP + 2))
+  local c = GameState.data.combat
+  local g = card.getGUID()
+  if c and c.attackers and (stepId() == "blockers" or stepId() == "damage") then
+    state()
+    c.attackers[g] = target
+    local have = false
+    for _, x in ipairs(c.order) do
+      if x == g then have = true end
+    end
+    if not have then
+      table.insert(c.order, g)
+    end
+    c.blockOrder[g] = {}
+    c.blocked[g] = nil
+    c.gone[g] = nil
+  end
+  printToAll("MTG > " .. card.getName() .. " enters tapped and attacking " .. targetLabel(target) .. " (" .. why .. ").", { 0.55, 0.9, 0.6 })
   Wait.time(function()
     if card.isDestroyed() then
       return
     end
     pcall(Zones.refresh, card)
-    local c = GameState.data.combat
-    if c and c.attackers and (stepId() == "blockers" or stepId() == "damage") then
-      local g = card.getGUID()
-      c.attackers[g] = target
-      table.insert(c.order, g)
-      c.blockOrder[g] = {}
-    end
     if Counters and Counters.setup then
       Counters.setup(card)
     end
-    printToAll("MTG > " .. card.getName() .. " enters tapped and attacking " .. targetLabel(target) .. " (" .. why .. ").", { 0.55, 0.9, 0.6 })
+    if Combat.refresh then
+      pcall(Combat.refresh)
+    end
   end, 0.8)
 end
-Combat.enterAttacking = enterAttacking
 
 function Combat.ninjutsu(card, color, opt)
   if card == nil or card.isDestroyed() then
@@ -2035,7 +2055,7 @@ function Combat.ninjutsuResolve(guid)
     return false
   end
   GameState.data.ninjutsuPending[guid] = nil
-  enterAttacking(card, p.seat, p.target, "ninjutsu")
+  enterAttackingTarget(card, p.seat, p.target, "ninjutsu")
   return true
 end
 
@@ -2066,8 +2086,11 @@ function Combat.addNinjutsuMenu(obj, region)
   if region ~= "hand" and region ~= "command" then
     return
   end
-  local loc = Zones and Zones.locationOf and Zones.locationOf(obj)
-  local seat = loc and loc.seat
+  local seat = Zones and Zones.handOwner and Zones.handOwner(obj)
+  if seat == nil then
+    local loc = Zones and Zones.locationOf and Zones.locationOf(obj)
+    seat = loc and loc.seat
+  end
   for _, opt in ipairs(Combat.ninjutsuOptions(obj, seat)) do
     if region == "hand" or opt.kind == "commander ninjutsu" then
       local label = (opt.kind == "sneak" and "Sneak " or "Ninjutsu ") .. opt.cost

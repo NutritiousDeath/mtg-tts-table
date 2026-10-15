@@ -187,6 +187,13 @@ local function handOwner(obj)
   return nil
 end
 
+Zones.handOwner = function(obj)
+  if obj == nil or obj.isDestroyed() then
+    return nil
+  end
+  return handOwner(obj)
+end
+
 -- A card made by script (a token, a copy) has no earlier area: say it came
 -- from the stack, so "enters the battlefield" watchers see it arrive.
 -- A copy made in place (a token split off a pile) is where the original is, with no "enters".

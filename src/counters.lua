@@ -688,10 +688,25 @@ function Counters.regionOf(obj)
     return ""
   end
   local loc = Zones.locationOf(obj)
+  if loc and loc.region == "hand" then
+    return "hand"
+  end
+  local here = Zones.regionAt(obj.getPosition())
+  -- Off every mat: it may be sitting in a hand whose "entered" event was missed (a card dealt
+  -- or drawn by script). Ask TTS which hand holds it, and fix the tracking.
+  if here.region == "table" and Zones.handOwner then
+    local owner = Zones.handOwner(obj)
+    if owner then
+      if loc == nil or loc.region ~= "hand" then
+        pcall(Zones.refresh, obj)
+      end
+      return "hand"
+    end
+  end
   if loc then
     return loc.region
   end
-  return Zones.regionAt(obj.getPosition()).region
+  return here.region
 end
 
 function Counters.menuSig(obj)
@@ -708,7 +723,8 @@ function Counters.menuSig(obj)
   local nj = ""
   if region == "hand" and Combat and Combat.ninjutsuOptions then
     local loc = Zones and Zones.locationOf and Zones.locationOf(obj)
-    local okn, opts = pcall(Combat.ninjutsuOptions, obj, loc and loc.seat)
+    local hs = Zones and Zones.handOwner and Zones.handOwner(obj)
+    local okn, opts = pcall(Combat.ninjutsuOptions, obj, hs or (loc and loc.seat))
     nj = (okn and opts and #opts > 0) and "|nj" or ""
   end
   return region .. "|" .. step .. att .. sb .. pk .. prep .. nj
