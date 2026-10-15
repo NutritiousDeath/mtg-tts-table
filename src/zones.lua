@@ -257,6 +257,9 @@ end
 
 -- A card entered a hand zone.
 function Zones.onEnterZone(zone, obj)
+  if Flip and Flip.chaosOn then
+    return   -- a card flying through a hand during a table flip isn't drawn
+  end
   if not isCard(obj) or zone == nil or zone.type ~= "Hand" then
     return
   end

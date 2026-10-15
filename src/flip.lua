@@ -126,14 +126,107 @@ function Flip.play(color, reverse)
   end, STEP, FRAMES)
 end
 
--- The real chaos: every loose face-up card, token and die on the table is
--- launched into the air, spinning, then everything glides back to exactly
--- where it was. Face-down cards, cards in hands, decks and locked tiles stay
--- put (nothing hidden can flip over, no library scatters). Card tracking is
--- paused meanwhile so nothing counts as a move.
+-- The real chaos, like Tabletop Simulator's own "Flip Table" (which only works on TTS's built-in
+-- tables; ours is a custom surface, so this does it by script):
+--   * the play surface and stone frame tip up off the flipper's edge, pivoting on the far edge;
+--   * every loose card, token, die, counter and pile on the table is launched, spinning;
+--   * the mat pictures and outlines vanish while the table is up;
+--   * a few seconds later the table drops back and EVERYTHING glides back to exactly where it was.
+-- Kept safe: cards in hands, libraries and face-down cards stay put (nothing hidden gets revealed),
+-- and locked pieces (life tiles, trackers) don't move. While it runs, nothing can merge into a deck,
+-- fall into a hand, or count as a move (zones.lua checks Flip.chaosOn).
 Flip.chaosOn = false
 
-function Flip.chaos()
+local TIP_MAX = 115        -- degrees the table tips up
+local TIP_UP = 0.8         -- seconds to tip up
+local HOLD = 1.6           -- seconds it stays up
+local TIP_DOWN = 0.9       -- seconds to drop back
+local TICK = 0.03
+
+-- Rotate vector v about unit axis a by angle t (radians).
+local function rodrigues(v, a, t)
+  local c, sn = math.cos(t), math.sin(t)
+  local cx = a.y * v.z - a.z * v.y
+  local cy = a.z * v.x - a.x * v.z
+  local cz = a.x * v.y - a.y * v.x
+  local dot = a.x * v.x + a.y * v.y + a.z * v.z
+  return {
+    x = v.x * c + cx * sn + a.x * dot * (1 - c),
+    y = v.y * c + cy * sn + a.y * dot * (1 - c),
+    z = v.z * c + cz * sn + a.z * dot * (1 - c),
+  }
+end
+
+-- The table pieces that tip: surface and frame, with where they rest.
+local function tablePieces()
+  local out = {}
+  local st = GameState.data and GameState.data.table or {}
+  for _, g in ipairs({ st.surface, st.frame }) do
+    local o = g and getObjectFromGUID(g)
+    if o and not o.isDestroyed() then
+      table.insert(out, { obj = o, pos = o.getPosition(), rot = o.getRotation() })
+    end
+  end
+  return out
+end
+
+-- Tip setup for the flipper's seat: the pivot on the far edge and the axis to turn about (snapped
+-- to the table's own x or z axis so the frame's Euler angles stay simple).
+local function tipFor(color)
+  local s = color and TableSetup.isActive(color) and TableSetup.seat(color)
+  local n = s and s.inward or { x = 0, z = 1 }
+  local w, d = TableSetup.surfaceSize()
+  local axis, euler, half
+  if math.abs(n.x) > math.abs(n.z) then
+    local sx = n.x > 0 and 1 or -1
+    n = { x = sx, z = 0 }
+    half = w / 2
+  else
+    local sz = n.z > 0 and 1 or -1
+    n = { x = 0, z = sz }
+    half = d / 2
+  end
+  -- axis = up x n: turning by +angle lifts the flipper's (near) edge.
+  axis = { x = n.z, y = 0, z = -n.x }
+  if axis.x ~= 0 then
+    euler = function(deg) return { axis.x * deg, 0, 0 } end
+  else
+    euler = function(deg) return { 0, 0, axis.z * deg } end
+  end
+  local pivot = { x = n.x * half, y = TableSetup.SURFACE_TOP, z = n.z * half }
+  return pivot, axis, euler
+end
+
+local function placeTable(pieces, pivot, axis, euler, deg)
+  local t = math.rad(deg)
+  for _, e in ipairs(pieces) do
+    local o = e.obj
+    if not o.isDestroyed() then
+      local v = { x = e.pos.x - pivot.x, y = e.pos.y - pivot.y, z = e.pos.z - pivot.z }
+      local r = rodrigues(v, axis, t)
+      o.setPosition({ pivot.x + r.x, pivot.y + r.y, pivot.z + r.z })
+      local eu = euler(deg)
+      o.setRotation({ e.rot.x + eu[1], e.rot.y, e.rot.z + eu[3] })
+    end
+  end
+end
+
+-- Animate the tip from one angle to another over `secs`, then call done.
+local function tween(pieces, pivot, axis, euler, from, to, secs, done)
+  local n = math.max(1, math.floor(secs / TICK))
+  local i = 0
+  Wait.time(function()
+    i = i + 1
+    local p = i / n
+    local e = (to > from) and (1 - (1 - p) * (1 - p)) or (p * p)   -- ease out going up, ease in coming down
+    placeTable(pieces, pivot, axis, euler, from + (to - from) * e)
+    if i >= n and done then
+      done()
+    end
+  end, TICK, n)
+end
+
+function Flip.chaos(color)
   if Flip.chaosOn then
     return
   end
@@ -143,44 +236,96 @@ function Flip.chaos()
       inHand[o.getGUID()] = true
     end
   end
+  local pieces = tablePieces()
+  local skip = {}
+  for _, e in ipairs(pieces) do
+    skip[e.obj.getGUID()] = true
+  end
   local list = {}
   for _, o in ipairs(getObjects()) do
-    local kind = (o.type == "Card" and not o.is_face_down) or o.type == "Dice"
-    if kind and not o.getLock() and o.held_by_color == nil and not inHand[o.getGUID()] then
+    local ok, take = pcall(function()
+      if skip[o.getGUID()] or o.getLock() or o.held_by_color ~= nil or inHand[o.getGUID()] then
+        return false
+      end
+      if o.type == "Card" and o.is_face_down then
+        return false   -- face-down cards stay hidden
+      end
+      if o.type == "Deck" then
+        local r = Zones and Zones.regionAt(o.getPosition()).region
+        if r == "library" or o.is_face_down then
+          return false   -- libraries keep their order and stay hidden
+        end
+      end
+      return true
+    end)
+    if ok and take then
       table.insert(list, { obj = o, pos = o.getPosition(), rot = o.getRotation() })
     end
   end
-  if #list == 0 then
-    return
-  end
   Flip.chaosOn = true
+  -- Mat pictures and outlines would float in the air while the table is up.
+  local decals, lines
+  pcall(function() decals = Global.getDecals() end)
+  pcall(function() lines = Global.getVectorLines() end)
+  pcall(function() Global.setDecals({}) end)
+  pcall(function() Global.setVectorLines({}) end)
+
+  local pivot, axis, euler = tipFor(color)
+  -- Launch: up and away from the flipper, like the table went over under them.
+  local push = { x = -axis.z, z = axis.x }   -- = n, toward the far edge
   for _, e in ipairs(list) do
     local p = e.pos
-    -- Up and away from the middle, like the table went over under them.
-    e.obj.setVelocity({ p.x * 0.35 + math.random(-8, 8), math.random(22, 38), p.z * 0.35 + math.random(-8, 8) })
+    e.obj.setVelocity({ p.x * 0.25 + push.x * 10 + math.random(-8, 8), math.random(22, 38),
+      p.z * 0.25 + push.z * 10 + math.random(-8, 8) })
     e.obj.setAngularVelocity({ math.random(-25, 25), math.random(-25, 25), math.random(-25, 25) })
   end
-  Wait.time(function()
-    for _, e in ipairs(list) do
-      local o = e.obj
-      if not o.isDestroyed() then
-        o.setVelocity({ 0, 0, 0 })
-        o.setAngularVelocity({ 0, 0, 0 })
-        o.setPositionSmooth({ e.pos.x, e.pos.y + 0.5, e.pos.z }, false, false)
-        o.setRotationSmooth(e.rot, false, false)
-      end
-    end
+  tween(pieces, pivot, axis, euler, 0, TIP_MAX, TIP_UP, function()
     Wait.time(function()
-      Flip.chaosOn = false
-    end, 2.5)
-  end, 3.5)
+      tween(pieces, pivot, axis, euler, TIP_MAX, 0, TIP_DOWN, function()
+        -- Exactly back where it was.
+        for _, e in ipairs(pieces) do
+          if not e.obj.isDestroyed() then
+            e.obj.setPosition(e.pos)
+            e.obj.setRotation(e.rot)
+            e.obj.setLock(true)
+          end
+        end
+        -- Everything glides home, locked on the way so nothing bumps anything.
+        for _, e in ipairs(list) do
+          local o = e.obj
+          if not o.isDestroyed() then
+            o.setVelocity({ 0, 0, 0 })
+            o.setAngularVelocity({ 0, 0, 0 })
+            o.setLock(true)
+            o.setPositionSmooth({ e.pos.x, e.pos.y + 0.05, e.pos.z }, false, false)
+            o.setRotationSmooth(e.rot, false, false)
+          end
+        end
+        pcall(function() if decals then Global.setDecals(decals) end end)
+        pcall(function() if lines then Global.setVectorLines(lines) end end)
+        Wait.time(function()
+          for _, e in ipairs(list) do
+            local o = e.obj
+            if not o.isDestroyed() then
+              o.setPosition(e.pos)
+              o.setRotation(e.rot)
+              o.setLock(false)
+            end
+          end
+          Wait.time(function()
+            Flip.chaosOn = false
+          end, 0.5)
+        end, 2.2)
+      end)
+    end, HOLD)
+  end)
 end
 
 function Flip.flip(color)
   broadcastToAll((color or "Someone") .. " flipped the table!", { 1, 0.33, 0.45 })
   Flip.play(color or "Someone", false)
   -- Launch everything as the table "tips" in the animation.
-  Wait.time(function() Flip.chaos() end, 0.6)
+  Wait.time(function() Flip.chaos(color) end, 0.6)
 end
 
 function Flip.unflip(color)

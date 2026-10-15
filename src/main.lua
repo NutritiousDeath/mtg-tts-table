@@ -289,6 +289,10 @@ end
 -- (combat.lua Combat.tokenGone), as tokens cease to exist outside the battlefield.
 function tryObjectEnterContainer(container, obj)
   local ok, res = pcall(function()
+    -- Table flip in progress: nothing merges into anything (it all goes back where it was).
+    if Flip and Flip.chaosOn then
+      return false
+    end
     if obj == nil or obj.type ~= "Card" or container == nil then
       return true
     end
