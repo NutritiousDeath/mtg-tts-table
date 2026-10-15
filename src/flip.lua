@@ -226,10 +226,26 @@ local function tween(pieces, pivot, axis, euler, from, to, secs, done)
   end, TICK, n)
 end
 
+-- Only real game pieces fly: never zones, hand zones, the table, or scripted helpers.
+local FLIES = { Card = true, Deck = true, Dice = true, Tile = true, Token = true, Chip = true, Figurine = true,
+  Generic = true, Coin = true }
+
+local runChaos   -- defined below
+
 function Flip.chaos(color)
   if Flip.chaosOn then
     return
   end
+  local ok, err = pcall(runChaos, color)
+  if not ok then
+    Flip.chaosOn = false
+    print("MTG > Table flip hit a snag: " .. tostring(err))
+  end
+  -- Never leave the table stuck in flip mode.
+  Wait.time(function() Flip.chaosOn = false end, 15)
+end
+
+runChaos = function(color)
   local inHand = {}
   for _, c in ipairs(TableSetup.activeSeats()) do
     for _, o in ipairs(Player[c].getHandObjects() or {}) do
@@ -244,7 +260,8 @@ function Flip.chaos(color)
   local list = {}
   for _, o in ipairs(getObjects()) do
     local ok, take = pcall(function()
-      if skip[o.getGUID()] or o.getLock() or o.held_by_color ~= nil or inHand[o.getGUID()] then
+      if not FLIES[o.type] or skip[o.getGUID()] or o.getLock() or o.held_by_color ~= nil
+          or inHand[o.getGUID()] or o.interactable == false then
         return false
       end
       if o.type == "Card" and o.is_face_down then
@@ -275,9 +292,11 @@ function Flip.chaos(color)
   local push = { x = -axis.z, z = axis.x }   -- = n, toward the far edge
   for _, e in ipairs(list) do
     local p = e.pos
-    e.obj.setVelocity({ p.x * 0.25 + push.x * 10 + math.random(-8, 8), math.random(22, 38),
-      p.z * 0.25 + push.z * 10 + math.random(-8, 8) })
-    e.obj.setAngularVelocity({ math.random(-25, 25), math.random(-25, 25), math.random(-25, 25) })
+    pcall(function()
+      e.obj.setVelocity({ p.x * 0.25 + push.x * 10 + math.random(-8, 8), math.random(22, 38),
+        p.z * 0.25 + push.z * 10 + math.random(-8, 8) })
+      e.obj.setAngularVelocity({ math.random(-25, 25), math.random(-25, 25), math.random(-25, 25) })
+    end)
   end
   tween(pieces, pivot, axis, euler, 0, TIP_MAX, TIP_UP, function()
     Wait.time(function()
