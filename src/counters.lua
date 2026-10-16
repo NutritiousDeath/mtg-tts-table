@@ -31,7 +31,9 @@ Counters = {}
 -- tp / tt: power / toughness changes until end of turn ("gets +2/+0 until
 -- end of turn", effects.lua); they can be negative and clear at cleanup.
 -- pc / tc: "+1/+0" and "+0/+1" counters (they change power / toughness only).
-local KINDS = { "plus", "minus", "loyalty", "other", "tp", "tt", "pc", "tc" }
+-- bp / bt: a base power and toughness it was given ("becomes ... with base power and toughness 4/4", Figure of
+-- Destiny); bs: how far it has levelled (1 Spirit, 2 Warrior, 3 Avatar); bk = 1: Avatar (flying, first strike).
+local KINDS = { "plus", "minus", "loyalty", "other", "tp", "tt", "pc", "tc", "bp", "bt", "bs", "bk" }
 
 -- The counter kind for the name on the card ("+1/+1", "+1/+0", "loyalty", "quest"...).
 function Counters.kindOf(label)
@@ -65,7 +67,7 @@ function Counters.carry(old, obj)
 end
 
 function Counters.get(obj)
-  local c = { plus = 0, minus = 0, loyalty = 0, other = 0, tp = 0, tt = 0, pc = 0, tc = 0 }
+  local c = { plus = 0, minus = 0, loyalty = 0, other = 0, tp = 0, tt = 0, pc = 0, tc = 0, bp = 0, bt = 0, bs = 0, bk = 0 }
   local memo = obj and obj.memo
   if obj and memo then
     pcall(function() memoOf[obj.getGUID()] = memo end)
@@ -116,9 +118,13 @@ function Counters.stats(obj)
     local n = tonumber(v)
     return n and (n + bonus + extra) or v
   end
+  local baseP, baseT = data.power, data.toughness
+  if (c.bp or 0) > 0 or (c.bt or 0) > 0 then
+    baseP, baseT = c.bp, c.bt
+  end
   return {
-    power = data.power and apply(data.power, c.tp + c.pc + eqP + sP) or nil,
-    toughness = data.toughness and apply(data.toughness, c.tt + c.tc + eqT + sT) or nil,
+    power = baseP and apply(baseP, c.tp + c.pc + eqP + sP) or nil,
+    toughness = baseT and apply(baseT, c.tt + c.tc + eqT + sT) or nil,
     loyalty = c.loyalty,
     counters = c,
   }
@@ -271,6 +277,9 @@ function Counters.render(obj)
   end
   if c.tp ~= 0 or c.tt ~= 0 then
     table.insert(parts, "turn " .. sgn(c.tp) .. "/" .. sgn(c.tt))
+  end
+  if (c.bp or 0) > 0 or (c.bt or 0) > 0 then
+    table.insert(parts, "base " .. c.bp .. "/" .. c.bt .. ((c.bk or 0) > 0 and " flying, first strike" or ""))
   end
   if sP ~= 0 or sT ~= 0 then
     table.insert(parts, "static " .. sgn(sP) .. "/" .. sgn(sT))
@@ -617,6 +626,10 @@ function Counters.addTempKeyword(obj, kw)
 end
 
 function Counters.hasTempKeyword(obj, kw)
+  -- Figure of Destiny as an Avatar: flying and first strike for good.
+  if (kw == "flying" or kw == "first strike") and obj and obj.memo and obj.memo:find("bk=1", 1, true) then
+    return true
+  end
   local t = GameState.data and GameState.data.tempKeywords
   return t ~= nil and t[obj.getGUID()] ~= nil and t[obj.getGUID()][kw:lower()] == true
 end

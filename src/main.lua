@@ -114,7 +114,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.68 (ninjutsu fixes, equipment tucks under creatures, table flip, 2HG Planechase chest)"
+SCRIPT_VERSION = "1.69 (Jared Carthalion deck audit: color Lieges, all-color Kavus, Leyline, Oath of Teferi)"
 
 function onLoad(saved)
   GameLog.setup()

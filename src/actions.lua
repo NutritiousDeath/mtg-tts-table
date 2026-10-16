@@ -126,6 +126,71 @@ function Actions.untapAll(color, quiet)
   return count
 end
 
+-- Murkfiend Liege ("Untap all green and/or blue creatures you control during each other player's untap
+-- step"), Seedborn Muse ("Untap all permanents you control during ..."): the other seats untap too.
+function Actions.othersUntap(active)
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    if c ~= active then
+      local what
+      for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+        if obj.type == "Card" and not obj.isDestroyed() then
+          local loc = Zones.regionAt(obj.getPosition())
+          if loc.seat == c and (loc.region == "battlefield" or loc.region == "lands") then
+            local ol = tostring(CardData.get(obj).oracle or ""):lower()
+            local w = ol:match("untap all ([%a%s/]-) you control during each other player's untap step")
+            if w then
+              what = what or {}
+              table.insert(what, { words = w, src = obj.getName() })
+            end
+          end
+        end
+      end
+      if what then
+        local s = TableSetup.seat(c)
+        local n = 0
+        for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+          if obj.type == "Card" and not obj.isDestroyed() and obj.held_by_color == nil then
+            local loc = Zones.regionAt(obj.getPosition())
+            if loc.seat == c and (loc.region == "battlefield" or loc.region == "lands") then
+              local r = obj.getRotation()
+              if math.abs(((r.y - s.yaw + 540) % 360) - 180) > 30 and not neverUntaps(obj) then
+                local tl = tostring(CardData.get(obj).typeLine or ""):lower()
+                local ok = false
+                for _, wd in ipairs(what) do
+                  local words = wd.words
+                  if words == "permanents" then
+                    ok = true
+                  elseif words:find("creatures", 1, true) and tl:find("creature", 1, true) then
+                    local cols = (Statics and Statics.colorsOf) and Statics.colorsOf(obj, c) or {}
+                    local any = false
+                    local named = false
+                    for word, key in pairs({ white = "W", blue = "U", black = "B", red = "R", green = "G" }) do
+                      if words:find(word, 1, true) then
+                        named = true
+                        if cols[key] then
+                          any = true
+                        end
+                      end
+                    end
+                    ok = ok or any or not named
+                  end
+                end
+                if ok then
+                  obj.setRotationSmooth({ r.x, s.yaw, r.z }, false, true)
+                  n = n + 1
+                end
+              end
+            end
+          end
+        end
+        if n > 0 then
+          log(c .. " untaps " .. n .. " during " .. active .. "'s untap step (" .. what[1].src .. ")")
+        end
+      end
+    end
+  end
+end
+
 -- Mark / unmark a permanent to stay tapped in its controller's next untap step.
 function Actions.setSkipUntap(obj, on, why)
   GameState.data.skipUntap = GameState.data.skipUntap or {}

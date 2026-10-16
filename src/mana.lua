@@ -162,6 +162,13 @@ local function oracleOf(obj)
   if nm ~= "" then
     text = text:gsub(nm:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "~")
   end
+  -- Leyline of the Guildpact: lands are every basic land type, so they tap for any color.
+  if Statics and Statics.landsEveryType and tostring(d.typeLine or ""):lower():find("land", 1, true) then
+    local okl, loc = pcall(function() return Zones.regionAt(obj.getPosition()) end)
+    if okl and loc and loc.seat and Statics.landsEveryType(loc.seat) then
+      text = text .. "\n{t}: add one mana of any color."
+    end
+  end
   -- Mana abilities other permanents give it (Manaweft Sliver: Slivers tap for any color).
   if Statics and Statics.grants then
     local okg, g = pcall(Statics.grants, obj)
@@ -317,10 +324,17 @@ end
 function ManaChips.colorsAmong(seat)
   local have = {}
   for _, o in ipairs(permanentsOf(seat)) do
-    local d = CardData.get(o)
-    local cols = type(d.colors) == "table" and d.colors or {}
-    for _, c in pairs(cols) do
-      have[tostring(c):upper()] = true
+    if Statics and Statics.colorsOf then
+      -- Leyline of the Guildpact / "is all colors" count too.
+      for c in pairs(Statics.colorsOf(o, seat)) do
+        have[c] = true
+      end
+    else
+      local d = CardData.get(o)
+      local cols = type(d.colors) == "table" and d.colors or {}
+      for _, c in pairs(cols) do
+        have[tostring(c):upper()] = true
+      end
     end
   end
   local out = {}

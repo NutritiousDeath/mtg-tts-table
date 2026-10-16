@@ -110,10 +110,40 @@ local function controllerOf(obj)
   return nil
 end
 
-local function usedThisTurn(obj)
+-- How many loyalty activations this planeswalker gets each turn: 2 with Oath of Teferi ("activate the
+-- loyalty abilities of planeswalkers you control twice each turn") or The Chain Veil's effect.
+local function allowedPerTurn(obj)
+  local seat = controllerOf(obj)
+  if seat == nil then
+    return 1
+  end
+  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+    if o.type == "Card" and not o.isDestroyed() then
+      local loc = Zones.regionAt(o.getPosition())
+      if loc.seat == seat and (loc.region == "battlefield" or loc.region == "lands") then
+        local ol = tostring(CardData.get(o).oracle or ""):lower()
+        if ol:find("loyalty abilities of planeswalkers you control twice each turn", 1, true) then
+          return 2
+        end
+      end
+    end
+  end
+  return 1
+end
+
+-- walkersUsed[guid] = { turn = n, count = k } (older saves: just the turn number = one use).
+local function usesThisTurn(obj)
   local used = GameState.data.walkersUsed or {}
   local t = GameState.data.turn or {}
-  return used[obj.getGUID()] ~= nil and used[obj.getGUID()] == t.taken
+  local u = used[obj.getGUID()]
+  if type(u) == "table" then
+    return u.turn == t.taken and (u.count or 1) or 0
+  end
+  return (u ~= nil and u == t.taken) and 1 or 0
+end
+
+local function usedThisTurn(obj)
+  return usesThisTurn(obj) >= allowedPerTurn(obj)
 end
 
 -- Card face in local units (TTS card at scale 1): x to the right, z toward
@@ -292,7 +322,8 @@ function Walkers.activate(obj, i, color, force)
     elseif Stack and not Stack.isEmpty() then
       problem = "Loyalty abilities need an empty stack."
     elseif usedThisTurn(obj) then
-      problem = obj.getName() .. " already used a loyalty ability this turn."
+      problem = obj.getName() .. (allowedPerTurn(obj) > 1 and " already used its two loyalty activations this turn."
+        or " already used a loyalty ability this turn.")
     elseif a.cost and a.cost < 0 and loyalty + a.cost < 0 then
       problem = obj.getName() .. " has only " .. loyalty .. " loyalty."
     end
@@ -302,7 +333,7 @@ function Walkers.activate(obj, i, color, force)
     end
   end
   GameState.data.walkersUsed = GameState.data.walkersUsed or {}
-  GameState.data.walkersUsed[obj.getGUID()] = t.taken or 0
+  GameState.data.walkersUsed[obj.getGUID()] = { turn = t.taken or 0, count = usesThisTurn(obj) + 1 }
   if a.cost and a.cost > 0 then
     Counters.place(obj, "loyalty", a.cost, color)   -- Doubling Season doubles a plus cost
   elseif a.cost and a.cost ~= 0 then

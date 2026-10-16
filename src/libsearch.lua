@@ -257,6 +257,19 @@ function LibSearch.run(color)
     if ok and f and f.nonLegendary and tostring(gmField(e.gm_notes, "typeLine") or ""):lower():find("legendary", 1, true) then
       ok = false
     end
+    -- Jared Carthalion: "multicolored card" (two or more colors in its data).
+    if ok and f and f.minColors then
+      local notes = tostring(e.gm_notes or "")
+      local a = notes:find('"colors":[', 1, true)
+      local list = a and notes:match('^%b[]', a + 9) or ""
+      local cnt = 0
+      for _ in list:gmatch('"%a"') do
+        cnt = cnt + 1
+      end
+      if cnt < f.minColors and not notes:lower():find("is all colors", 1, true) then
+        ok = false
+      end
+    end
     if ok and (lo >= 0 or hi < 999) then
       local mv = tonumber(gmField(e.gm_notes, "cmc") or "") or 0
       if mv < lo or mv > hi then
@@ -549,6 +562,10 @@ local function take(color, slot, toBattlefield, tapped, toTop, toYard)
     if lib.type == "Deck" then
       local card = lib.takeObject({ index = index, position = hand.position, rotation = { 0, s.yaw, 0 }, smooth = true })
       name = card and card.getName() or name
+      local onTakeH = LibSearch.onTakeCb and LibSearch.onTakeCb[color]
+      if card and onTakeH then
+        pcall(onTakeH, card)
+      end
       -- Fetching a card is not drawing it (Sheoldred, Notion Thief...).
       if card and fromWhere == "library" then
         GameState.data.searched = GameState.data.searched or {}
@@ -568,6 +585,10 @@ local function take(color, slot, toBattlefield, tapped, toTop, toYard)
       end
       lib.setPositionSmooth(hand.position)
       name = lib.getName()
+      local onTakeH = LibSearch.onTakeCb and LibSearch.onTakeCb[color]
+      if onTakeH then
+        pcall(onTakeH, lib)
+      end
     end
     if fromWhere == "graveyard" then
       printToAll("MTG > " .. color .. " returned " .. name .. " from their graveyard to their hand.", INFO)

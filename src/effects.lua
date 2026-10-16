@@ -119,6 +119,16 @@ function Effects.parse(text, sourceName)
   -- Several paragraphs (a spell: "This spell can't be countered." then
   -- "Destroy all creatures."): read them as sentences.
   t = t:gsub("\n", " ")
+  -- Same meaning, a form the parser knows (Deathbringer Liege, Prismatic Ending).
+  t = t:gsub("destroy target creature if it's tapped", "destroy target tapped creature")
+  local convergeNote
+  do
+    local a, b = t:find("exile target nonland permanent if its mana value is less than or equal to the number of colors of mana spent to cast this spell", 1, true)
+    if a then
+      t = t:sub(1, a - 1) .. "exile target nonland permanent" .. t:sub(b + 1)
+      convergeNote = "Prismatic Ending: only a permanent with mana value up to the number of colors spent (X)."
+    end
+  end
   -- Whole-text effects from the Beamtown Bullies deck (they only make sense on their own).
   do
     local tt = t:gsub("^%s+", ""):gsub("%s+$", "")
@@ -179,6 +189,69 @@ function Effects.parse(text, sourceName)
     if tt:find("target player takes an extra turn after this one. return up to one target nonland permanent to its owner's hand.", 1, true) then
       return only({ { what = "extraTurn", who = "you", n = 1, ask = true },
         { what = "bounce", who = "you", n = 1, type = "nonland", mine = false, other = false, theirs = false } })
+    end
+    -- Figure of Destiny: "{R/W}: ~ becomes a Kithkin Spirit with base power and toughness 4/4." and the
+    -- "If ~ is a Spirit, it becomes ..." levels.
+    do
+      local need, types, bp, bt = tt:match("^if ~ is an? (%a+), it becomes an? ([%a%s]-) with base power and toughness (%d+)/(%d+)")
+      if not bp then
+        types, bp, bt = tt:match("^~ becomes an? ([%a%s]-) with base power and toughness (%d+)/(%d+)")
+      end
+      if bp then
+        local stage = 1
+        local tw = " " .. types .. " "
+        if tw:find(" avatar ", 1, true) then
+          stage = 3
+        elseif tw:find(" warrior ", 1, true) then
+          stage = 2
+        end
+        local needStage = need == "spirit" and 1 or (need == "warrior" and 2 or (need == "avatar" and 3 or 0))
+        return only({ { what = "becomeBase", who = "you", n = 1, p = tonumber(bp), t = tonumber(bt), stage = stage,
+          needStage = needStage, need = need, types = types, kw = tt:find("flying, and first strike", 1, true) ~= nil } })
+      end
+    end
+    -- Jared Carthalion deck.
+    if tt:find("put a number of +1/+1 counters on it equal to the number of colors it is", 1, true) then
+      return only({ { what = "colorCounters", who = "you", n = 2 } })
+    end
+    if tt:find("return target multicolored card from your graveyard to your hand. if that card was all colors, draw a card and create two treasure tokens", 1, true) then
+      return only({ { what = "jaredUlt", who = "you", n = 1 } })
+    end
+    if tt:find("draw x cards and you lose x life, where x is the number of colors of mana spent to cast this spell", 1, true) then
+      return only({ { what = "painfulTruths", who = "you", n = 1 } })
+    end
+    if tt:find("search your library for a creature, instant, or sorcery card with mana value less than or equal to the number of colors of mana spent", 1, true) then
+      return only({ { what = "bringToLight", who = "you", n = 1 } })
+    end
+    if tt:find("if it doesn't have the same name as another creature you control or a creature card in your graveyard, draw a card", 1, true) then
+      return only({ { what = "guardianProject", who = "you", n = 1 } })
+    end
+    if tt:find("^if you control a creature with power 4 or greater, draw a card") then
+      return only({ { what = "drawIfPower", who = "you", n = 1, power = 4 } })
+    end
+    do
+      local gl = tt:match("^target player gains (%d+) life%.$")
+      if gl then
+        return only({ { what = "gainTarget", who = "you", n = tonumber(gl) } })
+      end
+    end
+    if tt:find("draw cards equal to the greatest power among non-human creatures you control", 1, true) then
+      return only({ { what = "drawGreatest", who = "you", n = 1, nonHuman = true } })
+    end
+    if tt:find("double the number of each kind of counter on any number of target permanents", 1, true) then
+      return only({ { what = "doubleCounters", who = "you", n = 1 } })
+    end
+    if tt:find("reveal the top ten cards of your library. for each color pair, choose a card that's exactly those colors", 1, true) then
+      return only({ { what = "nivReborn", who = "you", n = 1 } })
+    end
+    if tt == "you may tap target creature." or tt == "tap target creature." then
+      return only({ { what = "tapTarget", who = "you", n = 1, may = tt:sub(1, 7) == "you may" } })
+    end
+    if tt:find("your life total can't change and you gain protection from everything. all permanents you control phase out", 1, true) then
+      return only({ { what = "teferiProt", who = "you", n = 1 } })
+    end
+    if tt:find("put target creature card from a graveyard onto the battlefield under its owner's control", 1, true) then
+      return only({ { what = "reanimateAny", who = "you", n = 1 } })
     end
     -- Heroic Intervention.
     if tt == "permanents you control gain hexproof and indestructible until end of turn." then
@@ -1115,14 +1188,29 @@ function Effects.parse(text, sourceName)
     local stop = rest:find(" card", 1, true) or rest:find(",", 1, true) or 40
     local phrase = rest:sub(1, stop - 1)
     local q
+    local anyOf
+    -- Fetch lands and Farseek: "a Mountain or Plains card", "a Plains, Island, Swamp, or Mountain card":
+    -- any of those land types (dual lands and shocks have them too).
+    do
+      local basics = {}
+      local ph = " " .. phrase:gsub(",", " ") .. " "
+      for _, ty in ipairs({ "plains", "island", "swamp", "mountain", "forest" }) do
+        if ph:find(" " .. ty .. " ", 1, true) then
+          table.insert(basics, ty)
+        end
+      end
+      if #basics >= 2 and phrase:find(" or ", 1, true) then
+        anyOf = basics
+        q = table.concat(basics, " or ")
+      end
+    end
     for _, ty in ipairs({ "land", "creature", "artifact", "enchantment", "planeswalker", "instant", "sorcery", "equipment", "aura" }) do
-      if phrase:find(ty, 1, true) and q == nil then
+      if phrase:find(ty, 1, true) and q == nil and not (ty == "land" and phrase:find("island", 1, true) and not phrase:find(" land", 1, true)) then
         q = ty
       end
     end
     -- "an instant or sorcery card": more than one type joined by "or".
-    local anyOf
-    if phrase:find(" or ", 1, true) then
+    if anyOf == nil and phrase:find(" or ", 1, true) then
       local found = {}
       for _, ty in ipairs({ "land", "creature", "artifact", "enchantment", "planeswalker", "instant", "sorcery" }) do
         if phrase:find(ty, 1, true) then
@@ -1291,6 +1379,10 @@ function Effects.parse(text, sourceName)
         if #spec.words > 0 then
           -- "...tokens that are tapped and attacking" (Hero of Bladehold).
           local sentence = rest:sub(1, (rest:find(".", 1, true) or #rest + 1) - 1)
+          -- "a 3/3 Kavu creature token with trample that's all colors" (Jared Carthalion).
+          if sentence:find("all colors", 1, true) then
+            spec.colors = { W = true, U = true, B = true, R = true, G = true }
+          end
           local atk = sentence:find("tapped and attacking", 1, true) ~= nil
           local act = { what = "token", who = "you", n = n, spec = spec, phrase = phrase,
             attacking = atk, tapped = atk or sentence:find("tapped", 1, true) ~= nil,
@@ -1400,7 +1492,7 @@ function Effects.parse(text, sourceName)
       if gainAt then
         local words = clause:sub(gainAt):gsub("^ gains? ", "")
         for _, kw in ipairs({ "first strike", "double strike", "flying", "trample", "lifelink", "deathtouch", "vigilance",
-          "haste", "indestructible", "hexproof", "menace", "reach" }) do
+          "haste", "indestructible", "hexproof", "menace", "reach", "infect", "wither" }) do
           if words:find(kw, 1, true) then
             table.insert(kws, kw)
           end
@@ -1708,6 +1800,9 @@ function Effects.parse(text, sourceName)
       actions[mi], actions[gi] = actions[gi], actions[mi]
     end
   end
+  if convergeNote then
+    table.insert(notes, convergeNote)
+  end
   return { optional = optional, actions = actions, notes = notes, conds = conds }
 end
 
@@ -1822,6 +1917,32 @@ local function describe(a, target, controller)
     return "it is exiled and returns to the battlefield"
   elseif a.what == "drawGreatest" then
     return "draw cards equal to your greatest creature power"
+  elseif a.what == "becomeBase" then
+    return "it becomes " .. a.p .. "/" .. a.t
+  elseif a.what == "colorCounters" then
+    return "up to two creatures get a +1/+1 counter for each of their colors"
+  elseif a.what == "jaredUlt" then
+    return "a multicolored card returns from the graveyard (all colors: draw a card and two Treasures)"
+  elseif a.what == "painfulTruths" then
+    return "draw X cards and lose X life (X = colors spent)"
+  elseif a.what == "bringToLight" then
+    return "find a creature, instant or sorcery with mana value up to the colors spent and cast it free"
+  elseif a.what == "guardianProject" then
+    return "draw a card if its name is new"
+  elseif a.what == "drawIfPower" then
+    return "draw a card if you control a creature with power " .. tostring(a.power) .. " or greater"
+  elseif a.what == "gainTarget" then
+    return "a player gains " .. a.n .. " life"
+  elseif a.what == "doubleCounters" then
+    return "double the counters on the permanents you choose"
+  elseif a.what == "nivReborn" then
+    return "one card of each two-color pair from the top ten into the hand"
+  elseif a.what == "tapTarget" then
+    return "a creature is tapped"
+  elseif a.what == "teferiProt" then
+    return "protection from everything, life can't change, permanents phase out"
+  elseif a.what == "reanimateAny" then
+    return "a creature card from a graveyard comes back"
   elseif a.what == "populate" then
     return "populate: a token copy of a creature token you control"
   elseif a.what == "proliferate" then
@@ -2128,7 +2249,33 @@ local function apply(it, plan, target)
             broadcastToColor(it.name .. " isn't on the table any more: no counter added.", seat, INFO)
           end
         elseif a.what == "bounce" then
-          Effects.pickBounce(seat, a, it.name, it.source)
+          -- Cyclonic Rift: "Overload {6}{U}": each, not one.
+          local srcCard = (it.guid and getObjectFromGUID(it.guid)) or (it.source and getObjectFromGUID(it.source))
+          local srcText = srcCard and tostring(CardData.get(srcCard).oracle or ""):lower() or ""
+          if srcText:find("\noverload {", 1, true) or srcText:sub(1, 10) == "overload {" then
+            Effects.askChoice(seat, it.name .. ": overloaded?", "Did you cast it for its OVERLOAD cost? Then it returns EACH one instead of one target.",
+              { { label = "OVERLOAD", value = true }, { label = "ONE TARGET", value = false } }, function(over)
+                if over then
+                  local n = 0
+                  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+                    if o.type == "Card" and not o.isDestroyed() and not Faces.unknown(o) then
+                      local owner = Effects.fieldSeat(o)
+                      local ty = Effects.cardTypes(o)
+                      if owner and (not a.theirs or owner ~= seat) and (not a.mine or owner == seat)
+                          and (a.type == "permanent" or (a.type == "nonland" and not ty.land) or ty[a.type]) then
+                        Effects.returnToHand(o)
+                        n = n + 1
+                      end
+                    end
+                  end
+                  printToAll("MTG > " .. it.name .. " (overloaded): " .. n .. " permanent" .. (n == 1 and "" or "s") .. " returned to their owners' hands.", GOOD)
+                else
+                  Effects.pickBounce(seat, a, it.name, it.source)
+                end
+              end)
+          else
+            Effects.pickBounce(seat, a, it.name, it.source)
+          end
         elseif a.what == "token" then
           local made = amountOf(a, controller, it.name, it)
           local opts = (a.tapped or a.attacking or a.haste)
@@ -2450,11 +2597,43 @@ local function apply(it, plan, target)
           else
             broadcastToColor(it.name .. ": make the token copy yourself (the card wasn't found).", seat, INFO)
           end
+        elseif a.what == "colorCounters" or a.what == "jaredUlt" or a.what == "painfulTruths" or a.what == "bringToLight"
+            or a.what == "guardianProject" or a.what == "drawIfPower" or a.what == "gainTarget" or a.what == "doubleCounters"
+            or a.what == "nivReborn" or a.what == "tapTarget" or a.what == "teferiProt" or a.what == "reanimateAny" then
+          Effects.jaredDeck(seat, a, it)
+        elseif a.what == "becomeBase" then
+          local src = it.source and getObjectFromGUID(it.source)
+          if src == nil or src.isDestroyed() then
+            printToAll("MTG > " .. it.name .. " isn't on the battlefield any more.", INFO)
+          else
+            local c = Counters.get(src)
+            if (c.bs or 0) < (a.needStage or 0) then
+              printToAll("MTG > " .. it.name .. " isn't a " .. tostring(a.need) .. " yet: nothing happens.", INFO)
+            else
+              local parts = {}
+              for k, v in src.memo:gmatch("(%a+)=(%-?%d+)") do
+                if k ~= "bp" and k ~= "bt" and k ~= "bs" and k ~= "bk" then
+                  table.insert(parts, k .. "=" .. v)
+                end
+              end
+              table.insert(parts, "bp=" .. a.p)
+              table.insert(parts, "bt=" .. a.t)
+              table.insert(parts, "bs=" .. math.max(a.stage or 1, c.bs or 0))
+              if a.kw or (c.bk or 0) > 0 then
+                table.insert(parts, "bk=1")
+              end
+              src.memo = table.concat(parts, ";")
+              Counters.render(src)
+              printToAll("MTG > " .. it.name .. " becomes a " .. tostring(a.types):gsub("(%a)(%a*)", function(x, y) return x:upper() .. y end)
+                .. " with base power and toughness " .. a.p .. "/" .. a.t .. (a.kw and ", flying and first strike" or "") .. ".", GOOD)
+            end
+          end
         elseif a.what == "drawGreatest" then
           local best = 0
           for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
             if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) and Effects.fieldSeat(obj) == seat
-                and Effects.cardTypes(obj).creature then
+                and Effects.cardTypes(obj).creature
+                and not (a.nonHuman and tostring(CardData.get(obj).typeLine or ""):find("Human", 1, true)) then
               local pw = tonumber(Counters.stats(obj).power) or 0
               if pw > best then
                 best = pw
@@ -4387,6 +4566,267 @@ local function turnTapped(obj, owner, tapped)
   obj.setRotationSmooth({ r.x, tapped and (s.yaw + 90) % 360 or s.yaw, r.z }, false, true)
 end
 
+-- The Jared Carthalion deck's effects.
+local ALLC = { "W", "U", "B", "R", "G" }
+
+local function dataColors(d)
+  if tostring(d.oracle or ""):lower():find("is all colors", 1, true) then
+    return { W = true, U = true, B = true, R = true, G = true }, 5
+  end
+  local set, n = {}, 0
+  for _, c in pairs(type(d.colors) == "table" and d.colors or {}) do
+    local k = tostring(c):upper()
+    if not set[k] then
+      set[k] = true
+      n = n + 1
+    end
+  end
+  return set, n
+end
+
+local function colorsSpentAsk(seat, it, text, onPick)
+  local ch = {}
+  for i = 1, 5 do
+    table.insert(ch, { label = tostring(i), value = i })
+  end
+  ask(seat, it.name .. ": how many colors of mana did you spend?", text, ch, onPick)
+end
+
+function Effects.jaredDeck(seat, a, it)
+  local w = a.what
+  if w == "colorCounters" then
+    -- Jared −3: up to two creatures, +1/+1 counters equal to their number of colors.
+    local picked = {}
+    local function one(left)
+      if left <= 0 then
+        return
+      end
+      ask(seat, it.name .. ": counters by colors", "Click COUNTERS on a creature (up to " .. left .. " more): it gets a +1/+1 counter for each of its colors. DONE to stop.",
+        { { label = "DONE", value = false } }, function(obj)
+          if not obj then
+            return
+          end
+          picked[obj.getGUID()] = true
+          local n = (Statics and Statics.colorCount) and Statics.colorCount(obj) or 0
+          if n > 0 then
+            local placed = Counters.place(obj, "plus", n, seat)
+            printToAll("MTG > " .. it.name .. ": " .. obj.getName() .. " is " .. n .. " color" .. (n == 1 and "" or "s") .. ": " .. placed .. " +1/+1 counters.", GOOD)
+          else
+            printToAll("MTG > " .. it.name .. ": " .. obj.getName() .. " is colorless: no counters.", INFO)
+          end
+          one(left - 1)
+        end, { filter = function(obj)
+          return not picked[obj.getGUID()] and Effects.cardTypes(obj).creature == true
+        end, label = "COUNTERS", protect = false })
+    end
+    one(a.n or 2)
+  elseif w == "jaredUlt" then
+    LibSearch.open(seat, "", it.name .. ": click a MULTICOLORED card to return it to your hand, then CLOSE.", "hand", false,
+      { zone = "graveyard", minColors = 2, limit = 1, onTake = function(card)
+        local _, n = dataColors(CardData.get(card))
+        if n >= 5 then
+          printToAll("MTG > " .. it.name .. ": " .. card.getName() .. " is all colors: " .. seat .. " draws a card and creates two Treasures.", GOOD)
+          Actions.draw(seat, 1, it.name)
+          Tokens.create(seat, { words = { "treasure" }, colors = {} }, 2, it.name)
+        end
+      end })
+  elseif w == "painfulTruths" then
+    colorsSpentAsk(seat, it, "Converge: you draw that many cards and lose that much life.", function(x)
+      printToAll("MTG > " .. it.name .. ": " .. x .. " colors spent: " .. seat .. " draws " .. x .. " and loses " .. x .. " life.", GOOD)
+      Actions.draw(seat, x, it.name)
+      if Trackers and Trackers.changeLife then
+        Trackers.changeLife(seat, -x)
+      end
+    end)
+  elseif w == "bringToLight" then
+    colorsSpentAsk(seat, it, "Converge: find a creature, instant or sorcery with mana value up to that many.", function(x)
+      LibSearch.open(seat, "", it.name .. ": pick a creature, instant or sorcery (mana value " .. x .. " or less). It comes to your hand: cast it right away without paying its mana cost (by the rules it's exiled, then cast).",
+        "hand", false, { typeOnly = true, anyOf = { "creature", "instant", "sorcery" }, mvMax = x, limit = 1, fixedDest = true })
+    end)
+  elseif w == "guardianProject" then
+    local card = (it.thatCard and getObjectFromGUID(it.thatCard)) or (it.that and type(it.that) == "string" and getObjectFromGUID(it.that))
+    if card == nil or card.isDestroyed() then
+      printToAll("MTG > " .. it.name .. ": the creature isn't on the table any more: check its name by hand.", INFO)
+      return
+    end
+    local nm = card.getName()
+    local clash = false
+    for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+      if o ~= card and o.type == "Card" and not o.isDestroyed() and o.getName() == nm and Effects.fieldSeat(o) == seat
+          and Effects.cardTypes(o).creature then
+        clash = true
+      end
+    end
+    local yard = Library.pileIn and Library.pileIn(seat, "graveyard")
+    if yard and not clash then
+      local list = yard.type == "Deck" and (yard.getData().ContainedObjects or {}) or { yard.getData() }
+      for _, e in ipairs(list) do
+        if e.Nickname == nm then
+          clash = true
+        end
+      end
+    end
+    if clash then
+      printToAll("MTG > " .. it.name .. ": " .. seat .. " already has a " .. nm .. ": no card.", INFO)
+    else
+      Actions.draw(seat, 1, it.name)
+    end
+  elseif w == "drawIfPower" then
+    local ok = false
+    for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+      if o.type == "Card" and not o.isDestroyed() and Effects.fieldSeat(o) == seat and Effects.cardTypes(o).creature
+          and (tonumber(Counters.stats(o).power) or 0) >= (a.power or 4) then
+        ok = true
+      end
+    end
+    if ok then
+      Actions.draw(seat, 1, it.name)
+    else
+      printToAll("MTG > " .. it.name .. ": " .. seat .. " controls no creature with power " .. tostring(a.power) .. " or greater: no card.", INFO)
+    end
+  elseif w == "gainTarget" then
+    local ch = {}
+    for _, c in ipairs(TableSetup.activeSeats()) do
+      table.insert(ch, { label = string.upper(c), value = c })
+    end
+    ask(seat, it.name .. ": who gains " .. a.n .. " life?", "Pick the player.", ch, function(c)
+      if Trackers and Trackers.changeLife then
+        Trackers.changeLife(c, a.n)
+      end
+      printToAll("MTG > " .. it.name .. ": " .. c .. " gains " .. a.n .. " life.", GOOD)
+    end)
+  elseif w == "doubleCounters" then
+    -- Deepglow Skate: double each kind of counter on any number of permanents (Doubling Season makes it more).
+    local done = {}
+    local function step()
+      ask(seat, it.name .. ": double counters", "Click DOUBLE on each permanent whose counters double, then DONE.",
+        { { label = "DONE", value = false } }, function(obj)
+          if not obj then
+            return
+          end
+          done[obj.getGUID()] = true
+          local c = Counters.get(obj)
+          for _, kind in ipairs({ "plus", "minus", "loyalty", "other", "pc", "tc" }) do
+            if (c[kind] or 0) > 0 then
+              Counters.place(obj, kind, c[kind], seat)
+            end
+          end
+          printToAll("MTG > " .. it.name .. ": counters on " .. obj.getName() .. " doubled.", GOOD)
+          step()
+        end, { filter = function(obj)
+          if done[obj.getGUID()] then
+            return false
+          end
+          local c = Counters.get(obj)
+          return (c.plus or 0) + (c.minus or 0) + (c.loyalty or 0) + (c.other or 0) + (c.pc or 0) + (c.tc or 0) > 0
+        end, label = "DOUBLE", protect = false })
+    end
+    step()
+  elseif w == "nivReborn" then
+    Effects.nivReborn(seat, it)
+  elseif w == "tapTarget" then
+    ask(seat, it.name .. ": tap a creature?", "Click TAP on the creature to tap" .. (a.may and ", or SKIP." or "."),
+      { { label = "SKIP", value = false } }, function(obj)
+        if obj then
+          local owner = Effects.fieldSeat(obj)
+          if owner then
+            turnTapped(obj, owner, true)
+          end
+          printToAll("MTG > " .. it.name .. ": " .. obj.getName() .. " is tapped.", GOOD)
+        end
+      end, { filter = function(obj)
+        return Effects.cardTypes(obj).creature == true
+      end, label = "TAP" })
+  elseif w == "teferiProt" then
+    GameState.data.playerPro = GameState.data.playerPro or {}
+    GameState.data.playerPro[seat] = true
+    broadcastToAll(seat .. " has PROTECTION FROM EVERYTHING until their next turn and their life total can't change (" .. it.name .. ").", { 1, 0.85, 0.3 })
+    printToAll("MTG > " .. it.name .. ": all of " .. seat .. "'s permanents PHASE OUT until their next turn: treat them as not there "
+      .. "(board wipes and removal skip them; they can't block). Undo any change to " .. seat .. "'s life by hand. " .. it.name .. " is exiled.", { 1, 0.6, 0.2 })
+  elseif w == "reanimateAny" then
+    printToAll("MTG > " .. it.name .. ": put the creature card from a graveyard onto the battlefield under its OWNER's control by hand (drag it there).", { 1, 0.6, 0.2 })
+  end
+end
+
+-- Niv-Mizzet Reborn: reveal the top ten; for each two-color pair, one card that's exactly those colors goes
+-- to the hand; the rest go on the bottom in a random order.
+function Effects.nivReborn(seat, it)
+  local lib = Library.find(seat)
+  if lib == nil then
+    printToAll("MTG > " .. it.name .. ": no library found.", INFO)
+    return
+  end
+  if lib.type ~= "Deck" then
+    printToAll("MTG > " .. it.name .. ": only one card in the library: check it by hand.", INFO)
+    return
+  end
+  local data = lib.getData()
+  local objs, ids = data.ContainedObjects or {}, data.DeckIDs or {}
+  local n = math.min(10, #objs)
+  local taken, takenPair, names, chosenNames = {}, {}, {}, {}
+  for i = 1, n do
+    local e = objs[i]
+    local d = {}
+    pcall(function() d = JSON.decode(e.GMNotes or "") or {} end)
+    table.insert(names, e.Nickname or "?")
+    local set, cnt = dataColors(d)
+    if cnt == 2 then
+      local key = ""
+      for _, c in ipairs(ALLC) do
+        if set[c] then
+          key = key .. c
+        end
+      end
+      if not takenPair[key] then
+        takenPair[key] = true
+        taken[i] = true
+        table.insert(chosenNames, (e.Nickname or "?") .. " (" .. key .. ")")
+      end
+    end
+  end
+  broadcastToAll(seat .. " reveals (" .. it.name .. "): " .. table.concat(names, ", "), { 1, 0.85, 0.3 })
+  local toHand, rest, restIds = {}, {}, {}
+  local keepObjs, keepIds = {}, {}
+  for i = 1, #objs do
+    if i <= n then
+      if taken[i] then
+        table.insert(toHand, objs[i])
+      else
+        table.insert(rest, objs[i])
+        table.insert(restIds, ids[i])
+      end
+    else
+      table.insert(keepObjs, objs[i])
+      table.insert(keepIds, ids[i])
+    end
+  end
+  for i = #rest, 2, -1 do
+    local j = math.random(i)
+    rest[i], rest[j] = rest[j], rest[i]
+    restIds[i], restIds[j] = restIds[j], restIds[i]
+  end
+  for i, o in ipairs(rest) do
+    table.insert(keepObjs, o)
+    table.insert(keepIds, restIds[i])
+  end
+  printToAll("MTG > " .. it.name .. ": " .. seat .. " takes " .. (#chosenNames > 0 and table.concat(chosenNames, ", ") or "nothing (no two-color cards)")
+    .. "; the other " .. #rest .. " go on the bottom in a random order.", GOOD)
+  local pos, rot = lib.getPosition(), lib.getRotation()
+  local hand = Player[seat].getHandTransform()
+  lib.destruct()
+  if #keepObjs == 1 then
+    spawnObjectData({ data = keepObjs[1], position = pos, rotation = rot })
+  elseif #keepObjs > 1 then
+    data.ContainedObjects, data.DeckIDs = keepObjs, keepIds
+    spawnObjectData({ data = data, position = pos, rotation = rot })
+  end
+  local yaw = (TableSetup.seat(seat) or { yaw = 0 }).yaw
+  for i, o in ipairs(toHand) do
+    local hp = hand.position
+    spawnObjectData({ data = o, position = { hp.x, hp.y + 0.2 * i, hp.z }, rotation = { 0, yaw, 0 } })
+  end
+end
+
 function Effects.untapObj(obj)
   local seat = Effects.fieldSeat(obj)
   if seat then
@@ -5592,7 +6032,20 @@ function Effects.resolve(it)
     end
     -- "Choose one or more" / "any number" / Spree: a YES / NO for each mode, then all the chosen ones resolve.
     local lowRaw = raw:lower()
-    if #modes > 0 and (spree or lowRaw:find("choose one or more", 1, true) or lowRaw:find("choose any number", 1, true)) then
+    -- Akroma's Will / commander "Will" cards: "If you control a commander as you cast this spell, you may choose both".
+    local willBoth = false
+    if lowRaw:find("if you control a commander as you cast this spell, you may choose both", 1, true) then
+      for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+        if o.type == "Card" and not o.isDestroyed() and Combat and Combat.isCommander and Combat.isCommander(o)
+            and Effects.fieldSeat(o) == it.controller then
+          willBoth = true
+        end
+      end
+      if willBoth then
+        printToAll("MTG > " .. it.name .. ": " .. it.controller .. " controls a commander: they may choose both modes.", INFO)
+      end
+    end
+    if #modes > 0 and (spree or willBoth or lowRaw:find("choose one or more", 1, true) or lowRaw:find("choose any number", 1, true)) then
       local chosen = {}
       local function step(i)
         if i > #modes then
@@ -6304,6 +6757,8 @@ local function returnToHand(obj)
     end
   end, 1.2)
 end
+
+Effects.returnToHand = returnToHand
 
 function Effects.pickBounce(seat, a, sourceName, sourceGuid)
   local want = tostring(a.type)

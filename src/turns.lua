@@ -351,6 +351,9 @@ enterStep = function()
 
   if step.id == "untap" then
     Actions.untapAll(seat, true)
+    if Actions.othersUntap then
+      pcall(Actions.othersUntap, seat)
+    end
     -- No one gets priority in the untap step.
     autoAdvance(0.8)
   elseif step.id == "draw" then

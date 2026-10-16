@@ -136,8 +136,31 @@ local function buildTpl(r)
   for ch in tostring(e.c or ""):gmatch("%a") do
     table.insert(colors, ch)
   end
+  -- Keywords from its rules text ("Flying", "Trample", "Haste, vigilance"): combat reads these.
+  local kws = {}
+  local KW = { flying = "Flying", trample = "Trample", haste = "Haste", vigilance = "Vigilance", lifelink = "Lifelink",
+    deathtouch = "Deathtouch", menace = "Menace", reach = "Reach", defender = "Defender", indestructible = "Indestructible",
+    hexproof = "Hexproof", ["first strike"] = "First strike", ["double strike"] = "Double strike", infect = "Infect",
+    wither = "Wither", shroud = "Shroud", prowess = "Prowess", flash = "Flash" }
+  for line in (tostring(e.o or "") .. "\n"):gmatch("([^\n]*)\n") do
+    local all = true
+    local found = {}
+    for part in line:lower():gsub("%b()", ""):gmatch("[^,]+") do
+      local w = part:gsub("^%s+", ""):gsub("%s+$", ""):gsub("%.$", "")
+      if KW[w] then
+        table.insert(found, KW[w])
+      elseif w ~= "" then
+        all = false
+      end
+    end
+    if all then
+      for _, k in ipairs(found) do
+        table.insert(kws, k)
+      end
+    end
+  end
   local data = { v = 1, name = e.n, scryfallId = e.i, manaCost = "", cmc = 0, typeLine = e.t, types = types,
-    oracle = e.o or "", keywords = {}, colors = colors, colorIdentity = colors, isCommander = false }
+    oracle = e.o or "", keywords = kws, colors = colors, colorIdentity = colors, isCommander = false }
   local desc = { e.t }
   if e.o and e.o ~= "" then
     table.insert(desc, e.o)

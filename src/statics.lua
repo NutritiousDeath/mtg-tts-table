@@ -28,6 +28,69 @@ local function perms()
   return list
 end
 
+-- A card's colors as a set { W = true, ... }: its printed colors, "is all colors" (Transguild Courier,
+-- Jared's Kavu tokens), and Leyline of the Guildpact ("Each nonland permanent you control is all colors").
+local ALL5 = { W = true, U = true, B = true, R = true, G = true }
+local leyCache = { at = -100, seats = {} }
+local function leylineSeats()
+  local now = (Time and Time.time) or os.time()
+  if now - leyCache.at < 1 then
+    return leyCache.seats
+  end
+  local seats = {}
+  for _, p in ipairs(perms()) do
+    if p.oracle:find("each nonland permanent you control is all colors", 1, true) then
+      seats[p.seat] = true
+    end
+  end
+  leyCache.at, leyCache.seats = now, seats
+  return seats
+end
+
+function Statics.colorsOf(obj, seat)
+  local out = {}
+  if obj == nil then
+    return out
+  end
+  local d = dataOf(obj)
+  local tl = tostring(d.typeLine or ""):lower()
+  local o = tostring(d.oracle or ""):lower()
+  if o:find("is all colors", 1, true) then
+    return ALL5
+  end
+  if seat == nil then
+    local okl, loc = pcall(function() return Zones.regionAt(obj.getPosition()) end)
+    seat = okl and loc and IN[loc.region] and loc.seat or nil
+  end
+  if seat and not tl:find("land", 1, true) and leylineSeats()[seat] then
+    return ALL5
+  end
+  for _, c in pairs(type(d.colors) == "table" and d.colors or {}) do
+    out[tostring(c):upper()] = true
+  end
+  return out
+end
+
+-- Leyline of the Guildpact: "Lands you control are every basic land type" (they tap for any color).
+function Statics.landsEveryType(seat)
+  for _, p in ipairs(perms()) do
+    if p.seat == seat and p.oracle:find("lands you control are every basic land type", 1, true) then
+      return true
+    end
+  end
+  return false
+end
+
+function Statics.colorCount(obj, seat)
+  local n = 0
+  for _ in pairs(Statics.colorsOf(obj, seat)) do
+    n = n + 1
+  end
+  return n
+end
+
+local COLOR_WORD = { white = "W", blue = "U", black = "B", red = "R", green = "G" }
+
 function Statics.bonus(obj)
   local b = obj and bonus[obj.getGUID()]
   if b then
@@ -73,8 +136,38 @@ local function subjectMatches(subj, q, p)
   if other and q.obj == p.obj then
     return false
   end
+  -- "Lands you control have '{T}: Add one mana of any color.'" (Chromatic Lantern).
+  if subj == "lands" then
+    return q.tl:find("land", 1, true) ~= nil
+  end
   if q.tl:find("creature", 1, true) == nil then
     return false
+  end
+  -- "Attacking creatures you control have deathtouch" (Ohran Frostfang).
+  if subj:sub(1, 10) == "attacking " then
+    if not (Combat and Combat.isAttacking and Combat.isAttacking(q.obj)) then
+      return false
+    end
+    subj = subj:sub(11)
+  end
+  -- Colors: "Other red creatures you control get +1/+1" (the Lieges), "multicolored creatures".
+  do
+    local cw = subj:match("^(%a+) creatures$")
+    if cw and (COLOR_WORD[cw] or cw == "multicolored" or cw == "monocolored" or cw == "colorless") then
+      local cols = Statics.colorsOf(q.obj, q.seat)
+      local n = 0
+      for _ in pairs(cols) do
+        n = n + 1
+      end
+      if COLOR_WORD[cw] then
+        return cols[COLOR_WORD[cw]] == true
+      elseif cw == "multicolored" then
+        return n >= 2
+      elseif cw == "monocolored" then
+        return n == 1
+      end
+      return n == 0
+    end
   end
   -- Changeling: every creature type (Changeling Outcast is a Ninja for Splinter, a Sliver for Sliver lords).
   local changeling = tostring(dataOf(q.obj).oracle or ""):lower():find("changeling", 1, true) ~= nil
@@ -160,6 +253,7 @@ local function checkAscend(list)
 end
 
 function Statics.compute()
+  leyCache.at = -100   -- Leyline of the Guildpact may have come or gone
   local list = perms()
   local new = {}
   pcall(checkAscend, list)
@@ -181,6 +275,22 @@ function Statics.compute()
       local a, b = line:match("^this creature gets %+(%d+)/%+(%d+) for each artifact you control")
       if a then
         add(p, tonumber(a) * (artifacts[p.seat] or 0), tonumber(b) * (artifacts[p.seat] or 0))
+      end
+      -- Faeburrow Elder: "~ gets +1/+1 for each color among permanents you control."
+      if line:find(" gets +1/+1 for each color among permanents you control", 1, true) then
+        local have = {}
+        for _, q in ipairs(list) do
+          if q.seat == p.seat then
+            for c in pairs(Statics.colorsOf(q.obj, q.seat)) do
+              have[c] = true
+            end
+          end
+        end
+        local n = 0
+        for _ in pairs(have) do
+          n = n + 1
+        end
+        add(p, n, n)
       end
       -- Metalcraft: "~ gets +2/+2 as long as you control three or more artifacts."
       do
