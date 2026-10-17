@@ -93,6 +93,7 @@ function Actions.untapAll(color, quiet)
   local count = 0
   local skip = GameState.data.skipUntap or {}
   local held = {}
+  local untappedNow = {}
   -- Only table cards (not every object on the table: that was slow with big boards).
   for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
     if obj.type == "Card" and obj.held_by_color == nil then
@@ -113,6 +114,7 @@ function Actions.untapAll(color, quiet)
           else
             obj.setRotationSmooth({ r.x, s.yaw, r.z }, false, true)
             count = count + 1
+            table.insert(untappedNow, obj)
           end
         end
       end
@@ -120,6 +122,12 @@ function Actions.untapAll(color, quiet)
   end
   if #held > 0 then
     log(color .. ": stays tapped: " .. table.concat(held, ", "))
+  end
+  -- "Whenever ~ becomes untapped" (Key to the City).
+  if Triggers and Triggers.onUntapped then
+    for _, obj in ipairs(untappedNow) do
+      pcall(Triggers.onUntapped, obj, color)
+    end
   end
   if not quiet or count > 0 then
     log(color .. " untaps " .. count .. " permanent" .. (count == 1 and "" or "s"))
@@ -287,6 +295,14 @@ function Actions.onRotate(obj, spin, oldSpin, color)
   local s = TableSetup.seat(loc.seat)
   local function tapped(y)
     return math.abs((((y or 0) - s.yaw + 540) % 360) - 180) > 30
+  end
+  -- A player turned it: "whenever ~ becomes tapped / untapped".
+  if Triggers then
+    if tapped(spin) and not tapped(oldSpin) and Triggers.onTapped then
+      pcall(Triggers.onTapped, obj, loc.seat)
+    elseif tapped(oldSpin) and not tapped(spin) and Triggers.onUntapped then
+      pcall(Triggers.onUntapped, obj, loc.seat)
+    end
   end
   if not tapped(spin) or tapped(oldSpin) then
     return

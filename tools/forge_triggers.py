@@ -17,8 +17,11 @@ rules text for anything that isn't in it.
 
 Usage:
   git clone --depth 1 --filter=blob:none --sparse https://github.com/Card-Forge/forge.git forge
-  git -C forge sparse-checkout set forge-gui/res/cardsfolder forge-gui/res/lists
+  git -C forge sparse-checkout set forge-gui/res/cardsfolder forge-gui/res/lists forge-gui/res/tokenscripts
   python3 tools/forge_triggers.py forge/forge-gui/res/cardsfolder [--out src/forge_triggers_data.lua]
+
+It also writes src/forge_effects_data.lua (tools/forge_effects.py): what each
+triggered and activated ability does, as Forge ApiType steps.
 
 It prints the Forge trigger modes it could not map, with counts and the main
 reasons, so the next ones to support are easy to pick.
@@ -270,6 +273,61 @@ for _c in ("White", "Blue", "Black", "Red", "Green"):
     SPELL_TYPES["Card." + _c + "+YouCtrl"] = _c.lower()
 
 
+COLORS = {"White": "white", "Blue": "blue", "Black": "black", "Red": "red", "Green": "green",
+          "Colorless": "colorless", "MultiColor": "multicolored"}
+
+
+def spell_filter(expr):
+    """A spell filter ("Instant,Sorcery,Wizard", "Creature.Green", "Card.cmcGE5", "Spirit,Arcane") ->
+    'alt/alt' where each alternative is words joined by '+': card types, sub:<subtype>, colors,
+    non<type>, historic, legendary, permanent, mvge=N, mvle=N. Our matcher (triggers.lua
+    spellSpecMatches) reads the same words."""
+    alts = []
+    for alt in expr.split(","):
+        alt = alt.strip()
+        head, _, rest = alt.partition(".")
+        words = []
+        h = head.lower()
+        if head in ("Card", "Spell"):
+            pass
+        elif h in CARD_TYPES or h in ("instant", "sorcery"):
+            words.append(h)
+        elif head in SUBTYPES:
+            words.append("sub:" + h)
+        else:
+            raise Unmapped("spell head " + head)
+        for p in (rest.split("+") if rest else []):
+            m = re.fullmatch(r"cmc(GE|LE|EQ)(\d+)", p)
+            if p in ("YouCtrl", "OppCtrl", "YouOwn"):
+                pass                                  # who cast it: ValidActivatingPlayer says
+            elif p in COLORS:
+                words.append(COLORS[p])
+            elif p.startswith("non") and (p[3:].lower() in CARD_TYPES or p[3:].lower() in ("instant", "sorcery")):
+                words.append("non" + p[3:].lower())
+            elif p in ("Historic", "Legendary", "Permanent"):
+                words.append(p.lower())
+            elif p.lower() in CARD_TYPES or p.lower() in ("instant", "sorcery"):
+                words.append(p.lower())
+            elif p in SUBTYPES:
+                words.append("sub:" + p.lower())
+            elif m:
+                n = int(m.group(2))
+                if m.group(1) in ("GE", "EQ"):
+                    words.append("mvge=%d" % n)
+                if m.group(1) in ("LE", "EQ"):
+                    words.append("mvle=%d" % n)
+            else:
+                raise Unmapped("spell prop " + re.sub(r"[^A-Za-z!_].*", "", p))
+        alts.append("+".join(words) if words else "any")
+    if "any" in alts:
+        return None
+    return "/".join(alts)
+
+
+ATTACHED = ("Card.EquippedBy", "Card.AttachedBy", "Creature.EquippedBy", "Card.EnchantedBy", "Creature.EnchantedBy",
+            "Permanent.EnchantedBy", "Land.EnchantedBy", "Land.AttachedBy", "Creature.AttachedBy", "Permanent.AttachedBy")
+
+
 def count_ge(v):
     m = re.fullmatch(r"EQ(\d+)", v or "")
     if not m:
@@ -282,19 +340,29 @@ IGNORED_KEYS = {"Mode", "Execute", "TriggerDescription", "TriggerZones", "Option
                 "NoResolvingCheck", "ActivationLimit", "Static", "CheckDefinedPlayer", "Delirium",
                 "Threshold", "Metalcraft", "Hellbent", "Revolt", "Morbid", "IsPresent2", "PresentCompare2",
                 "TriggerController", "AILogic", "CheckSVar2", "SVarCompare2", "Ferocious", "Raid",
-                "PlayerTurn", "NotPlayerTurn"}
+                "PlayerTurn", "NotPlayerTurn",
+                # Werewolves: "if no spells were cast last turn, transform" - a condition the players check.
+                "WerewolfTransformCondition", "WerewolfUntransformCondition"}
 # Keys the mode-specific code reads.
 USED_KEYS = {
     "ChangesZone": {"Origin", "Destination", "ValidCard"},
     "Phase": {"Phase", "ValidPlayer"},
     "SpellCast": {"ValidCard", "ValidActivatingPlayer", "ActivatorThisTurnCast", "OpponentTurn"},
     "Attacks": {"ValidCard", "Alone", "Attacked"},
-    "AttackersDeclared": {"AttackingPlayer"},
+    "AttackersDeclared": {"AttackingPlayer", "ValidAttackers"},
     "DamageDone": {"ValidSource", "ValidTarget", "CombatDamage"},
     "DamageDoneOnce": {"ValidSource", "ValidTarget", "CombatDamage"},
     "Blocks": {"ValidCard"},
     "AttackerBlocked": {"ValidCard"},
-    "Drawn": {"ValidCard", "Number"},
+    "AttackerBlockedByCreature": {"ValidCard", "ValidBlocker"},
+    "AttackerUnblocked": {"ValidCard"},
+    "Sacrificed": {"ValidCard", "ValidPlayer"},
+    "Discarded": {"ValidCard"},
+    "Cycled": {"ValidCard"},
+    "Taps": {"ValidCard"},
+    "Untaps": {"ValidCard"},
+    "LandPlayed": {"ValidCard"},
+    "Drawn": {"ValidCard", "Number", "ValidPlayer"},
     "LifeGained": {"ValidPlayer"},
     "LifeLost": {"ValidPlayer"},
     "BecomesTarget": {"ValidTarget", "ValidSource"},
@@ -312,32 +380,50 @@ def map_trigger(p, own=None):
 
     if mode == "ChangesZone":
         dest, origin = p.get("Destination"), p.get("Origin", "Any")
-        f = card_filter(p.get("ValidCard", "Card.Self"), own)
+        vc = p.get("ValidCard", "Card.Self")
+        kind = None
+        if dest == "Battlefield" and origin == "Any":
+            kind = "enters"
+        elif dest == "Graveyard" and origin == "Battlefield":
+            kind = "dies"
+        elif dest == "Any" and origin == "Battlefield":
+            kind = "leaves"                           # "when ~ leaves the battlefield"
+        if kind is None:
+            raise Unmapped("zones %s->%s" % (origin, dest))
+        if vc in ATTACHED:
+            if kind == "enters":
+                raise Unmapped("attached enters")
+            on_battlefield(p)
+            return {"kind": kind, "equipped": True}   # "when enchanted/equipped creature dies / leaves"
+        f = card_filter(vc, own)
         if not f["self"]:
             on_battlefield(p)
-        if dest == "Battlefield" and origin == "Any":
-            return subject_fields(f, {"kind": "enters"})
-        if dest == "Graveyard" and origin == "Battlefield":
-            return subject_fields(f, {"kind": "dies"})
-        raise Unmapped("zones %s->%s" % (origin, dest))
+        return subject_fields(f, {"kind": kind})
 
     if mode == "Phase":
         on_battlefield(p)
         ph = p.get("Phase", "")
         if ph not in STEPS:
             raise Unmapped("phase " + ph)
-        return {"kind": "step", "step": STEPS[ph], "who": who_of(p.get("ValidPlayer"))}
+        vp = p.get("ValidPlayer")
+        if vp in ("Player.EnchantedController", "Player.EnchantedBy", "Player.AttachedController"):
+            # Curses and Auras: "at the beginning of the upkeep of enchanted creature's controller / enchanted player".
+            return {"kind": "step", "step": STEPS[ph], "who": "host"}
+        return {"kind": "step", "step": STEPS[ph], "who": who_of(vp)}
 
     if mode == "SpellCast":
         vc = p.get("ValidCard", "Card")
         if vc == "Card.Self":
             return {"kind": "castSelf"}
         on_battlefield(p)
-        if vc not in SPELL_TYPES:
-            raise Unmapped("spell " + vc)
         t = {"kind": "cast", "who": who_of(p.get("ValidActivatingPlayer"), "ValidActivatingPlayer")}
-        if SPELL_TYPES[vc]:
-            t["spellType"] = SPELL_TYPES[vc]
+        if vc in SPELL_TYPES:
+            if SPELL_TYPES[vc]:
+                t["spellType"] = SPELL_TYPES[vc]
+        else:
+            spec = spell_filter(vc)
+            if spec:
+                t["spell"] = spec
         if "ActivatorThisTurnCast" in p:
             n = count_ge(p["ActivatorThisTurnCast"])
             if t["who"] == "opp" and n == 1:
@@ -353,11 +439,15 @@ def map_trigger(p, own=None):
     if mode == "Attacks":
         vc = p.get("ValidCard", "")
         attacked = p.get("Attacked")
+        if attacked in ("You,Planeswalker.YouCtrl", "You,Planeswalker.YouCtrl,Battle.YouCtrl+Protected"):
+            attacked = "You"                          # combat.lua's target seat covers your planeswalkers
         if attacked and attacked != "You":
             raise Unmapped("attacked " + attacked)
-        if vc in ("Card.EquippedBy", "Card.AttachedBy", "Creature.EquippedBy", "Card.EnchantedBy",
-                  "Creature.EnchantedBy"):
+        if vc in ATTACHED:
             return {"kind": "attacks", "equipped": True}
+        if vc in ("Card.IsCommander+YouOwn", "Creature.IsCommander+YouOwn", "Card.IsCommander+YouCtrl"):
+            on_battlefield(p)
+            return {"kind": "attacks", "mine": True, "commander": True}
         f = card_filter(vc)
         if attacked == "You":
             if f["self"] or f["mine"]:
@@ -371,9 +461,9 @@ def map_trigger(p, own=None):
         t = {"kind": "attacks", "mine": True}
         subs = [s for s in f["subjects"] if s.startswith("sub:")]
         if subs:
-            if len(subs) > 1 or len(f["subjects"]) > 1:
-                raise Unmapped("several attacker types")
-            t["onlyType"] = subs[0][4:]
+            if len(subs) != len(f["subjects"]):
+                raise Unmapped("attacker types mixed")
+            t["onlyType"] = "/".join(x[4:] for x in subs)   # "Samurai or Warrior": any of them
         if p.get("Alone") == "True":
             t["alone"] = True
         return t
@@ -382,16 +472,66 @@ def map_trigger(p, own=None):
         on_battlefield(p)
         if p.get("AttackingPlayer") != "You":
             raise Unmapped("attacking " + str(p.get("AttackingPlayer")))
-        return {"kind": "attacks", "mine": True, "once": True}
+        t = {"kind": "attacks", "mine": True, "once": True}
+        va = p.get("ValidAttackers")
+        if va:
+            f = card_filter(va)
+            subs = [x for x in f["subjects"] if x.startswith("sub:")]
+            if f["theirs"] or f["tokenOnly"] or f["excludes"] or (subs and len(subs) != len(f["subjects"])):
+                raise Unmapped("attackers " + va)
+            if subs:
+                t["onlyType"] = "/".join(x[4:] for x in subs)   # "one or more Dragons you control attack"
+        return t
+
+    if mode in ("DamageDone", "DamageDoneOnce") and (p.get("CombatDamage") != "True"
+                                                     or p.get("ValidTarget") not in ("Player", "Opponent", "Player.Opponent")):
+        # Any damage (combat or not) to players or creatures: our "damage" kind.
+        tgt = {"Player": "player", "Opponent": "opp", "Player.Opponent": "opp", "You": "you", "Creature": "creature",
+               "Player,Planeswalker": "player", "Player,Battle": "player", "Opponent,Planeswalker": "opp",
+               "Card.Self": "self", "Creature.YouCtrl": "creature"}.get(p.get("ValidTarget", ""))
+        if tgt is None:
+            raise Unmapped("damage to " + str(p.get("ValidTarget")))
+        t = {"kind": "damage", "tgt": tgt}
+        if p.get("CombatDamage") == "True":
+            t["combat"] = "yes"
+        elif p.get("CombatDamage") == "False":
+            t["combat"] = "no"
+        vs = p.get("ValidSource", "Card")
+        if tgt == "self":
+            # "Whenever ~ is dealt damage": the source can be anything.
+            if vs not in ("Card", "Card,Emblem", "Creature", "Card.OppCtrl,Emblem.OppCtrl", "Card.OppCtrl"):
+                raise Unmapped("dealt damage by " + vs)
+            if "OppCtrl" in vs:
+                t["opp"] = True
+        elif vs in ATTACHED:
+            t["equipped"] = True
+        elif vs in ("Card.YouCtrl,Emblem.YouCtrl", "Card.YouCtrl"):
+            t["mine"] = True                          # "a source you control"
+        elif vs in ("Card.OppCtrl,Emblem.OppCtrl", "Card.OppCtrl"):
+            t["theirs"] = True
+        elif vs in ("Card", "Card,Emblem"):
+            pass
+        else:
+            f = card_filter(vs)
+            if f["self"]:
+                t["self"] = True
+            else:
+                if f["excludes"] or f["tokenOnly"]:
+                    raise Unmapped("damage source " + vs)
+                t["s"] = "/".join(f["subjects"])
+                if f["mine"]:
+                    t["mine"] = True
+                if f["theirs"]:
+                    t["theirs"] = True
+        if tgt != "self" and not t.get("self"):
+            on_battlefield(p)
+        if mode == "DamageDoneOnce":
+            t["once"] = True
+        return t
 
     if mode in ("DamageDone", "DamageDoneOnce"):
-        if p.get("CombatDamage") != "True":
-            raise Unmapped("noncombat damage")
-        if p.get("ValidTarget") not in ("Player", "Opponent", "Player.Opponent"):
-            raise Unmapped("damage to " + str(p.get("ValidTarget")))
         vs = p.get("ValidSource", "")
-        if vs in ("Creature.EquippedBy", "Card.AttachedBy", "Card.EquippedBy", "Creature.EnchantedBy",
-                  "Card.EnchantedBy"):
+        if vs in ATTACHED:
             return {"kind": "combatDamage", "equipped": True}
         f = card_filter(vs)
         if f["self"]:
@@ -409,14 +549,101 @@ def map_trigger(p, own=None):
             t["once"] = True
         return t
 
-    if mode in ("Blocks", "AttackerBlocked"):
+    if mode in ("Blocks", "AttackerBlocked", "AttackerBlockedByCreature", "AttackerUnblocked"):
         vc = p.get("ValidCard", "")
-        kind = "blocks" if mode == "Blocks" else "blocked"
-        if mode == "Blocks" and vc in ("Card.EquippedBy", "Creature.EquippedBy", "Card.AttachedBy", "Card.EnchantedBy"):
-            return {"kind": "blocks", "equipped": True}
-        if card_filter(vc)["self"]:
-            return {"kind": kind, "self": True}
-        raise Unmapped(kind + " " + vc)
+        kind = {"Blocks": "blocks", "AttackerUnblocked": "unblocked"}.get(mode, "blocked")
+        if mode == "AttackerBlockedByCreature" and p.get("ValidBlocker") == "Card.Self":
+            # "Whenever ~ blocks a creature": this card is the blocker.
+            if vc not in ("Creature", "Card", "Creature.attacking"):
+                raise Unmapped("blocks " + vc)
+            return {"kind": "blocks", "self": True}
+        if mode == "AttackerBlockedByCreature":
+            if p.get("ValidBlocker", "Creature") not in ("Creature", "Card"):
+                raise Unmapped("blocker " + p.get("ValidBlocker"))
+        if vc in ATTACHED:
+            return {"kind": kind, "equipped": True}
+        f = card_filter(vc)
+        if f["self"]:
+            t = {"kind": kind, "self": True}
+        elif f["mine"] and not f["theirs"] and not f["excludes"] and not f["tokenOnly"]:
+            on_battlefield(p)
+            t = {"kind": kind, "mine": True}          # "whenever a creature you control becomes blocked"
+            subs = [x for x in f["subjects"] if x != "creature"]
+            if subs:
+                t["s"] = "/".join(subs)
+        else:
+            raise Unmapped(kind + " " + vc)
+        if mode == "AttackerBlockedByCreature":
+            t["perBlocker"] = True                    # once for each creature blocking it
+        return t
+
+    if mode in ("Sacrificed", "Taps", "Untaps"):
+        kind = {"Sacrificed": "sacrificed", "Taps": "tapped", "Untaps": "untapped"}[mode]
+        vc = p.get("ValidCard", "Card.Self")
+        if mode == "Sacrificed" and p.get("ValidPlayer") not in (None, "You", "Player"):
+            raise Unmapped("sacrificed by " + p.get("ValidPlayer"))
+        if vc in ATTACHED:
+            on_battlefield(p)
+            return {"kind": kind, "equipped": True}
+        f = card_filter(vc, own)
+        if not f["self"]:
+            on_battlefield(p)
+        t = subject_fields(f, {"kind": kind})
+        if mode == "Sacrificed" and p.get("ValidPlayer") == "You" and not f["self"]:
+            t["mine"] = True                          # "whenever you sacrifice a ..."
+        return t
+
+    if mode == "Discarded":
+        vc = p.get("ValidCard", "Card")
+        if vc == "Card.Self":
+            return {"kind": "discard", "self": True}  # the card itself ("when you discard ~")
+        on_battlefield(p)
+        head, _, rest = vc.partition(".")
+        props = [x for x in rest.split("+") if x] if rest else []
+        who = "each"
+        words = []
+        if head != "Card":
+            if head.lower() not in CARD_TYPES:
+                raise Unmapped("discarded " + vc)
+            words.append(head.lower())
+        for x in props:
+            if x == "Other":
+                pass                                  # "another card": the card itself never sees its own discard
+            elif x in ("YouCtrl", "YouOwn"):
+                who = "you"
+            elif x in ("OppOwn", "OppCtrl"):
+                who = "opp"
+            elif x.startswith("non") and x[3:].lower() in CARD_TYPES:
+                words.append(x.lower())
+            else:
+                raise Unmapped("discarded " + vc)
+        t = {"kind": "discard", "who": who}
+        if words:
+            t["spell"] = "+".join(words)
+        return t
+
+    if mode == "Cycled":
+        vc = p.get("ValidCard", "Card")
+        if vc == "Card.Self":
+            return {"kind": "cycled", "self": True}
+        on_battlefield(p)
+        who = {"Card": "each", "Card.YouOwn": "you", "Card.YouCtrl": "you", "Card.Other+YouOwn": "you",
+               "Card.Other": "each", "Card.Other+YouCtrl": "you", "Card.YouCtrl+Other": "you"}.get(vc)
+        if not who:
+            raise Unmapped("cycled " + vc)
+        return {"kind": "cycled", "who": who}
+
+    if mode == "LandPlayed":
+        on_battlefield(p)
+        vc = p.get("ValidCard", "Land")
+        t = {"kind": "enters", "s": "land", "playedOnly": True}
+        if vc == "Land.YouCtrl":
+            t["mine"] = True
+        elif vc == "Land.OppCtrl":
+            t["theirs"] = True
+        elif vc != "Land":
+            raise Unmapped("land played " + vc)
+        return t
 
     if mode == "Drawn":
         on_battlefield(p)
@@ -425,6 +652,11 @@ def map_trigger(p, own=None):
                "Card": "each"}.get(vc)
         if not who:
             raise Unmapped("drawn " + vc)
+        if "ValidPlayer" in p:
+            vp = who_of(p["ValidPlayer"])
+            if who != "each" and vp != who:
+                raise Unmapped("drawn by " + p["ValidPlayer"])
+            who = vp
         t = {"kind": "draw", "who": who}
         if "Number" in p:
             t["nth"] = int(p["Number"])
@@ -456,7 +688,8 @@ def map_trigger(p, own=None):
 # ---------------------------------------------------------------------------
 
 FIELD_ORDER = ["self", "orSelf", "s", "x", "mine", "theirs", "nontoken", "tokenOnly", "who", "step", "spellType",
-               "nth", "first", "oppTurn", "once", "alone", "onlyType", "equipped", "targetsMe", "dir", "opp"]
+               "spell", "nth", "first", "oppTurn", "once", "alone", "onlyType", "equipped", "targetsMe", "dir", "opp",
+               "tgt", "combat", "commander", "perBlocker", "playedOnly"]
 
 
 def encode(trig):
@@ -479,6 +712,8 @@ def main():
     ap.add_argument("cardsfolder")
     ap.add_argument("--types", help="Forge's res/lists/TypeLists.txt (default: next to cardsfolder)")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "..", "src", "forge_triggers_data.lua"))
+    ap.add_argument("--effects-out", default=os.path.join(os.path.dirname(__file__), "..", "src", "forge_effects_data.lua"))
+    ap.add_argument("--tokens", help="Forge's res/tokenscripts (default: next to cardsfolder)")
     args = ap.parse_args()
     load_subtypes(args.types or os.path.join(args.cardsfolder, "..", "lists", "TypeLists.txt"))
 
@@ -552,6 +787,13 @@ def main():
     for mode, n in unmapped_modes.most_common():
         top = ", ".join("%s %d" % (r, c) for r, c in reasons[mode].most_common(4))
         print("  %6d  %-26s %s" % (n, mode, top))
+
+    # forge_effects imports this module by name; when run as a script that is __main__.
+    sys.modules.setdefault("forge_triggers", sys.modules[__name__])
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import forge_effects
+    print("\n" + forge_effects.build(args.cardsfolder, args.tokens or os.path.join(args.cardsfolder, "..", "tokenscripts"),
+                                     args.effects_out, commit))
 
 
 if __name__ == "__main__":

@@ -1,44 +1,48 @@
 Forge trigger modes tools/forge_triggers.py does not map yet (Forge 64569999, 2026-10-16).
 Count, mode, then the most common reasons. Regenerate with tools/forge_triggers.py.
+Not mapped on purpose: Phase/SpellCast with TriggerZones Command (planes and schemes: planechase.lua),
+SpellCast TargetsValid (heroic: a spell's targets aren't known when it's cast), TapsForMana (mana.lua).
 
-Forge 64569999 2026-10-16: 10902 cards with mapped triggers, 12120 of 17086 triggers mapped (70.9%).
+Table coverage (tools/forge_coverage.py, every Forge card through the table's own Lua):
+                  v1.79 rules text   v1.79 + Phase 1 data   v1.80 (Phase 2 + 3)
+  triggers watched     78.6%               80.7%                 86.4%  (12855 of 14873 paragraphs)
+  Jared deck           17/18               17/18                 17/18
+  Yuriko deck          19/22               19/22                 20/22
+  Beamtown deck        16/22               16/22                 19/22
+
+Forge 64569999 2026-10-16: 11946 cards with mapped triggers, 13526 of 17086 triggers mapped (79.2%).
+Written: /home/user/mtg-tts-table/src/forge_triggers_data.lua (759 KB)
 
 Unmapped trigger modes (count, then the most common reasons):
-     968  ChangesZone                zones Battlefield->Any 235, prop AttachedBy 58, prop IsRemembered 31, prop EnchantedBy 29
-     621  SpellCast                  key TargetsValid 87, spell Spirit,Arcane 49, key ValidSA 34, TriggerZones Command 20
-     330  Phase                      TriggerZones Command 91, ValidPlayer Player.EnchantedController 34, key WerewolfUntransformCondition 33, key WerewolfTransformCondition 32
-     262  DamageDone                 noncombat damage 124, damage to Creature 31, damage to Player,Battle 11, damage to Player,Planeswalker 10
+     655  ChangesZone                zones Exile->Any 34, zones Any->Graveyard 31, prop DamagedBy 24, prop counters_GE 24
+     413  SpellCast                  key TargetsValid 87, key ValidSA 34, TriggerZones Command 20, TriggerZones Graveyard 17
+     218  Phase                      TriggerZones Command 91, TriggerZones Graveyard 30, key PhaseCount 27, key PresentDefined 12
      158  ChaosEnsues                mode 158
-     157  DamageDoneOnce             noncombat damage 108, damage to You 8, prop Artifact 4, damage to Card.Self 4
-     142  Attacks                    attacked You,Planeswalker.YouCtrl 14, several attacker types 13, prop IsCommander 9, attacker not yours 8
-     133  AttackersDeclared          key ValidAttackers 90, key AttackedTarget 28, attacking None 5, TriggerZones Command 3
+     132  AttackersDeclared          attacking None 55, key ValidAttackersAmount 30, key AttackedTarget 28, TriggerZones Command 5
      126  ChangesZoneAll             mode 126
      126  TurnFaceUp                 mode 126
-     114  Sacrificed                 mode 114
-     110  Taps                       mode 110
-     102  AttackerBlockedByCreature  mode 102
+     116  DamageDone                 damage source not yours 7, TriggerZones Command 7, key DamageAmount 6, prop inZoneBattlefield 6
+     115  Attacks                    attacker not yours 8, prop withFlying 7, attacked Player.Opponent 6, key FirstCombat 5
       85  SetInMotion                mode 85
-      83  Discarded                  mode 83
-      78  Cycled                     mode 78
       65  TapsForMana                mode 65
+      63  DamageDoneOnce             damage to Card.AttachedBy 7, damage to Creature.EnchantedBy 6, TriggerZones Command 4, prop Artifact 4
       62  Always                     mode 62
       61  BecomesTarget              prop inZoneBattlefield 20, key Valiant 10, head You 7, key FirstTime 6
-      57  AttackerBlocked            key ValidBlocker 33, blocked Creature.YouCtrl 7, prop AttachedBy 5, prop EquippedBy 3
       57  PlaneswalkedTo             mode 57
       49  DamageDealtOnce            mode 49
       47  Specializes                mode 47
       46  CounterAddedOnce           mode 46
       45  CrankContraption           mode 45
       43  AbilityCast                mode 43
-      41  LandPlayed                 mode 41
-      37  AttackerUnblocked          mode 37
+      42  AttackerBlockedByCreature  blocker Creature.nonWall 5, blocks Creature.nonWall 3, blocks Creature.nonBlack 3, blocker Creature.nonBlack 3
+      38  AttackerBlocked            key ValidBlocker 33, prop enchanted 1, blocked Beast 1, prop withMenace 1
       35  Transformed                mode 35
       33  AttackersDeclaredOneTarget mode 33
-      33  Drawn                      key ValidPlayer 13, key ForReveal 5, key FirstCardInDrawStep 4, TriggerZones Graveyard 2
       32  Mutates                    mode 32
       30  UnlockDoor                 mode 30
-      30  Untaps                     mode 30
       29  SpellCastOrCopy            mode 29
+      29  LandPlayed                 key Origin 11, key ValidSA 4, land played Island.YouCtrl 1, land played Land.YouCtrl+YouDontOwn 1
+      24  Drawn                      key ForReveal 5, key FirstCardInDrawStep 4, TriggerZones Graveyard 3, drawn Card.OwnedBy Player.EnchantedBy 2
       24  Scry                       mode 24
       23  Exploited                  mode 23
       23  RolledDie                  mode 23
@@ -46,12 +50,15 @@ Unmapped trigger modes (count, then the most common reasons):
       20  DiscardedAll               mode 20
       19  CounterAdded               mode 19
       19  BecomeMonstrous            mode 19
+      18  Discarded                  key ValidCause 11, key ValidPlayer 3, discarded Island.YouCtrl,Pirate.YouCtrl,Vehicle.YouCtrl 1, discarded Permanent.!token+OppCtrl 1
       17  FullyUnlock                mode 17
-      16  Blocks                     key ValidBlocked 8, blocks Creature 4, blocks Creature.YouCtrl 2, prop powerLE 1
       16  Surveil                    mode 16
+      14  Blocks                     key ValidBlocked 8, blocks Creature 4, prop powerLE 1, prop withDefender 1
       13  ManaExpend                 mode 13
+      12  Taps                       key ValidPlayer 4, key Attacker 2, prop counters_GE 1, key FirstTime 1
       11  CounterRemoved             mode 11
       11  Attached                   mode 11
+      11  Sacrificed                 key Destination 4, color 2, sacrificed by Opponent 1, key WhileKeyword 1
       11  LifeGained                 key FirstTime 6, ValidPlayer Player.Opponent+Active+controlsArtifact.namedWedding Ring 1, key Spell 1, TriggerZones Graveyard 1
       10  DayTimeChanges             mode 10
        9  StickerPlaced              mode 9
@@ -87,11 +94,13 @@ Unmapped trigger modes (count, then the most common reasons):
        4  Unattached                 mode 4
        3  CounterRemovedOnce         mode 3
        3  Enlisted                   mode 3
+       3  Cycled                     key ValidPlayer 2, key FirstTime 1
        3  AttackerBlockedOnce        mode 3
        3  CounterAddedAll            mode 3
        3  Connives                   mode 3
        3  Destroyed                  mode 3
        3  Exiled                     mode 3
+       3  AttackerUnblocked          key ValidDefender 2, prop Legendary 1
        3  MilledAll                  mode 3
        3  TokenCreated               mode 3
        3  Vote                       mode 3
@@ -101,6 +110,7 @@ Unmapped trigger modes (count, then the most common reasons):
        2  Milled                     mode 2
        2  Evolved                    mode 2
        2  PhaseOut                   mode 2
+       2  Untaps                     key Phase 1, prop cmcGE 1
        2  AbilityResolves            mode 2
        2  LifeLostAll                mode 2
        2  Discover                   mode 2
