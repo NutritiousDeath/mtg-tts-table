@@ -1,0 +1,145 @@
+Forge trigger modes tools/forge_triggers.py does not map yet (Forge 64569999, 2026-10-16).
+Count, mode, then the most common reasons. Regenerate with tools/forge_triggers.py.
+
+Forge 64569999 2026-10-16: 10902 cards with mapped triggers, 12120 of 17086 triggers mapped (70.9%).
+
+Unmapped trigger modes (count, then the most common reasons):
+     968  ChangesZone                zones Battlefield->Any 235, prop AttachedBy 58, prop IsRemembered 31, prop EnchantedBy 29
+     621  SpellCast                  key TargetsValid 87, spell Spirit,Arcane 49, key ValidSA 34, TriggerZones Command 20
+     330  Phase                      TriggerZones Command 91, ValidPlayer Player.EnchantedController 34, key WerewolfUntransformCondition 33, key WerewolfTransformCondition 32
+     262  DamageDone                 noncombat damage 124, damage to Creature 31, damage to Player,Battle 11, damage to Player,Planeswalker 10
+     158  ChaosEnsues                mode 158
+     157  DamageDoneOnce             noncombat damage 108, damage to You 8, prop Artifact 4, damage to Card.Self 4
+     142  Attacks                    attacked You,Planeswalker.YouCtrl 14, several attacker types 13, prop IsCommander 9, attacker not yours 8
+     133  AttackersDeclared          key ValidAttackers 90, key AttackedTarget 28, attacking None 5, TriggerZones Command 3
+     126  ChangesZoneAll             mode 126
+     126  TurnFaceUp                 mode 126
+     114  Sacrificed                 mode 114
+     110  Taps                       mode 110
+     102  AttackerBlockedByCreature  mode 102
+      85  SetInMotion                mode 85
+      83  Discarded                  mode 83
+      78  Cycled                     mode 78
+      65  TapsForMana                mode 65
+      62  Always                     mode 62
+      61  BecomesTarget              prop inZoneBattlefield 20, key Valiant 10, head You 7, key FirstTime 6
+      57  AttackerBlocked            key ValidBlocker 33, blocked Creature.YouCtrl 7, prop AttachedBy 5, prop EquippedBy 3
+      57  PlaneswalkedTo             mode 57
+      49  DamageDealtOnce            mode 49
+      47  Specializes                mode 47
+      46  CounterAddedOnce           mode 46
+      45  CrankContraption           mode 45
+      43  AbilityCast                mode 43
+      41  LandPlayed                 mode 41
+      37  AttackerUnblocked          mode 37
+      35  Transformed                mode 35
+      33  AttackersDeclaredOneTarget mode 33
+      33  Drawn                      key ValidPlayer 13, key ForReveal 5, key FirstCardInDrawStep 4, TriggerZones Graveyard 2
+      32  Mutates                    mode 32
+      30  UnlockDoor                 mode 30
+      30  Untaps                     mode 30
+      29  SpellCastOrCopy            mode 29
+      24  Scry                       mode 24
+      23  Exploited                  mode 23
+      23  RolledDie                  mode 23
+      21  CommitCrime                mode 21
+      20  DiscardedAll               mode 20
+      19  CounterAdded               mode 19
+      19  BecomeMonstrous            mode 19
+      17  FullyUnlock                mode 17
+      16  Blocks                     key ValidBlocked 8, blocks Creature 4, blocks Creature.YouCtrl 2, prop powerLE 1
+      16  Surveil                    mode 16
+      13  ManaExpend                 mode 13
+      11  CounterRemoved             mode 11
+      11  Attached                   mode 11
+      11  LifeGained                 key FirstTime 6, ValidPlayer Player.Opponent+Active+controlsArtifact.namedWedding Ring 1, key Spell 1, TriggerZones Graveyard 1
+      10  DayTimeChanges             mode 10
+       9  StickerPlaced              mode 9
+       9  DamageAll                  mode 9
+       9  PlaneswalkedFrom           mode 9
+       9  RingTemptsYou              mode 9
+       8  TurnBegin                  mode 8
+       8  CounterPlayerAddedAll      mode 8
+       8  FlippedCoin                mode 8
+       7  LosesGame                  mode 7
+       7  RolledDieOnce              mode 7
+       7  Proliferate                mode 7
+       7  Crewed                     mode 7
+       6  SpellAbilityCast           mode 6
+       6  Explores                   mode 6
+       6  SpellCopy                  mode 6
+       6  Clashed                    mode 6
+       6  LifeLost                   key FirstTime 3, life each 1, key LifeAmount 1, key ResolvedLimit 1
+       6  ChangesController          mode 6
+       5  Exerted                    mode 5
+       5  NewGame                    mode 5
+       5  BecomesCrewed              mode 5
+       5  PlanarDice                 mode 5
+       4  PayCumulativeUpkeep        mode 4
+       4  Countered                  mode 4
+       4  SearchedLibrary            mode 4
+       4  PhaseIn                    mode 4
+       4  Shuffled                   mode 4
+       4  BecomeMonarch              mode 4
+       4  DungeonCompleted           mode 4
+       4  AbilityTriggered           mode 4
+       4  BecomesTargetOnce          mode 4
+       4  Unattached                 mode 4
+       3  CounterRemovedOnce         mode 3
+       3  Enlisted                   mode 3
+       3  AttackerBlockedOnce        mode 3
+       3  CounterAddedAll            mode 3
+       3  Connives                   mode 3
+       3  Destroyed                  mode 3
+       3  Exiled                     mode 3
+       3  MilledAll                  mode 3
+       3  TokenCreated               mode 3
+       3  Vote                       mode 3
+       3  ConjureAll                 mode 3
+       3  ExcessDamage               mode 3
+       3  SeekAll                    mode 3
+       2  Milled                     mode 2
+       2  Evolved                    mode 2
+       2  PhaseOut                   mode 2
+       2  AbilityResolves            mode 2
+       2  LifeLostAll                mode 2
+       2  Discover                   mode 2
+       2  Investigated               mode 2
+       2  BecomeRenowned             mode 2
+       2  CounterTypeAddedAll        mode 2
+       2  ManaAdded                  mode 2
+       2  Saddled                    mode 2
+       2  FacesDilemma               mode 2
+       2  MilledOnce                 mode 2
+       2  BecomesPlotted             mode 2
+       2  CollectEvidence            mode 2
+       2  TokenCreatedOnce           mode 2
+       2  TapAll                     mode 2
+       1  Abandoned                  mode 1
+       1  GiveGift                   mode 1
+       1  ExcessDamageAll            mode 1
+       1  Championed                 mode 1
+       1  Stationed                  mode 1
+       1  VisitAttraction            mode 1
+       1  UntapAll                   mode 1
+       1  ClaimPrize                 mode 1
+       1  PhaseOutAll                mode 1
+       1  BlockersDeclared           mode 1
+       1  Devoured                   mode 1
+       1  Fight                      mode 1
+       1  PayLife                    mode 1
+       1  ManifestDread              mode 1
+       1  FightOnce                  mode 1
+       1  SacrificedOnce             mode 1
+       1  CaseSolved                 mode 1
+       1  FlippedCoinOnce            mode 1
+       1  Forage                     mode 1
+       1  AttackerUnblockedOnce      mode 1
+       1  SpellAbilityCopy           mode 1
+       1  Trains                     mode 1
+       1  DamagePreventedOnce        mode 1
+       1  PayEcho                    mode 1
+       1  BecomesSaddled             mode 1
+       1  Mentored                   mode 1
+       1  ElementalBend              mode 1
+       1  Foretell                   mode 1

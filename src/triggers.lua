@@ -549,6 +549,176 @@ local function stripReminder(s)
 end
 Triggers.stripReminder = stripReminder
 
+---------------------------------------------------------------------------
+-- Forge data: FORGE_TRIGGERS (forge_triggers_data.lua, made by
+-- tools/forge_triggers.py from Forge's card scripts). For a card it knows,
+-- each triggered paragraph's trigger comes from there; anything it doesn't
+-- cover (or a paragraph with a trigger it can't express) is read from the
+-- rules text as before. !triggers forge off / on switches it.
+---------------------------------------------------------------------------
+
+local FORGE_SELF_WORDS = { "this creature", "this permanent", "this artifact", "this enchantment", "this land",
+  "this planeswalker", "this card", "this token", "this vehicle", "this case", "this class", "this saga",
+  "this aura", "this equipment", "cardname", "nickname" }
+
+local function replacePlain(s, needle, with)
+  if needle == "" then
+    return s
+  end
+  local out, i = {}, 1
+  while true do
+    local a, b = s:find(needle, i, true)
+    if not a then
+      break
+    end
+    table.insert(out, s:sub(i, a - 1))
+    table.insert(out, with)
+    i = b + 1
+  end
+  table.insert(out, s:sub(i))
+  return table.concat(out)
+end
+
+-- Same as forge_key() in tools/forge_triggers.py: keep the two identical. (The data stores
+-- each key cut short; forgeTriggers compares by prefix.)
+local function forgeKey(text, name)
+  local s = stripReminder(tostring(text or "")):lower()
+  s = replacePlain(s, "enters the battlefield", "enters")
+  s = replacePlain(s, "whenever", "when")      -- Forge's descriptions mix the two
+  local full = tostring(name or ""):lower()
+  local names = { full }
+  local comma = full:find(",", 1, true)
+  if comma then
+    table.insert(names, full:sub(1, comma - 1))
+  end
+  for _, n in ipairs(names) do
+    if #n > 1 then
+      s = replacePlain(s, n, "")
+    end
+  end
+  for _, w in ipairs(FORGE_SELF_WORDS) do
+    s = replacePlain(s, w, "")
+  end
+  s = (s:gsub("[^a-z]", ""))
+  return s:sub(1, 64)
+end
+Triggers.forgeKey = forgeKey
+
+-- "enters|s=creature/artifact;mine;nth=2" -> { kind = "enters", subjects = {...}, mine = true, nth = 2 }
+local function forgeDecode(kind, fields)
+  local t = { kind = kind }
+  for f in (fields .. ";"):gmatch("([^;]*);") do
+    if f ~= "" then
+      local eq = f:find("=", 1, true)
+      if eq then
+        local k, v = f:sub(1, eq - 1), f:sub(eq + 1)
+        if k == "s" or k == "x" then
+          local list = {}
+          for w in (v .. "/"):gmatch("([^/]*)/") do
+            if w ~= "" then
+              table.insert(list, w)
+            end
+          end
+          if k == "s" then
+            t.subjects, t.subject = list, list[1]
+          else
+            t.excludes = list
+          end
+        else
+          t[k] = tonumber(v) or v
+        end
+      else
+        t[f] = true
+      end
+    end
+  end
+  return t
+end
+
+local forgeCache = {}
+-- A card's Forge entries: { { key, trig } } (trig = false: Forge has a trigger there the data can't express).
+local function forgeEntries(name)
+  if FORGE_TRIGGERS == nil or name == nil then
+    return nil
+  end
+  local hit = forgeCache[name]
+  if hit ~= nil then
+    return hit or nil
+  end
+  local raw = FORGE_TRIGGERS[name]
+  if raw == nil then
+    forgeCache[name] = false
+    return nil
+  end
+  local list = {}
+  for line in (raw .. "\n"):gmatch("([^\n]*)\n") do
+    local bar = line:find("|", 1, true)
+    if bar then
+      local key, rest = line:sub(1, bar - 1), line:sub(bar + 1)
+      if rest == "?" then
+        table.insert(list, { key = key, trig = false })
+      else
+        local bar2 = rest:find("|", 1, true)
+        local kind = bar2 and rest:sub(1, bar2 - 1) or rest
+        table.insert(list, { key = key, trig = forgeDecode(kind, bar2 and rest:sub(bar2 + 1) or "") })
+      end
+    end
+  end
+  forgeCache[name] = list
+  return list
+end
+
+-- Pair a card's Forge entries with its paragraphs (already stripped of
+-- reminder text). Returns { [paragraph index] = { trig, ... } } for the
+-- paragraphs Forge covers, or nil. An entry is used only when its key fits
+-- exactly one paragraph; a paragraph an entry can't be told apart for, or
+-- one with a trigger the data can't express ("|?"), is read from its text.
+local function forgeForParas(name, paras)
+  if GameState.data and GameState.data.forgeOff then
+    return nil
+  end
+  local entries = forgeEntries(name)
+  if entries == nil then
+    return nil
+  end
+  local keys = {}
+  for i, p in ipairs(paras) do
+    keys[i] = forgeKey(p, name)
+  end
+  local per, bad = {}, {}
+  for _, e in ipairs(entries) do
+    local hits = {}
+    for i, k in ipairs(keys) do
+      if k ~= "" and k:sub(1, #e.key) == e.key then
+        table.insert(hits, i)
+      end
+    end
+    if #hits == 1 then
+      local i = hits[1]
+      if e.trig == false then
+        bad[i] = true
+      else
+        per[i] = per[i] or {}
+        table.insert(per[i], e.trig)
+      end
+    else
+      for _, i in ipairs(hits) do
+        bad[i] = true
+      end
+    end
+  end
+  for i in pairs(bad) do
+    per[i] = nil
+  end
+  return per
+end
+Triggers.forgeForParas = forgeForParas
+
+function Triggers.setForge(on)
+  GameState.data.forgeOff = not on or nil
+  cache = {}
+end
+
 -- The Soul Stone's infinity ability only counts once it has been harnessed (effects.lua sets the flag).
 local function visibleTo(obj, list)
   if not list.hasHarness then
@@ -606,8 +776,13 @@ local function abilitiesOf(obj)
       table.insert(paras, raw)
     end
   end
-  for _, raw in ipairs(paras) do
-    local para = stripReminder(raw)
+  local stripped = {}
+  for i, raw in ipairs(paras) do
+    stripped[i] = stripReminder(raw)
+  end
+  local forgeMap = forgeForParas(d.name, stripped) or {}
+  for pi, raw in ipairs(paras) do
+    local para = stripped[pi]
     -- Loyalty abilities ("-8: You get an emblem with 'Whenever...'") and activated abilities
     -- ("{3}{B}: ... 'Whenever this creature attacks...'") are not triggers of this card.
     local isActivated = false
@@ -627,16 +802,24 @@ local function abilitiesOf(obj)
       if harness then
         list.hasHarness = true
       end
-      local trig = parseTrigger(norm)
-      if norm:find("whenever you play a land or cast a spell", 1, true) then
-        table.insert(list, { trig = { kind = "enters", subject = "land", subjects = { "land" }, mine = true, playedOnly = true }, text = para })
-        trig = { kind = "cast", who = "you" }
-      end
-      if trig then
-        table.insert(list, { trig = trig, text = para, harness = harness })
-      end
-      for _, ct in ipairs(parseCombat(norm)) do
-        table.insert(list, { trig = ct, text = para, harness = harness })
+      -- Forge's data first (a card's own printed paragraphs); the rules text otherwise.
+      local fromForge = forgeMap[pi]
+      if fromForge then
+        for _, ft in ipairs(fromForge) do
+          table.insert(list, { trig = ft, text = para, harness = harness, forge = true })
+        end
+      else
+        local trig = parseTrigger(norm)
+        if norm:find("whenever you play a land or cast a spell", 1, true) then
+          table.insert(list, { trig = { kind = "enters", subject = "land", subjects = { "land" }, mine = true, playedOnly = true }, text = para })
+          trig = { kind = "cast", who = "you" }
+        end
+        if trig then
+          table.insert(list, { trig = trig, text = para, harness = harness })
+        end
+        for _, ct in ipairs(parseCombat(norm)) do
+          table.insert(list, { trig = ct, text = para, harness = harness })
+        end
       end
     end
   end
@@ -1564,6 +1747,17 @@ local function spellMatches(card, spellType, source)
     end
     return n == 0 and not t.land
   end
+  -- "Whenever you cast a red spell" / "a multicolored spell" (Forge data uses these).
+  if COLOR_LETTER[spellType] then
+    return spellColors(card)[COLOR_LETTER[spellType]] == true
+  end
+  if spellType == "multicolored" then
+    local n = 0
+    for _ in pairs(spellColors(card)) do
+      n = n + 1
+    end
+    return n >= 2
+  end
   local first = spellType:match("^(%a+)")
   return first ~= nil and t[first] == true
 end
@@ -1625,7 +1819,7 @@ Events.on("spellCast", function(d)
             firstOk = false
           end
         end
-        if firstOk and ((t.who == "you" and mine) or (t.who == "opp" and not mine)) and spellMatches(d.card, t.spellType, p.obj) then
+        if firstOk and (t.who == "each" or (t.who == "you" and mine) or (t.who == "opp" and not mine)) and spellMatches(d.card, t.spellType, p.obj) then
           -- "That spell" (Gandalf copies it) is the spell that was cast.
           local that = tostring(a.text):lower():find("that spell", 1, true) and d.card.getGUID() or nil
           table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, thatCard = that })
@@ -1916,7 +2110,7 @@ function Triggers.describe(obj)
     table.insert(lines, "- " .. t.kind .. (t.step and (" " .. t.step .. " (" .. t.who .. ")") or "")
       .. (t.self and " (itself)" or "") .. (t.mine and " (yours)" or "") .. (t.once and " (once)" or "")
       .. (t.alone and " (alone)" or "") .. (t.subject and (" " .. t.subject) or "")
-      .. ": " .. a.text)
+      .. (a.forge and " [Forge]" or " [text]") .. ": " .. a.text)
   end
   return obj.getName() .. ":\n" .. table.concat(lines, "\n")
 end
