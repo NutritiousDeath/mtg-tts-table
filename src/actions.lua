@@ -930,6 +930,63 @@ local function renderTile(color, a)
     press_color = { 1, 1, 1, 0.18 } }, 0, 0)
 end
 
+-- The console strip on the table edge (replaces the screen buttons at the top left).
+local CONSOLE = {
+  { key = "import", label = "IMPORT DECK", tip = "IMPORT DECK\nOpen the deck import panel (imports to the seat of whoever clicks)", fn = "ui_toggleImport" },
+  { key = "start", label = "START GAME", tip = "START GAME\nOpen the start / new game panel", fn = "ui_toggleStart" },
+  { key = "turnopts", label = "TURN OPTIONS", tip = "TURN OPTIONS\nExtra turn, extra combat, skip a step, flip the table...", fn = "ui_turnOpts" },
+  { key = "dice", label = "ROLL DICE", tip = "ROLL DICE\nOpen the dice roller (only you see it)", fn = "ui_diceToggle" },
+}
+local CONSOLE_RGB = { White = { 0.85, 0.88, 0.95 }, Red = { 1, 0.45, 0.5 }, Green = { 0.45, 1, 0.6 }, Blue = { 0.5, 0.75, 1 } }
+
+local function consoleTiles()
+  GameState.data.table = GameState.data.table or {}
+  GameState.data.table.consoleTiles = GameState.data.table.consoleTiles or {}
+  return GameState.data.table.consoleTiles
+end
+
+local function renderConsole(color)
+  local guid = consoleTiles()[color]
+  local tile = guid and getObjectFromGUID(guid)
+  if tile == nil then
+    return
+  end
+  tile.clearButtons()
+  for i, c in ipairs(CONSOLE) do
+    local fn = "console_" .. c.key
+    _G[fn] = function(obj, playerColor)
+      local f = _G[c.fn]
+      local p = Player[playerColor]
+      if f and p then
+        f(p)
+      end
+    end
+    -- Left to right as the seat's player sees it (negative x is their left).
+    Trackers.tileButton(tile, { label = c.label, click_function = fn, tooltip = c.tip,
+      width = 2250, height = 820, font_size = 250, font_color = CONSOLE_RGB[color] or { 1, 1, 1 },
+      color = { 0, 0, 0, 0 }, hover_color = { 1, 1, 1, 0.1 }, press_color = { 1, 1, 1, 0.2 } }, -7.5 + (i - 1) * 5, 0)
+  end
+end
+
+function Actions.ensureConsole()
+  local wanted = {}
+  for _, color in ipairs(TableSetup.activeSeats()) do
+    table.insert(wanted, { key = color, color = color, region = "console", name = "Console (" .. color .. ")",
+      url = ART_BASE .. "ui/console_" .. color .. ".png" .. ART_VERSION, width = 20,
+      draw = function() renderConsole(color) end })
+  end
+  Trackers.syncTiles("ConsoleTile", { { registry = consoleTiles(), wanted = wanted } })
+end
+
+-- The old screen buttons (top left): hidden while the console strips are on the table. "!screenbuttons"
+-- shows / hides them again.
+function Actions.setScreenButtons(on)
+  GameState.data.screenButtons = on and true or false
+  for _, id in ipairs({ "importToggle", "startToggle", "turnOptsToggle", "diceToggle" }) do
+    pcall(function() UI.setAttribute(id, "active", on and "true" or "false") end)
+  end
+end
+
 function Actions.ensure()
   local wanted = {}
   for _, color in ipairs(TableSetup.activeSeats()) do
@@ -941,6 +998,8 @@ function Actions.ensure()
     end
   end
   Trackers.syncTiles("ActionTile", { { registry = tiles(), wanted = wanted } })
+  pcall(Actions.ensureConsole)
+  Wait.time(function() Actions.setScreenButtons(GameState.data.screenButtons == true) end, 1.5)
 end
 
 -- Hover text on the tile object itself too (shown by TTS when hovering).

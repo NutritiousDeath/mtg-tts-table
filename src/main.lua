@@ -114,7 +114,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.69 (Jared Carthalion deck audit: color Lieges, all-color Kavus, Leyline, Oath of Teferi)"
+SCRIPT_VERSION = "1.70 (table console strips: Import, Start, Turn Options, Dice on the table edge)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -409,6 +409,12 @@ function onChat(message, sender)
     return false
   end
 
+  if message:lower() == "!screenbuttons" then
+    Actions.setScreenButtons(not GameState.data.screenButtons)
+    broadcastToAll("Screen buttons (Import / Start / Turn Options / Dice, top left) " .. (GameState.data.screenButtons and "SHOWN" or "HIDDEN")
+      .. ". They're also on the table edge in front of each seat.", { 0.75, 0.8, 0.9 })
+    return false
+  end
   if message == "!seats" then
     print("MTG > Version " .. SCRIPT_VERSION .. ", you are " .. tostring(sender.color))
     TableSetup.report()

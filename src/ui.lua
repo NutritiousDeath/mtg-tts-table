@@ -71,6 +71,14 @@ function TableUI.build()
   local panels = { importPanel() }
   local xml = HEADER .. table.concat(panels) .. GameFlow.xml() .. Turns.xml() .. Actions.xml() .. Flip.xml()
     .. Dice.xml() .. Tokens.xml() .. LibSearch.xml() .. Stack.xml() .. Combat.xml() .. Triggers.orderXml() .. Effects.xml() .. Counters.xml()
+  -- The top-left screen buttons (Import / Start / Turn Options / Dice) are on the table's console strips now;
+  -- hidden unless "!screenbuttons" turned them back on.
+  do
+    local on = (GameState.data and GameState.data.screenButtons) and "true" or "false"
+    for _, id in ipairs({ "importToggle", "startToggle", "turnOptsToggle", "diceToggle" }) do
+      xml = xml:gsub('<Button id="' .. id .. '"', '<Button id="' .. id .. '" active="' .. on .. '"', 1)
+    end
+  end
   -- Remember every element that's shown to one seat only (see
   -- TableUI.refreshVisibility).
   TableUI.privateIds = {}
