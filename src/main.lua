@@ -114,7 +114,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.70 (table console strips: Import, Start, Turn Options, Dice on the table edge)"
+SCRIPT_VERSION = "1.71 (console strip moved left of the name; Start, Turn Options, Dice)"
 
 function onLoad(saved)
   GameLog.setup()

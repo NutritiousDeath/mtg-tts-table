@@ -116,9 +116,9 @@ local REGIONS = {
   -- clickable life / poison / commander damage tracker, in front of the
   -- playmat toward the table center (trackers.lua)
   tracker = { side = 0, depth = 31, w = 14, d = 4.8 },
-  -- The seat's console strip along the table edge, in front of the lands (actions.lua): Import Deck,
-  -- Start Game, Turn Options, Roll Dice.
-  console = { side = 0, depth = 2.2, w = 20, d = 2.0 },
+  -- The seat's console strip along the table edge, left of the middle (the player's name shows in the
+  -- middle of the edge), in front of the lands (actions.lua): Start Game, Turn Options, Roll Dice.
+  console = { side = -14.5, depth = 2.2, w = 11, d = 2.0 },
 }
 TableSetup.REGION_NAMES = { "command1", "command2", "tax1", "tax2", "battlefield", "lands", "library", "graveyard",
   "exile", "tracker" }

@@ -930,9 +930,9 @@ local function renderTile(color, a)
     press_color = { 1, 1, 1, 0.18 } }, 0, 0)
 end
 
--- The console strip on the table edge (replaces the screen buttons at the top left).
+-- The console strip on the table edge (replaces the screen buttons at the top left; decks are imported
+-- with the importer spots on the table).
 local CONSOLE = {
-  { key = "import", label = "IMPORT DECK", tip = "IMPORT DECK\nOpen the deck import panel (imports to the seat of whoever clicks)", fn = "ui_toggleImport" },
   { key = "start", label = "START GAME", tip = "START GAME\nOpen the start / new game panel", fn = "ui_toggleStart" },
   { key = "turnopts", label = "TURN OPTIONS", tip = "TURN OPTIONS\nExtra turn, extra combat, skip a step, flip the table...", fn = "ui_turnOpts" },
   { key = "dice", label = "ROLL DICE", tip = "ROLL DICE\nOpen the dice roller (only you see it)", fn = "ui_diceToggle" },
@@ -963,8 +963,8 @@ local function renderConsole(color)
     end
     -- Left to right as the seat's player sees it (negative x is their left).
     Trackers.tileButton(tile, { label = c.label, click_function = fn, tooltip = c.tip,
-      width = 2250, height = 820, font_size = 250, font_color = CONSOLE_RGB[color] or { 1, 1, 1 },
-      color = { 0, 0, 0, 0 }, hover_color = { 1, 1, 1, 0.1 }, press_color = { 1, 1, 1, 0.2 } }, -7.5 + (i - 1) * 5, 0)
+      width = 1700, height = 820, font_size = 230, font_color = CONSOLE_RGB[color] or { 1, 1, 1 },
+      color = { 0, 0, 0, 0 }, hover_color = { 1, 1, 1, 0.1 }, press_color = { 1, 1, 1, 0.2 } }, (i - 2) * 11 / 3, 0)
   end
 end
 
@@ -972,7 +972,7 @@ function Actions.ensureConsole()
   local wanted = {}
   for _, color in ipairs(TableSetup.activeSeats()) do
     table.insert(wanted, { key = color, color = color, region = "console", name = "Console (" .. color .. ")",
-      url = ART_BASE .. "ui/console_" .. color .. ".png" .. ART_VERSION, width = 20,
+      url = ART_BASE .. "ui/console_" .. color .. ".png?v=2", width = 11,
       draw = function() renderConsole(color) end })
   end
   Trackers.syncTiles("ConsoleTile", { { registry = consoleTiles(), wanted = wanted } })

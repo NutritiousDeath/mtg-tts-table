@@ -1,7 +1,7 @@
 """
 make_console_art.py
 The console strip on the table edge in front of each seat (actions.lua): a dark plate with a glowing
-seat-colored border and four cells. The labels are drawn live by the script.
+seat-colored border and three cells. The labels are drawn live by the script.
     python tools/make_console_art.py
 """
 import os, sys
@@ -10,7 +10,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(ROOT, "assets", "ui")
 SEAT_RGB = {"White": (205, 212, 230), "Red": (230, 70, 80), "Green": (70, 220, 120), "Blue": (80, 150, 255)}
 PPU = 80
-W, H = int(20 * PPU), int(2.0 * PPU)
+W, H = int(11 * PPU), int(2.0 * PPU)
 for color, rgb in SEAT_RGB.items():
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     mask = Image.new("L", (W, H), 0)
@@ -20,8 +20,8 @@ for color, rgb in SEAT_RGB.items():
     for y in range(H):
         t = y / H
         pd.line([(0, y), (W, y)], fill=(int(10 + 8 * t), int(13 + 9 * t), int(22 + 12 * t), 255))
-    for i in (1, 2, 3):
-        x = int(W * i / 4)
+    for i in (1, 2):
+        x = int(W * i / 3)
         pd.line([(x, 26), (x, H - 26)], fill=tuple(int(c * 0.45) for c in rgb) + (255,), width=3)
     img.paste(panel, (0, 0), mask)
     border = Image.new("RGBA", (W, H), (0, 0, 0, 0))
