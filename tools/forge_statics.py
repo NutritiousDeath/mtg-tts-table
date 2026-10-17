@@ -57,12 +57,21 @@ def card_filter(expr):
         else:
             raise Unmapped("affects " + head)
         for p in [x for x in rest.split("+") if x]:
+            m = re.fullmatch(r"power(LE|GE)(\d+)", p)
             if p in PROPS:
                 toks.append(PROPS[p])
             elif p in COLORS:
                 toks.append(COLORS[p])
             elif p in SUBTYPES:
                 toks.append(p.lower())
+            elif p in ("withFlying", "withoutFlying", "withReach"):
+                toks.append({"withFlying": "fly", "withoutFlying": "nofly", "withReach": "reach"}[p])
+            elif p.startswith("non") and p[3:] in COLORS:
+                toks.append("!" + COLORS[p[3:]])
+            elif p.startswith("non") and p[3:] in TYPES:
+                toks.append("!" + TYPES[p[3:]])
+            elif m:
+                toks.append("pow" + ("<=" if m.group(1) == "LE" else ">=") + m.group(2))
             else:
                 raise Unmapped("prop " + re.sub(r"[^A-Za-z].*", "", p))
         alts.append(".".join(toks))
@@ -103,7 +112,30 @@ def continuous(p):
     return "C", out
 
 
-MODES = {"Continuous": continuous}
+COMBAT_KEYS = {"Mode", "ValidCard", "ValidAttacker", "ValidBlocker", "Description", "EffectZone", "Secondary", "AILogic"}
+
+
+def combat(p):
+    if set(p) - COMBAT_KEYS:
+        raise Unmapped("key " + sorted(set(p) - COMBAT_KEYS)[0])
+    if p.get("EffectZone", "Battlefield") != "Battlefield":
+        raise Unmapped("from " + p["EffectZone"])
+    mode = p["Mode"]
+    if mode == "CantBlockBy":
+        if "ValidAttacker" not in p:
+            raise Unmapped("no attacker")
+        out = {"a": card_filter(p["ValidAttacker"])}
+        if "ValidBlocker" in p:
+            out["b"] = card_filter(p["ValidBlocker"])
+        return "CBB", out
+    if "ValidCard" not in p:
+        raise Unmapped("no card")
+    kind = {"CantAttack": "CA", "CantBlock": "CB", "CantAttack,CantBlock": "CAB"}[mode]
+    return kind, {"f": card_filter(p["ValidCard"])}
+
+
+MODES = {"Continuous": continuous, "CantAttack": combat, "CantBlock": combat, "CantBlockBy": combat,
+         "CantAttack,CantBlock": combat}
 
 
 def encode(kind, fields):

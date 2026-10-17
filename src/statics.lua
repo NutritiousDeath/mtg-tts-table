@@ -322,6 +322,20 @@ function Statics.forgeMatches(filter, q, src)
         ok = not q.token
       elseif tok == "attacking" then
         ok = Combat ~= nil and Combat.isAttacking ~= nil and Combat.isAttacking(q.obj) == true
+      elseif tok == "fly" or tok == "nofly" or tok == "reach" then
+        local has = Effects ~= nil and Effects.hasKeyword ~= nil and Effects.hasKeyword(q.obj, tok == "reach" and "reach" or "flying")
+        ok = (tok == "nofly") ~= (has == true)
+      elseif tok:sub(1, 1) == "!" then
+        local w = tok:sub(2)
+        if FS_COLORS[w] then
+          ok = Statics.colorsOf(q.obj, q.seat)[w] ~= true
+        else
+          ok = q.tl:find(w, 1, true) == nil
+        end
+      elseif tok:sub(1, 3) == "pow" then
+        local pw = tonumber(Counters and Counters.stats and Counters.stats(q.obj).power or "") or 0
+        local n = tonumber(tok:sub(6)) or 0
+        ok = (tok:sub(4, 5) == "<=" and pw <= n) or (tok:sub(4, 5) == ">=" and pw >= n)
       elseif FS_FLAGS[tok] then
         ok = false
       else
@@ -1059,4 +1073,57 @@ function Statics.panharmonicons(seat)
     end
   end
   return n
+end
+
+-- Forge's combat statics (CantAttack / CantBlock / CantBlockBy) of the permanents on the table:
+-- { { kind, f / a / b, src = { obj, seat }, name } }. The table's rules-text reader has none of these.
+local combatSrc = { epoch = -1, at = -100, list = {} }
+local function combatStatics()
+  local ep = Events and Events.epoch or 0
+  local now = clockNow()
+  if combatSrc.epoch == ep and now - combatSrc.at < 2 then
+    return combatSrc.list
+  end
+  local out = {}
+  for _, p in ipairs(perms()) do
+    for _, e in pairs(Statics.forgeLines(p.obj.getName(), p.oracle)) do
+      if e.kind == "CA" or e.kind == "CB" or e.kind == "CAB" or e.kind == "CBB" then
+        table.insert(out, { kind = e.kind, f = e.f, src = { obj = p.obj, seat = p.seat }, name = p.obj.getName() })
+      end
+    end
+  end
+  combatSrc.epoch, combatSrc.at, combatSrc.list = ep, now, out
+  return out
+end
+
+local function asQ(obj)
+  local okl, loc = pcall(function() return Zones.regionAt(obj.getPosition()) end)
+  local d = dataOf(obj)
+  return { obj = obj, seat = okl and loc and loc.seat or nil, tl = tostring(d.typeLine or ""):lower(), token = obj.hasTag("Token") }
+end
+
+-- Why `card` can't attack (Forge static), or nil.
+function Statics.cantAttack(card)
+  local q = asQ(card)
+  for _, s in ipairs(combatStatics()) do
+    if (s.kind == "CA" or s.kind == "CAB") and Statics.forgeMatches(s.f.f, q, s.src) then
+      return s.name
+    end
+  end
+  return nil
+end
+
+-- Why `blocker` can't block `attacker` (Forge static), or nil.
+function Statics.cantBlock(blocker, attacker)
+  local b = asQ(blocker)
+  local a = attacker and asQ(attacker)
+  for _, s in ipairs(combatStatics()) do
+    if (s.kind == "CB" or s.kind == "CAB") and Statics.forgeMatches(s.f.f, b, s.src) then
+      return blocker.getName() .. " can't block (" .. s.name .. ")"
+    end
+    if s.kind == "CBB" and a and Statics.forgeMatches(s.f.a, a, s.src) and (s.f.b == nil or Statics.forgeMatches(s.f.b, b, s.src)) then
+      return "can't be blocked by " .. blocker.getName() .. " (" .. s.name .. ")"
+    end
+  end
+  return nil
 end

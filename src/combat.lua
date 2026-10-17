@@ -565,6 +565,12 @@ function Combat.attackClick(card, color, alt)
     if hasKeyword(card, "Defender") then
       broadcastToColor(card.getName() .. " has defender and normally can't attack.", color, WARN)
     end
+    if Statics and Statics.cantAttack then
+      local okS, src = pcall(Statics.cantAttack, card)
+      if okS and src then
+        broadcastToColor(card.getName() .. " can't attack (" .. src .. ").", color, WARN)
+      end
+    end
   else
     local nextKey
     for i, k in ipairs(list) do
@@ -754,6 +760,13 @@ local function canBlock(blocker, attacker)
     local oracle = tostring(cardData(blocker).oracle or ""):lower()
     if not oracle:find("can block creatures with flying", 1, true) then
       return false, "has flying and " .. blocker.getName() .. " has neither flying nor reach"
+    end
+  end
+  -- Forge's "can't block", "can't be blocked except by ...", "can block only creatures with flying".
+  if Statics and Statics.cantBlock then
+    local okS, why = pcall(Statics.cantBlock, blocker, attacker)
+    if okS and why then
+      return false, why
     end
   end
   return true
