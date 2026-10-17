@@ -7,6 +7,7 @@ Output (into the Unity project, Assets/MTG/Glass/, given as argv[1]):
 Designs: jewel_a / jewel_b / jewel_c (gothic jewel tones), broken_a / broken_b (some panes knocked
 out), seat_White / seat_Blue / seat_Red / seat_Green (the window behind each seat leans to that colour,
 with a motif: sun, drop, flame, leaf), corner (all five colours, a crescent moon for black).
+Custom motifs: put SVGs or PNGs in assets/glass/motifs/ (see MOTIF_DIR) and they replace the built-in ones.
 """
 import json
 import os
@@ -19,6 +20,9 @@ sys.path.insert(0, HERE)
 import make_room  # noqa: E402
 
 W, H = 256, 1024
+# Optional: your own medallion images, motif_White.png / motif_Blue.png / motif_Red.png / motif_Green.png /
+# motif_Black.png (Black goes in the corner windows). Any colour without a file keeps the built-in design.
+MOTIF_DIR = os.path.join(HERE, "..", "assets", "glass", "motifs")
 SPRING_V = 0.80          # arch spring as a fraction of the window height
 LEAD = (14, 12, 18)
 
@@ -84,6 +88,22 @@ def voronoi_panes(rng, region, n, pal, img, alpha, lead_px=2.2):
 
 def draw_lead(img, mask_fn, width):
     pass
+
+
+def custom_motif(colour):
+    """Your own medallion image for a colour, if there is one: motif_<Colour>.svg (rendered) or .png."""
+    if not MOTIF_DIR:
+        return None
+    svg = os.path.join(MOTIF_DIR, "motif_" + colour + ".svg")
+    png = os.path.join(MOTIF_DIR, "motif_" + colour + ".png")
+    if os.path.exists(svg):
+        import io
+        import cairosvg   # pip install cairosvg
+        data = cairosvg.svg2png(url=svg, output_width=512, output_height=512)
+        return Image.open(io.BytesIO(data)).convert("RGBA")
+    if os.path.exists(png):
+        return Image.open(png).convert("RGBA")
+    return None
 
 
 def motif_layer(kind):
@@ -216,7 +236,13 @@ def make(design, seed):
     elif design == "corner":
         motif = "Black"
     if motif:
-        mi = motif_layer(motif).resize((int(W * 0.78), int(W * 0.78)), Image.LANCZOS)
+        src = custom_motif(motif)
+        if src is not None:
+            # your own image for this colour (assets/glass/motifs/motif_<Colour>.svg or .png), fitted into the medallion
+            k = (W * 0.62) / max(src.width, src.height)
+            mi = src.resize((max(1, int(src.width * k)), max(1, int(src.height * k))), Image.LANCZOS)
+        else:
+            mi = motif_layer(motif).resize((int(W * 0.78), int(W * 0.78)), Image.LANCZOS)
         cx, cy = W // 2, int((1 - rose_c[1]) * H)
         out.alpha_composite(mi, (cx - mi.width // 2, cy - mi.height // 2))
     if design.startswith("broken"):
