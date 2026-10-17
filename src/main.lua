@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.98 (ambient light from fixed colours, not the background: no more orange walls)"
+SCRIPT_VERSION = "2.00 (guild windows, rose tracery, and the active player's window glows on their turn)"
 
 function onLoad(saved)
   GameLog.setup()

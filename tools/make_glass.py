@@ -35,6 +35,10 @@ PAL = {
     "Green": [((0.05, 0.60, 0.25), 3), ((0.35, 0.75, 0.20), 2), ((0.02, 0.35, 0.15), 2), ((0.95, 0.80, 0.30), 1)],
     "Black": [((0.22, 0.05, 0.30), 3), ((0.10, 0.06, 0.14), 2), ((0.45, 0.12, 0.55), 1)],
 }
+GUILDS = {"Azorius": ("White", "Blue"), "Dimir": ("Blue", "Black"), "Rakdos": ("Black", "Red"),
+          "Gruul": ("Red", "Green"), "Selesnya": ("Green", "White"), "Orzhov": ("White", "Black"),
+          "Izzet": ("Blue", "Red"), "Golgari": ("Black", "Green"), "Boros": ("Red", "White"),
+          "Simic": ("Green", "Blue")}
 MOTIF_COLOR = {"White": (1.0, 0.85, 0.35), "Blue": (0.55, 0.85, 1.0), "Red": (1.0, 0.55, 0.12),
                "Green": (0.55, 0.95, 0.35), "Black": (0.85, 0.80, 1.0)}
 
@@ -90,20 +94,51 @@ def draw_lead(img, mask_fn, width):
     pass
 
 
-def custom_motif(colour):
-    """Your own medallion image for a colour, if there is one: motif_<Colour>.svg (rendered) or .png."""
+def custom_motif(name):
+    """Your own medallion image, if there is one: motif_<Colour> or guild_<Guild> (.svg, .png or .webp)."""
     if not MOTIF_DIR:
         return None
-    svg = os.path.join(MOTIF_DIR, "motif_" + colour + ".svg")
-    png = os.path.join(MOTIF_DIR, "motif_" + colour + ".png")
+    stem = name if name.startswith("guild_") else "motif_" + name
+    svg = os.path.join(MOTIF_DIR, stem + ".svg")
     if os.path.exists(svg):
         import io
         import cairosvg   # pip install cairosvg
         data = cairosvg.svg2png(url=svg, output_width=512, output_height=512)
         return Image.open(io.BytesIO(data)).convert("RGBA")
-    if os.path.exists(png):
-        return Image.open(png).convert("RGBA")
+    for ext in (".png", ".webp"):
+        f = os.path.join(MOTIF_DIR, stem + ext)
+        if os.path.exists(f):
+            return Image.open(f).convert("RGBA")
     return None
+
+
+def rose_tracery(out, cx, cy, r, kind):
+    """Gothic rose-window leading inside the medallion (pixel centre cx, cy, radius r)."""
+    d = ImageDraw.Draw(out)
+    lead = LEAD + (250,)
+    wd = max(3, int(r * 0.06))
+    if kind == "quatrefoil":
+        for a in range(4):
+            t = a * np.pi / 2 + np.pi / 4
+            px, py = cx + np.cos(t) * r * 0.42, cy + np.sin(t) * r * 0.42
+            d.ellipse([px - r * 0.42, py - r * 0.42, px + r * 0.42, py + r * 0.42], outline=lead, width=wd)
+        d.ellipse([cx - r * 0.18, cy - r * 0.18, cx + r * 0.18, cy + r * 0.18], outline=lead, width=wd)
+    elif kind == "sixfoil":
+        for a in range(6):
+            t = a * np.pi / 3
+            px, py = cx + np.cos(t) * r * 0.5, cy + np.sin(t) * r * 0.5
+            d.ellipse([px - r * 0.5, py - r * 0.5, px + r * 0.5, py + r * 0.5], outline=lead, width=wd)
+    else:   # star
+        pts = []
+        for a in range(16):
+            t = a * np.pi / 8 - np.pi / 2
+            rr = r * (0.92 if a % 2 == 0 else 0.42)
+            pts.append((cx + np.cos(t) * rr, cy + np.sin(t) * rr))
+        d.polygon(pts, outline=lead, width=wd)
+        for a in range(8):
+            t = a * np.pi / 4 - np.pi / 2
+            d.line([(cx, cy), (cx + np.cos(t) * r * 0.92, cy + np.sin(t) * r * 0.92)], fill=lead, width=wd)
+        d.ellipse([cx - r * 0.16, cy - r * 0.16, cx + r * 0.16, cy + r * 0.16], fill=(255, 220, 140, 230), outline=lead, width=wd)
 
 
 def motif_layer(kind):
@@ -191,6 +226,10 @@ def make(design, seed):
     if design.startswith("seat_"):
         col = design[5:]
         pal_main, pal_rose = PAL[col], PAL["jewel"]
+    elif design.startswith("guild_"):
+        a_, b_ = GUILDS[design[6:]]
+        pal_main = PAL[a_] + PAL[b_]
+        pal_rose = [((0.05, 0.05, 0.08), 1)]
     elif design == "corner":
         pal_main, pal_rose = None, PAL["Black"]
     else:
@@ -205,7 +244,8 @@ def make(design, seed):
     else:
         voronoi_panes(rng, sub, 46, pal_main, img, alpha)
         voronoi_panes(rng, filler, 22, pal_main, img, alpha)
-    voronoi_panes(rng, in_rose & inside, 10 if design.startswith(("seat_", "corner")) else 16, pal_rose, img, alpha + 0.05)
+    voronoi_panes(rng, in_rose & inside, 10 if design.startswith(("seat_", "corner", "guild_")) else 16, pal_rose, img,
+                  alpha + (0.35 if design.startswith("guild_") else 0.05))
     # lead between the tracery regions (sub-lancets / filler / medallion)
     rid = np.zeros((H, W), np.int8)
     rid[sub] = 1
@@ -231,18 +271,29 @@ def make(design, seed):
     # motif in the medallion
     out = Image.fromarray((np.clip(img, 0, 1) * 255).astype(np.uint8), "RGBA")
     motif = None
+    cx, cy = W // 2, int((1 - rose_c[1]) * H)
+    rpx = rose_r * W
     if design.startswith("seat_"):
         motif = design[5:]
     elif design == "corner":
         motif = "Black"
+    elif design.startswith("guild_"):
+        motif = design
+    else:
+        kinds = ["quatrefoil", "sixfoil", "star"]
+        rose_tracery(out, cx, cy, rpx * 0.92, kinds[seed % 3])
     if motif:
         src = custom_motif(motif)
         if src is not None:
             # your own image for this colour (assets/glass/motifs/motif_<Colour>.svg or .png), fitted into the medallion
             k = (W * 0.62) / max(src.width, src.height)
             mi = src.resize((max(1, int(src.width * k)), max(1, int(src.height * k))), Image.LANCZOS)
+        elif motif.startswith("guild_"):
+            mi = None
         else:
             mi = motif_layer(motif).resize((int(W * 0.78), int(W * 0.78)), Image.LANCZOS)
+        if mi is None:
+            return out
         cx, cy = W // 2, int((1 - rose_c[1]) * H)
         out.alpha_composite(mi, (cx - mi.width // 2, cy - mi.height // 2))
     if design.startswith("broken"):
@@ -265,8 +316,9 @@ def make(design, seed):
     return out
 
 
-DESIGNS = ["jewel_a", "jewel_b", "jewel_c", "broken_a", "broken_b", "seat_White", "seat_Blue", "seat_Red",
-           "seat_Green", "corner"]
+GUILD_ORDER = ["Azorius", "Rakdos", "Selesnya", "Izzet", "Golgari", "Dimir", "Gruul", "Orzhov", "Boros", "Simic"]
+DESIGNS = (["jewel_a", "jewel_b", "jewel_c", "broken_a", "broken_b", "seat_White", "seat_Blue", "seat_Red",
+            "seat_Green", "corner"] + ["guild_" + g for g in GUILD_ORDER])
 
 
 def seats(layout):
@@ -294,14 +346,23 @@ def assign(layout):
             if dd < bd:
                 best, bd = i, dd
         taken[best] = "seat_" + colour
+    # The rest: the ten guilds spread around the chapel, the others rose tracery (two of them broken).
     jewels = ["jewel_a", "jewel_b", "jewel_c"]
-    broken = {3: "broken_a", 14: "broken_b"}
+    plain = [i for i, w in enumerate(ws) if i not in taken and w["kind"] != "corner"]
+    guild_at = {}
+    step = len(plain) / len(GUILD_ORDER)
+    for k, g in enumerate(GUILD_ORDER):
+        guild_at[plain[int(k * step)]] = "guild_" + g
+    rest = [i for i in plain if i not in guild_at]
+    broken = {rest[1]: "broken_a", rest[-2]: "broken_b"} if len(rest) >= 4 else {}
     k = 0
     for i, w in enumerate(ws):
         if i in taken:
             d = taken[i]
         elif w["kind"] == "corner":
             d = "corner"
+        elif i in guild_at:
+            d = guild_at[i]
         elif i in broken:
             d = broken[i]
         else:
@@ -309,8 +370,23 @@ def assign(layout):
             k += 1
         o = {key: float(val) if not isinstance(val, str) else val for key, val in w.items()}
         o["design"] = d
+        # which turn colour lights this window up (glass glow, fires.lua): its seat, or purple for the corners
+        o["glow"] = d[5:] if d.startswith("seat_") else ("Purple" if d == "corner" else "")
         out.append(o)
     return out
+
+
+def halo():
+    """Soft glow around a window (additive): white, fading out from the lancet's outline."""
+    inside, u, v = lancet_mask()
+    m = Image.fromarray((inside * 255).astype(np.uint8))
+    big = Image.new("L", (W * 2, int(H * 1.25)), 0)
+    big.paste(m.resize((W, H)), (W // 2, int(H * 0.125)))
+    g = np.asarray(big.filter(ImageFilter.GaussianBlur(28))).astype(np.float32) / 255
+    g = np.clip(g * 1.6, 0, 1)
+    rgb = (g[..., None] * 255).astype(np.uint8).repeat(3, 2)
+    a = (g * 255).astype(np.uint8)[..., None]
+    return Image.fromarray(np.concatenate([rgb, a], 2), "RGBA")
 
 
 if __name__ == "__main__":
@@ -318,6 +394,7 @@ if __name__ == "__main__":
     os.makedirs(dest, exist_ok=True)
     for i, dsg in enumerate(DESIGNS):
         make(dsg, 100 + i).save(os.path.join(dest, "glass_" + dsg + ".png"))
+    halo().save(os.path.join(dest, "glass_halo.png"))
     for layout, name in (("four", "windows_four.json"), ("twohg", "windows_2hg.json")):
         with open(os.path.join(dest, name), "w") as fh:
             json.dump({"windows": assign(layout)}, fh, indent=1)

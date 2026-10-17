@@ -7,6 +7,8 @@
       fire turns the starting player's colour;
     * each new turn: a WOOSH and the fires turn the new active player's colour;
     * game over: a roar in the winner's colour.
+  The stained glass (table.lua) joins in: the window behind the active player glows in their colour, the
+  two big corner windows glow purple before the game.
   The fires are Unity AssetBundles (tools/unity/MTGTorchBuilder.cs) with one looping effect per colour
   and roar / woosh trigger effects; the stone fireplaces are plain TTS models (tools/make_hearth.py).
   !fire <color> [roar|woosh] tries a colour by hand (Purple, White, Red, Green, Blue).
@@ -181,9 +183,21 @@ local function whenLoaded(o, fn)
 end
 
 -- Turn every fire to a colour (Purple, White, Red, Green, Blue), with a "roar" or "woosh" first.
+-- The stained glass follows too: the window behind the active player glows (purple: the corner windows).
 function Fires.set(color, mode)
   local idx = INDEX[color] or 0
   GameState.data.fireColor = color
+  local st = state()
+  local glass = st.glass and getObjectFromGUID(st.glass)
+  if glass then
+    whenLoaded(glass, function(obj)
+      Wait.time(function()
+        if not obj.isDestroyed() then
+          pcall(function() obj.AssetBundle.playLoopingEffect(idx) end)
+        end
+      end, mode and 0.35 or 0)
+    end)
+  end
   for n, o in ipairs(fireObjects()) do
     whenLoaded(o, function(obj)
       if mode then

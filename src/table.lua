@@ -594,7 +594,7 @@ end
 -- Stained glass in the chapel windows: translucent, glowing jewel-tone glass you can still see through;
 -- the window behind each seat leans to that seat's colour (sun, drop, flame, leaf) and the two big
 -- corner windows hold all five colours. A Unity AssetBundle (tools/unity/MTGGlassBuilder.cs).
-local GLASS_VERSION = "?v=1"
+local GLASS_VERSION = "?v=3"
 
 function TableSetup.ensureGlass()
   local state = GameState.data.table
@@ -629,6 +629,9 @@ function TableSetup.ensureGlass()
       o.setName("Stained Glass")
       o.addTag("TableGlass")
       state.glass = o.getGUID()
+      if Fires then
+        Wait.time(function() Fires.refresh() end, 1)
+      end
     end,
   })
   obj.setCustomObject({ assetbundle = url, type = 0 })
