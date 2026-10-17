@@ -126,6 +126,7 @@ function Flip.play(color, reverse)
   end, STEP, FRAMES)
 end
 
+-- (v1.79: the table no longer tips: moving it by script made everything fall through the floor.)
 -- The real chaos, like Tabletop Simulator's own "Flip Table" (which only works on TTS's built-in
 -- tables; ours is a custom surface, so this does it by script):
 --   * the play surface and stone frame tip up off the flipper's edge, pivoting on the far edge;
@@ -280,67 +281,76 @@ runChaos = function(color)
     end
   end
   Flip.chaosOn = true
-  -- Mat pictures and outlines would float in the air while the table is up.
-  local decals, lines
-  pcall(function() decals = Global.getDecals() end)
-  pcall(function() lines = Global.getVectorLines() end)
-  pcall(function() Global.setDecals({}) end)
-  pcall(function() Global.setVectorLines({}) end)
-
-  local pivot, axis, euler = tipFor(color)
-  -- Launch: up and away from the flipper, like the table went over under them.
-  local push = { x = -axis.z, z = axis.x }   -- = n, toward the far edge
+  print("MTG > Table flip: " .. #list .. " piece" .. (#list == 1 and "" or "s") .. " go flying.")
+  -- The table itself stays put (moving it by script left the cards falling through the floor).
+  -- Everything loose is launched up and away from the flipper, spinning.
+  local s = color and TableSetup.isActive(color) and TableSetup.seat(color)
+  local push = s and s.inward or { x = 0, z = 0 }
   for _, e in ipairs(list) do
     local p = e.pos
     pcall(function()
-      e.obj.setVelocity({ p.x * 0.25 + push.x * 10 + math.random(-8, 8), math.random(22, 38),
-        p.z * 0.25 + push.z * 10 + math.random(-8, 8) })
+      e.obj.setVelocity({ p.x * 0.25 + push.x * 12 + math.random(-8, 8), math.random(25, 40),
+        p.z * 0.25 + push.z * 12 + math.random(-8, 8) })
       e.obj.setAngularVelocity({ math.random(-25, 25), math.random(-25, 25), math.random(-25, 25) })
     end)
   end
-  tween(pieces, pivot, axis, euler, 0, TIP_MAX, TIP_UP, function()
-    Wait.time(function()
-      tween(pieces, pivot, axis, euler, TIP_MAX, 0, TIP_DOWN, function()
-        -- Exactly back where it was.
-        for _, e in ipairs(pieces) do
-          if not e.obj.isDestroyed() then
-            e.obj.setPosition(e.pos)
-            e.obj.setRotation(e.rot)
-            e.obj.setLock(true)
-          end
+  -- A few seconds later: everything glides home, locked on the way so nothing bumps anything.
+  Wait.time(function()
+    for _, e in ipairs(list) do
+      pcall(function()
+        local o = e.obj
+        if not o.isDestroyed() then
+          o.setVelocity({ 0, 0, 0 })
+          o.setAngularVelocity({ 0, 0, 0 })
+          o.setLock(true)
+          o.setPositionSmooth({ e.pos.x, e.pos.y + 0.05, e.pos.z }, false, false)
+          o.setRotationSmooth(e.rot, false, false)
         end
-        -- Everything glides home, locked on the way so nothing bumps anything.
-        for _, e in ipairs(list) do
+      end)
+    end
+    Wait.time(function()
+      for _, e in ipairs(list) do
+        pcall(function()
           local o = e.obj
           if not o.isDestroyed() then
-            o.setVelocity({ 0, 0, 0 })
-            o.setAngularVelocity({ 0, 0, 0 })
-            o.setLock(true)
-            o.setPositionSmooth({ e.pos.x, e.pos.y + 0.05, e.pos.z }, false, false)
-            o.setRotationSmooth(e.rot, false, false)
+            o.setPosition(e.pos)
+            o.setRotation(e.rot)
+            o.setLock(false)
           end
-        end
-        pcall(function() if decals then Global.setDecals(decals) end end)
-        pcall(function() if lines then Global.setVectorLines(lines) end end)
-        Wait.time(function()
-          for _, e in ipairs(list) do
-            local o = e.obj
-            if not o.isDestroyed() then
-              o.setPosition(e.pos)
-              o.setRotation(e.rot)
-              o.setLock(false)
-            end
-          end
-          Wait.time(function()
-            Flip.chaosOn = false
-          end, 0.5)
-        end, 2.2)
-      end)
-    end, HOLD)
-  end)
+        end)
+      end
+      Wait.time(function()
+        Flip.chaosOn = false
+      end, 0.5)
+    end, 2.2)
+  end, 3.5)
 end
 
+-- Put the play surface and the stone frame back exactly in place (an older flip could leave them moved
+-- or dropped). Runs on load and before every flip.
+function Flip.fixTable()
+  local st = GameState.data and GameState.data.table or {}
+  local surf = st.surface and getObjectFromGUID(st.surface)
+  if surf and not surf.isDestroyed() then
+    surf.setLock(true)
+    surf.setRotation({ 0, 0, 0 })
+    local b = surf.getBounds()
+    local top = b.center.y + b.size.y / 2
+    local p = surf.getPosition()
+    surf.setPosition({ 0, p.y + (TableSetup.SURFACE_TOP - top), 0 })
+  end
+  local frame = st.frame and getObjectFromGUID(st.frame)
+  if frame and not frame.isDestroyed() then
+    frame.setLock(true)
+    frame.setRotation({ 0, 0, 0 })
+    frame.setPosition({ 0, 0, 0 })
+  end
+end
+
+Wait.time(function() pcall(Flip.fixTable) end, 3)
+
 function Flip.flip(color)
+  pcall(Flip.fixTable)
   broadcastToAll((color or "Someone") .. " flipped the table!", { 1, 0.33, 0.45 })
   Flip.play(color or "Someone", false)
   -- Launch everything as the table "tips" in the animation.
