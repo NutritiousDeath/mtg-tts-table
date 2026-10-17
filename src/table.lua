@@ -591,6 +591,49 @@ function TableSetup.ensureRoom()
     type = 0, material = 1, cast_shadows = false })
 end
 
+-- Stained glass in the chapel windows: translucent, glowing jewel-tone glass you can still see through;
+-- the window behind each seat leans to that seat's colour (sun, drop, flame, leaf) and the two big
+-- corner windows hold all five colours. A Unity AssetBundle (tools/unity/MTGGlassBuilder.cs).
+local GLASS_VERSION = "?v=1"
+
+function TableSetup.ensureGlass()
+  local state = GameState.data.table
+  local base = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/glass/"
+  local url = base .. (TableSetup.layout() == "twohg" and "mtg_glass_2hg" or "mtg_glass") .. ".unity3d" .. GLASS_VERSION
+  local glass = state.glass and getObjectFromGUID(state.glass)
+  local co = glass and glass.getCustomObject()
+  if glass and co and co.assetbundle == url then
+    glass.setLock(true)
+    glass.interactable = false
+    glass.setPosition({ 0, FLOOR_Y, 0 })
+    glass.setRotation({ 0, 0, 0 })
+    return
+  end
+  if glass then
+    glass.destruct()
+  end
+  for _, obj in ipairs(getObjectsWithTag("TableGlass")) do
+    obj.destruct()
+  end
+  local obj = spawnObject({
+    type = "Custom_AssetBundle",
+    position = { 0, FLOOR_Y, 0 },
+    rotation = { 0, 0, 0 },
+    scale = { 1, 1, 1 },
+    sound = false,
+    callback_function = function(o)
+      o.setLock(true)
+      o.setPosition({ 0, FLOOR_Y, 0 })
+      o.setRotation({ 0, 0, 0 })
+      o.interactable = false
+      o.setName("Stained Glass")
+      o.addTag("TableGlass")
+      state.glass = o.getGUID()
+    end,
+  })
+  obj.setCustomObject({ assetbundle = url, type = 0 })
+end
+
 -- Spectral torches: an iron sconce on the inner corner of each of the frame's four towers, with cold
 -- blue-cyan fire, embers and a real flickering light (a Unity AssetBundle: tools/unity/MTGTorchBuilder.cs).
 local TORCH_URL = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/torch/mtg_torch.unity3d?v=3"
@@ -709,7 +752,7 @@ function TableSetup.ignorePointer()
       pcall(function() o.interactable = false end)
     end
   end
-  for _, tag in ipairs({ "PlaySurface", "TableFrame", "TableFloor", "TableHearth", "HearthFire", "TableTorch", "TableRoom", "MatLabel" }) do
+  for _, tag in ipairs({ "PlaySurface", "TableFrame", "TableFloor", "TableHearth", "HearthFire", "TableTorch", "TableRoom", "TableGlass", "MatLabel" }) do
     for _, o in ipairs(getObjectsWithTag(tag)) do
       pcall(function() o.interactable = false end)
     end
@@ -768,6 +811,7 @@ function TableSetup.ensure()
   pcall(TableSetup.ensureFloor)
   pcall(TableSetup.ensureTorches)
   pcall(TableSetup.ensureRoom)
+  pcall(TableSetup.ensureGlass)
   if Fires then
     pcall(Fires.ensure)
   end
@@ -919,6 +963,7 @@ function TableSetup.setLayout(layout)
   pcall(TableSetup.ensureFloor)
   pcall(TableSetup.placeTorches)
   pcall(TableSetup.ensureRoom)
+  pcall(TableSetup.ensureGlass)
   if Fires then
     pcall(Fires.ensure)
   end

@@ -232,8 +232,23 @@ def octagon(hx, hz, d):
     return pts
 
 
+def record(m, wall, ws, kind):
+    """Remember each window for the stained glass (tools/make_glass.py), in GAME coordinates: TTS mirrors
+    this model's x, the glass (a Unity bundle) isn't mirrored, so x is flipped here."""
+    for (u, w, sill, spring, apex) in ws:
+        c = wall.p(u, 0, T / 2)                    # middle of the wall's thickness
+        m.windows.append({
+            "kind": kind,
+            "x": -c[0], "z": c[2],
+            "ux": -wall.u[0], "uz": wall.u[2],     # along the wall
+            "nx": -wall.n[0], "nz": wall.n[2],     # into the room
+            "width": w, "sill": sill, "spring": spring, "apex": apex,
+        })
+
+
 def build(layout):
     m = Mesh()
+    m.windows = []
     rng = np.random.default_rng(17 if layout == "four" else 23)
     # NOTE: TTS mirrors a model left-right (x) when it imports it, so anything asymmetric is built
     # mirrored here: the fireplaces stand at +x+z and -x-z in the game, so their solid corners are
@@ -267,6 +282,7 @@ def build(layout):
         # orient window offsets in world terms (wall u may run either way); symmetric so it doesn't matter
         ws = [(mid + c, w, SILL, SPRING, SPRING + 9) for c, w in wins]
         wall.build(ws, rng)
+        record(m, wall, ws, "wall")
         # pilasters between the windows
         cs = sorted([mid + c for c, _ in wins])
         piers = [(a + b) / 2 for a, b in zip(cs[:-1], cs[1:])]
@@ -283,7 +299,9 @@ def build(layout):
         if (sx, sz) in hearth_corners:
             wall.build([], rng)                    # the fireplace stands here
         else:
-            wall.build([(wall.L / 2, 20, SILL - 4, SPRING + 2, SPRING + 16)], rng)
+            ws = [(wall.L / 2, 20, SILL - 4, SPRING + 2, SPRING + 16)]
+            wall.build(ws, rng)
+            record(m, wall, ws, "corner")
     # rib vault: transverse ribs springing from the wall tops (over the pilasters)
     for z in ribs_x:
         rib(m, (hx - 1.5, z), (-hx + 1.5, z), TOP, VAULT)
@@ -295,6 +313,10 @@ def build(layout):
     rib(m, (c - 2, c - 2), (-c + 2, -c + 2), TOP, VAULT + 6)
     rib(m, (c - 2, -c + 2), (-c + 2, c - 2), TOP, VAULT + 6, broken=0.62)
     return m
+
+
+def windows(layout):
+    return build(layout).windows
 
 
 if __name__ == "__main__":
