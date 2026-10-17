@@ -339,6 +339,9 @@ function Flip.chat(message, color)
   if m == "!flip" or m == "!tableflip" or m == "!flip table" then
     Flip.flip(color)
     return true
+  elseif m == "!tableinfo" then
+    print("MTG > " .. TableSetup.tableInfo())
+    return true
   elseif m == "!fixtable" then
     Flip.repair()
     return true

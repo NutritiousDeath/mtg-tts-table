@@ -595,9 +595,34 @@ end
 -- its Flip Table button would work, but TTS won't let a script move its table, so it showed up under
 -- ours and caught falling pieces. Back to none.)
 function TableSetup.ensureNative()
-  if Tables.getTable() ~= "Table_None" then
-    Tables.setTable("Table_None")
+  pcall(function()
+    if Tables.getTable() ~= "Table_None" then
+      Tables.setTable("Table_None")
+    end
+  end)
+  -- Only one play surface: a stray copy (e.g. left behind by a flip) is removed.
+  local state = GameState.data.table or {}
+  for _, o in ipairs(getObjectsWithTag("PlaySurface")) do
+    if state.surface and o.getGUID() ~= state.surface then
+      o.destruct()
+    end
   end
+end
+
+-- !tableinfo: what TTS table is set, plus every big object sitting below the play surface (to track
+-- down anything showing under the table).
+function TableSetup.tableInfo()
+  local lines = { "TTS table setting: " .. tostring(Tables.getTable()) .. (Tables.getTableObject() and " (object present)" or "") }
+  for _, o in ipairs(getObjects()) do
+    pcall(function()
+      local b = o.getBounds()
+      if b.center.y < TableSetup.SURFACE_TOP - 0.5 and b.size.x * b.size.z > 30 then
+        table.insert(lines, string.format("  %s '%s' [%s] at (%.0f, %.1f, %.0f) size %.0f x %.0f", o.type,
+          tostring(o.getName()), o.getGUID(), b.center.x, b.center.y, b.center.z, b.size.x, b.size.z))
+      end
+    end)
+  end
+  return table.concat(lines, "\n")
 end
 
 -- Make sure the table exists and matches the current layout. Safe to call
