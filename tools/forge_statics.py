@@ -15,6 +15,10 @@ The lines this file can express are written per card as
   CB   CantBlock: f = who can't block
   CBB  CantBlockBy: a = attackers that can't be blocked, b = by these blockers ("~" = except by)
   RC   ReduceCost / RaiseCost: f = spells (type words), n = generic mana less (negative: more), w = whose spells
+  MA   MustAttack: f = creatures that attack each combat if able
+  NC   CantBeCast: f = spells, w = whose          NA  CantBeActivated: f = sources, w = whose, nm = mana ok
+  FL   CastWithFlash: f = spells, w = whose       PH  Panharmonicon (artifact / creature entering)
+  NL   CantGainLife: w = which players
 
 and "<key>|?" for a static the data can't express. The table (statics.lua, combat.lua) uses an
 entry only for a rules-text line its own reader didn't understand, so what works stays as it is.
@@ -161,7 +165,85 @@ def cost(p):
     return "RC", {"f": f, "n": n if p["Mode"] == "ReduceCost" else -n, "w": w}
 
 
-MODES = {"ReduceCost": cost, "RaiseCost": cost, "Continuous": continuous, "CantAttack": combat, "CantBlock": combat, "CantBlockBy": combat,
+WHO = {"You": "you", "Opponent": "opp", "Player.Opponent": "opp", "Player": "all", None: "all"}
+
+
+def simple(keys, zone_self=False):
+    """Checks shared by the one-filter modes below."""
+    def check(p):
+        if set(p) - keys:
+            raise Unmapped("key " + sorted(set(p) - keys)[0])
+        zone = p.get("EffectZone", "Battlefield")
+        if zone != "Battlefield" and not (zone_self and zone == "All"):
+            raise Unmapped("from " + zone)
+        if p.get("AffectedZone", "Battlefield") != "Battlefield":
+            raise Unmapped("in " + p["AffectedZone"])
+    return check
+
+
+BASE = {"Mode", "Description", "EffectZone", "Secondary", "AILogic"}
+
+
+def must_attack(p):
+    simple(BASE | {"ValidCreature"})(p)
+    return "MA", {"f": card_filter(p.get("ValidCreature", "Card.Self"))}
+
+
+def cant_cast(p):
+    simple(BASE | {"ValidCard", "Caster"})(p)
+    w = WHO.get(p.get("Caster"))
+    if w is None:
+        raise Unmapped("caster " + p["Caster"][:12])
+    return "NC", {"f": card_filter(p.get("ValidCard", "Card")), "w": w}
+
+
+def cant_activate(p):
+    simple(BASE | {"ValidCard", "ValidSA", "AffectedZone", "Activator"})(p)
+    sa = p.get("ValidSA", "Activated")
+    if sa not in ("Activated", "Activated.!ManaAbility"):
+        raise Unmapped("abilities " + sa[:16])
+    w = WHO.get(p.get("Activator"))
+    if w is None:
+        raise Unmapped("activator " + p["Activator"][:12])
+    out = {"f": card_filter(p.get("ValidCard", "Card")), "w": w}
+    if sa != "Activated":
+        out["nm"] = 1                           # mana abilities still work
+    return "NA", out
+
+
+def cast_with_flash(p):
+    simple(BASE | {"ValidCard", "Caster", "ValidSA"}, zone_self=True)(p)
+    if p.get("ValidSA", "Spell") != "Spell":
+        raise Unmapped("for " + p["ValidSA"][:12])
+    f = card_filter(p.get("ValidCard", "Card"))
+    if p.get("EffectZone") == "All" and f != "permanent.self":
+        raise Unmapped("from All")
+    w = WHO.get(p.get("Caster"))
+    if w is None:
+        raise Unmapped("caster " + p["Caster"][:12])
+    return "FL", {"f": f, "w": w}
+
+
+def panharmonicon(p):
+    simple(BASE | {"ValidMode", "Destination", "ValidCard", "ValidCause"})(p)
+    if p.get("ValidMode") not in ("ChangesZone", "ChangesZone,ChangesZoneAll") or p.get("Destination") != "Battlefield" \
+            or p.get("ValidCard") != "Permanent.YouCtrl" \
+            or p.get("ValidCause") not in ("Artifact,Creature", "Creature,Artifact"):
+        raise Unmapped("not an artifact or creature entering")    # triggers.lua counts only that kind
+    return "PH", {}
+
+
+def cant_gain_life(p):
+    simple(BASE | {"ValidPlayer"})(p)
+    w = {"Player": "all", "Player.Opponent": "opp", "Opponent": "opp", "You": "you"}.get(p.get("ValidPlayer", "Player"))
+    if w is None:
+        raise Unmapped("player " + p["ValidPlayer"][:16])
+    return "NL", {"w": w}
+
+
+MODES = {"MustAttack": must_attack, "CantBeCast": cant_cast, "CantBeActivated": cant_activate,
+         "CastWithFlash": cast_with_flash, "Panharmonicon": panharmonicon, "CantGainLife": cant_gain_life,
+         "ReduceCost": cost, "RaiseCost": cost, "Continuous": continuous, "CantAttack": combat, "CantBlock": combat, "CantBlockBy": combat,
          "CantAttack,CantBlock": combat}
 
 

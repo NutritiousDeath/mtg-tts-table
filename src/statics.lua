@@ -1183,3 +1183,34 @@ Events.on("spellCast", function(d)
       .. " (" .. table.concat(from, ", ") .. "). Adjust the payment by hand.", { 0.75, 0.8, 0.9 })
   end
 end)
+
+-- Every Forge static of the permanents on the table that isn't Continuous: { { kind, f, src, name } }.
+local otherSrc = { epoch = -1, at = -100, list = {} }
+function Statics.forgeOthers()
+  local ep = Events and Events.epoch or 0
+  local now = clockNow()
+  if otherSrc.epoch == ep and now - otherSrc.at < 2 then
+    return otherSrc.list
+  end
+  local out = {}
+  for _, p in ipairs(perms()) do
+    for _, e in pairs(Statics.forgeLines(p.obj.getName(), p.oracle)) do
+      if e.kind ~= "C" then
+        table.insert(out, { kind = e.kind, f = e.f, src = { obj = p.obj, seat = p.seat }, name = p.obj.getName() })
+      end
+    end
+  end
+  otherSrc.epoch, otherSrc.at, otherSrc.list = ep, now, out
+  return out
+end
+
+-- "Attacks each combat if able": the permanent that says so, or nil.
+function Statics.mustAttack(card)
+  local q = asQ(card)
+  for _, s in ipairs(Statics.forgeOthers()) do
+    if s.kind == "MA" and Statics.forgeMatches(s.f.f, q, s.src) then
+      return s.name
+    end
+  end
+  return nil
+end

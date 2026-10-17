@@ -683,6 +683,19 @@ local function declare(color)
     end
   end
   c.order = keep
+  -- "Attacks each combat if able" (Forge static): a creature of this player's that could attack but isn't.
+  if Statics and Statics.mustAttack then
+    local t = turn()
+    for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+      if o.type == "Card" and not o.isDestroyed() and controller(o) == color and isCreature(o) and not c.attackers[o.getGUID()]
+          and not isTapped(o) and not (entered()[o.getGUID()] == t.taken and not hasKeyword(o, "Haste")) then
+        local okM, src = pcall(Statics.mustAttack, o)
+        if okM and src then
+          broadcastToColor(o.getName() .. " attacks each combat if able (" .. src .. ") - it isn't attacking.", color, WARN)
+        end
+      end
+    end
+  end
   -- Remember who attacked this turn (World at War untaps them).
   do
     local tn = (GameState.data.turn or {}).taken or 0
