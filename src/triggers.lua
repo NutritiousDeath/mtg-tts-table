@@ -258,6 +258,13 @@ local function parseTrigger(p)
   if plainFind(p, "whenever you play a land") then
     return { kind = "enters", subject = "land", subjects = { "land" }, mine = true, playedOnly = true }
   end
+  -- Horn of Greed / Burgeoning style: "whenever a player plays a land", "whenever an opponent plays a land".
+  if plainFind(p, "whenever a player plays a land") then
+    return { kind = "enters", subject = "land", subjects = { "land" }, playedOnly = true }
+  end
+  if plainFind(p, "whenever an opponent plays a land") then
+    return { kind = "enters", subject = "land", subjects = { "land" }, theirs = true, playedOnly = true }
+  end
   -- Enters.
   if plainFind(p, "when ~ enters") or plainFind(p, "whenever ~ enters") or plainFind(p, "when ~ and ") and plainFind(p, " enter") then
     return { kind = "enters", self = true }
@@ -354,6 +361,9 @@ local function parseTrigger(p)
               return ex
             end)(),
             tokenOnly = subj:find(" token", 1, true) ~= nil and subj:find("nontoken", 1, true) == nil,
+            -- Garruk's Uprising: "a creature you control with power 4 or greater".
+            powerMin = tonumber(subj:match("with power (%d+) or greater") or ""),
+            toughMin = tonumber(subj:match("with toughness (%d+) or greater") or ""),
             mine = subj:find("you control", 1, true) ~= nil or underMine,
             theirs = subj:find("an opponent controls", 1, true) ~= nil or subj:find("your opponents control", 1, true) ~= nil
               or underTheirs }
@@ -1528,6 +1538,11 @@ Events.on("cardMoved", function(d)
             and not (t.goaded and not (Counters.goadedBy(card) and Combat and Combat.inCombat and Combat.inCombat(card)))
             and not (t.nontoken and isToken(card))
             and not (t.playedOnly and d.from.region ~= "hand")
+            and not ((t.powerMin or t.toughMin) and not (function()
+              pcall(Statics.compute)   -- anthems (Lieges...) count toward the power
+              local st = Counters.stats(card)
+              return (tonumber(st.power) or 0) >= (t.powerMin or -99) and (tonumber(st.toughness) or 0) >= (t.toughMin or -99)
+            end)())
             and not (t.mine and cardController ~= p.controller)
             and not (t.theirs and cardController == p.controller) then
           table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })

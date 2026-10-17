@@ -1153,8 +1153,12 @@ function Effects.parse(text, sourceName)
     end
   end
   w = t:match("each player draws (%w+) cards?") or t:match("each player loses %w+ life and draws (%w+) cards?")
+  local thatW = t:match("that player draws (%w+) cards?")
   if w then
     add("draw", "all", num(w))
+  elseif thatW and num(thatW) then
+    -- Horn of Greed: "that player draws a card" (the player the trigger was about).
+    add("draw", "that", num(thatW))
   else
     local a, word = t:find("draw (%w+) cards?")
     word = t:match("draw (%w+) cards?")

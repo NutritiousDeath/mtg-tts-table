@@ -116,7 +116,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.76 (Forge trigger data: triggers read from Forge card scripts first, rules text as fallback)"
+SCRIPT_VERSION = SCRIPT_VERSION = "1.77 (Forge trigger data + attack taxes: Propaganda, Ghostly Prison, Windborn Muse, Norn's Annex)"
 
 function onLoad(saved)
   GameLog.setup()

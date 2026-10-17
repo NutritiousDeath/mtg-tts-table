@@ -545,6 +545,7 @@ function Combat.attackClick(card, color, alt)
     broadcastToColor("There's no one to attack.", color, WARN)
     return
   end
+  c.taxOk = nil   -- the attack changed: any attack tax is worked out again
   if current == nil then
     if isTapped(card) then
       broadcastToColor(card.getName() .. " is tapped and can't attack.", color, WARN)
@@ -595,6 +596,59 @@ function Combat.untapAttacked(seat)
   end
   printToAll("MTG > " .. n .. " creature(s) that attacked untap for the extra combat.", { 0.55, 0.9, 0.6 })
   return n
+end
+
+-- Attack taxes: Propaganda, Ghostly Prison, Windborn Muse ("Creatures can't attack you unless their
+-- controller pays {2} for each creature they control that's attacking you"), Norn's Annex ("you or
+-- planeswalkers you control", {W/P}). Returns the cost string, the total generic, a list of lines and the
+-- guids of the taxed attackers.
+function Combat.attackTax(c)
+  local generic, symbols, lines, taxed = 0, {}, {}, {}
+  local perSeat = {}
+  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+    if o.type == "Card" and not o.isDestroyed() and onField(o) then
+      local ol = tostring(cardData(o).oracle or ""):lower()
+      local pwToo = ol:find("can't attack you or planeswalkers you control unless their controller pays", 1, true) ~= nil
+      local cost = ol:match("can't attack you unless their controller pays (%b{}[{}%w/]*) for each")
+        or ol:match("can't attack you or planeswalkers you control unless their controller pays (%b{}[{}%w/]*) for each")
+      if cost then
+        local seat = controller(o)
+        if seat then
+          perSeat[seat] = perSeat[seat] or {}
+          table.insert(perSeat[seat], { name = o.getName(), cost = cost, pwToo = pwToo })
+        end
+      end
+    end
+  end
+  for seat, srcs in pairs(perSeat) do
+    for _, src in ipairs(srcs) do
+      local n = 0
+      for _, g in ipairs(c.order) do
+        local key = c.attackers[g]
+        if key and live(g) then
+          local atPlayer = key == seat
+          local atPw = key:sub(1, 3) == "pw:" and targetSeat(key) == seat
+          if atPlayer or (src.pwToo and atPw) then
+            n = n + 1
+            taxed[g] = true
+          end
+        end
+      end
+      if n > 0 then
+        local num = tonumber(src.cost:match("^{(%d+)}$") or "")
+        if num then
+          generic = generic + num * n
+        else
+          for _ = 1, n do
+            table.insert(symbols, src.cost:upper())
+          end
+        end
+        table.insert(lines, src.name .. " (" .. seat .. "): " .. src.cost:upper() .. " x " .. n)
+      end
+    end
+  end
+  local costStr = (generic > 0 and ("{" .. generic .. "}") or "") .. table.concat(symbols, "")
+  return costStr, lines, taxed
 end
 
 local function declare(color)
@@ -1710,6 +1764,35 @@ function Combat.onNext(color)
   if step == "attackers" then
     c = state()
     if not c.declared then
+      -- Propaganda / Ghostly Prison: the attack costs mana first.
+      if #c.order > 0 and not c.taxOk then
+        local okT, cost, lines, taxed = pcall(Combat.attackTax, c)
+        if okT and cost ~= "" then
+          Effects.askChoice(color, "Attack tax: " .. cost, "Attacking costs " .. cost .. ":\n" .. table.concat(lines, "\n")
+            .. "\nPAY it (from your mana pool), or DROP the taxed attackers.",
+            { { label = "PAY " .. cost, value = "pay" }, { label = "DROP THEM", value = "drop" }, { label = "BACK", value = false } },
+            function(v)
+              if v == "pay" then
+                local _, covered = ManaChips.pay(color, cost, "attack tax")
+                if not covered then
+                  broadcastToColor("Pay the rest of " .. cost .. " yourself (the mana pool didn't cover it).", color, INFO)
+                end
+                printToAll("MTG > " .. color .. " pays " .. cost .. " to attack (" .. table.concat(lines, "; ") .. ").", INFO)
+                c.taxOk = true
+                Turns.next(color)
+              elseif v == "drop" then
+                for g in pairs(taxed) do
+                  removeAttacker(g)
+                  redraw(obj(g))
+                end
+                printToAll("MTG > " .. color .. " doesn't pay the attack tax: those attackers stay home.", INFO)
+                c.taxOk = true
+                Turns.next(color)
+              end
+            end)
+          return true
+        end
+      end
       if #c.order > 0 then
         declare(color)
         if #c.order > 0 then
