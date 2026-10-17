@@ -18,7 +18,7 @@ Fires = {}
 
 local BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/"
 local HEARTH_VERSION = "?v=4"
-local HEARTH_FIRE_URL = BASE .. "torch/mtg_hearth.unity3d?v=4"
+local HEARTH_FIRE_URL = BASE .. "torch/mtg_hearth.unity3d?v=6"
 local STONE_URL = BASE .. "table/stone.png?v=3"
 local FLOOR_Y = -31
 
@@ -203,11 +203,17 @@ function Fires.set(color, mode)
       if mode then
         local t = (mode == "roar" and ROAR or WOOSH) + idx + (n == 1 and 0 or SILENT)
         obj.AssetBundle.playTriggerEffect(t)
+        -- Switching an object's effect stops the sound it's playing, so the fire carrying the sound (the
+        -- first fireplace) changes colour only once its roar / woosh has finished; the rest change at once.
+        local delay = 0.35
+        if n == 1 then
+          delay = (mode == "roar") and 3.0 or 1.25
+        end
         Wait.time(function()
           if not obj.isDestroyed() then
             pcall(function() obj.AssetBundle.playLoopingEffect(idx) end)
           end
-        end, 0.35)
+        end, delay)
       else
         obj.AssetBundle.playLoopingEffect(idx)
       end

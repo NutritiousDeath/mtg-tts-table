@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.01 (real fire sounds: roar, woosh, and the fireplaces crackle)"
+SCRIPT_VERSION = "2.03 (fire sounds play in full; fireplace crackle louder)"
 
 function onLoad(saved)
   GameLog.setup()
