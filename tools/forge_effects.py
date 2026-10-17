@@ -614,6 +614,46 @@ def step(p, tokens, raw, token_db, self_trigger=False):
         out = {"f": f.strip()}
     elif api == "Proliferate":
         out = {}
+    elif api == "Animate":
+        pw, tg = get("Power"), get("Toughness")
+        types = [t for t in get("Types", "").split(",") if t]
+        kw = get("Keywords")
+        get("Colors")
+        get("OverwriteColors")
+        get("RemoveCreatureTypes")
+        dur = get("Duration")
+        if dur not in (None, "Permanent"):
+            raise Unmapped("animate " + dur[:16])
+        kws = [k.strip() for k in kw.split("&")] if kw else []
+        if any(not re.fullmatch(r"[A-Za-z ]+", k) for k in kws):
+            raise Unmapped("animate keyword")
+        if pw is None and tg is None and not types:
+            if not kws or dur:
+                raise Unmapped("animate nothing")
+            # Only keywords: the same as a pump.
+            api = "Pump"
+            out = {"a": "+0", "b": "+0", "kw": " and ".join(k.lower() for k in kws)}
+        else:
+            if not (pw and tg and re.fullmatch(r"\d+", pw) and re.fullmatch(r"\d+", tg)) or "Creature" not in types:
+                raise Unmapped("animate P/T")
+            out = {"p": int(pw), "t": int(tg), "ty": " ".join(t for t in types if t != "Creature"),
+                   "kw": " and ".join(k.lower() for k in kws)}
+            if dur == "Permanent":
+                out["perm"] = 1
+        if "ValidTgts" in p:
+            k, ctrl, other = target_kinds(get("ValidTgts"))
+            out.update({"on": "tgt", "k": k, "c": ctrl})
+            if api == "Pump":
+                out["t"], other = target_phrase(p["ValidTgts"], True)
+                del out["k"], out["c"]
+            if other:
+                out["o"] = 1
+        elif get("Defined", "Self") == "Self":
+            out["on"] = "self"
+        elif p["Defined"] in THAT_CARD:
+            out["on"] = "that"
+        else:
+            raise Unmapped("animate " + p["Defined"][:16])
     elif api == "Dig":
         n = amount(get("DigNum"), raw, counted=False)
         k = get("ChangeNum", "1")

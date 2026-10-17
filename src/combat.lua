@@ -211,6 +211,11 @@ end
 
 local function typeLine(obj)
   local d = cardData(obj)
+  -- "Becomes a 3/3 creature until end of turn" (effects.lua forgeAnimate).
+  local anim = GameState.data.animated
+  if anim and anim[obj.getGUID()] then
+    return tostring(d.typeLine or table.concat(d.types or {}, " ")) .. " Creature"
+  end
   if d.typeLine then
     return d.typeLine
   end

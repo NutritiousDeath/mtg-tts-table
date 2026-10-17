@@ -2277,6 +2277,13 @@ local function fxAction(st, it, notes)
     return n and { what = "forgeThat", who = "you", n = n, verb = "damage" }
   elseif api == "PayOrSac" then
     return { what = "forgePayOrSac", who = "you", n = 1, cost = p.cost }
+  elseif api == "Animate" then
+    local kinds = {}
+    for k in tostring(p.k or ""):gmatch("[^/]+") do
+      kinds[k] = true
+    end
+    return { what = "forgeAnimate", who = "you", n = 1, p = tonumber(p.p), t = tonumber(p.t), types = p.ty, kw = p.kw,
+      on = p.on, kinds = kinds, scope = p.c or "all", other = p.o ~= nil, perm = p.perm ~= nil }
   elseif api == "AtStep" then
     return { what = "forgeAtStep", who = "you", n = 1, how = p["do"], on = p.of, step = p.st, mine = p.mine ~= nil }
   elseif api == "Flicker" then
@@ -2431,7 +2438,7 @@ local FX_GENERIC = {}
 for _, w in ipairs({ "draw", "gain", "lose", "mill", "discard", "mayDiscard", "scry", "counter", "counterOn",
   "counterAll", "token", "pump", "tap", "tapX", "tapTarget", "untap", "untapSelf", "untapAll", "removeTarget", "bounce",
   "bounceSelf", "graveReturn", "reanimate", "search", "look", "edict", "sacSelf", "counterSpell", "proliferate",
-  "damageAll", "forgeDamage", "forgeDamageAll", "forgeExileSelf", "forgePayOrSac", "forgeThat", "forgeFlicker", "forgeAtStep",
+  "damageAll", "forgeDamage", "forgeDamageAll", "forgeExileSelf", "forgePayOrSac", "forgeThat", "forgeFlicker", "forgeAtStep", "forgeAnimate",
   "blink", "copyCreature", "copySelf" }) do
   FX_GENERIC[w] = true
 end
@@ -2556,6 +2563,8 @@ local function describe(a, target, controller)
       .. (a.players == "opp" and "each opponent" or (a.players and "each player" or ""))
   elseif a.what == "forgeExileSelf" then
     return "it is exiled"
+  elseif a.what == "forgeAnimate" then
+    return "becomes a " .. tostring(a.p) .. "/" .. tostring(a.t) .. " creature" .. (a.perm and "" or " until end of turn")
   elseif a.what == "forgeAtStep" then
     return "at the next " .. (a.step == "endcombat" and "end of combat" or "end step") .. ": " .. tostring(a.how) .. " it"
   elseif a.what == "forgeFlicker" then
@@ -3565,6 +3574,8 @@ local function apply(it, plan, target)
           Effects.forgeThat(seat, a, it)
         elseif a.what == "forgeFlicker" then
           Effects.forgeFlicker(seat, a, it)
+        elseif a.what == "forgeAnimate" then
+          Effects.forgeAnimate(seat, a, it)
         elseif a.what == "forgeAtStep" then
           local obj = a.on == "that" and it.thatCard and getObjectFromGUID(it.thatCard)
             or (a.on == "self" and it.source and getObjectFromGUID(it.source)) or nil
@@ -6625,6 +6636,14 @@ Events.on("stepStarted", function(d)
           Zones.refresh(obj)
           printToAll("MTG > " .. r.name .. ": " .. obj.getName() .. " is exiled (to " .. r.owner .. "'s exile).", GOOD)
         end
+      elseif r.kind == "forgeUnanimate" then
+        local obj = getObjectFromGUID(r.guid)
+        if GameState.data.animated then
+          GameState.data.animated[r.guid] = nil
+        end
+        if obj and not obj.isDestroyed() then
+          Effects.setBasePT(obj, nil, nil)
+        end
       elseif r.kind == "forgeEnd" then
         local obj = getObjectFromGUID(r.guid)
         if obj and not obj.isDestroyed() and Effects.fieldSeat(obj) then
@@ -7450,6 +7469,10 @@ local function cardTypes(obj)
     local d = CardData.get(obj)
     for _, n in ipairs(type(d) == "table" and d.types or {}) do
       t[tostring(n):lower()] = true
+    end
+    local anim = GameState.data.animated
+    if anim and anim[obj.getGUID()] then
+      t.creature = true
     end
   end)
   return t
@@ -8943,5 +8966,63 @@ function Effects.forgeFlicker(seat, a, it)
           printToAll("MTG > " .. it.name .. ": no target chosen.", INFO)
         end
       end, { filter = function(obj, owner) return kindsFit(obj, owner, a, seat, it.source) end, label = "EXILE" })
+  end
+end
+
+-- Base power / toughness set by an effect (nil, nil: back to the printed values).
+function Effects.setBasePT(obj, p, t)
+  local parts = {}
+  for k, v in tostring(obj.memo or ""):gmatch("(%a+)=(%-?%d+)") do
+    if k ~= "bp" and k ~= "bt" and k ~= "bs" then
+      table.insert(parts, k .. "=" .. v)
+    end
+  end
+  if p and t then
+    table.insert(parts, "bp=" .. p)
+    table.insert(parts, "bt=" .. t)
+    table.insert(parts, "bs=1")
+  end
+  obj.memo = table.concat(parts, ";")
+  Counters.render(obj)
+end
+
+-- "~ becomes a 3/3 Elemental creature with haste until end of turn."
+function Effects.forgeAnimate(seat, a, it)
+  local function go(obj)
+    if obj == nil or obj.isDestroyed() or not fieldSeat(obj) then
+      printToAll("MTG > " .. it.name .. ": it isn't on the battlefield any more - nothing happens.", INFO)
+      return
+    end
+    local g = obj.getGUID()
+    GameState.data.animated = GameState.data.animated or {}
+    GameState.data.animated[g] = true
+    Effects.setBasePT(obj, a.p, a.t)
+    for k in tostring(a.kw or ""):gmatch("[^&]+") do
+      for w in (k .. " and "):gmatch("(.-) and ") do
+        local kw = (w:gsub("^%s+", ""):gsub("%s+$", ""))
+        if kw ~= "" and Counters.addTempKeyword then
+          Counters.addTempKeyword(obj, kw)
+        end
+      end
+    end
+    if not a.perm then
+      Effects.addDelayed({ seat = seat, anySeat = true, step = "cleanup", kind = "forgeUnanimate", guid = g, name = it.name })
+    end
+    printToAll("MTG > " .. it.name .. ": " .. obj.getName() .. " becomes a " .. a.p .. "/" .. a.t
+      .. ((a.types and a.types ~= "") and (" " .. a.types) or "") .. " creature"
+      .. ((a.kw and a.kw ~= "") and (" with " .. a.kw) or "") .. (a.perm and "." or " until end of turn."), GOOD)
+  end
+  if a.on == "self" then
+    go(it.source and getObjectFromGUID(it.source))
+  elseif a.on == "that" then
+    go(it.thatCard and getObjectFromGUID(it.thatCard))
+  else
+    ask(seat, it.name .. ": choose the target", "Click TARGET on it, or SKIP.", { { label = "SKIP", value = false } }, function(obj)
+      if obj then
+        go(obj)
+      else
+        printToAll("MTG > " .. it.name .. ": no target chosen.", INFO)
+      end
+    end, { filter = function(obj, owner) return kindsFit(obj, owner, a, seat, it.source) end, label = "TARGET" })
   end
 end
