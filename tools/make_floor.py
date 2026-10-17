@@ -125,9 +125,23 @@ def outline(hx, hz, rng, n=72, jag=0.03):
     return ring
 
 
-def island(m, hx, hz, rng):
-    """The floor: a floating slab of the cathedral with a ragged edge and a rocky underside."""
-    ring = outline(hx, hz, rng)
+def octagon_ring(hx, hz, d, per_edge=8):
+    """The chapel's floor outline (tools/make_room.py walls + their thickness), counter-clockwise."""
+    s = d * np.sqrt(2)
+    corners = [(hx, -(s - hx)), (hx, s - hx), (s - hz, hz), (-(s - hz), hz),
+               (-hx, s - hx), (-hx, -(s - hx)), (-(s - hz), -hz), (s - hz, -hz)]
+    ring = []
+    for i in range(8):
+        a, b = np.array(corners[i]), np.array(corners[(i + 1) % 8])
+        for k in range(per_edge):
+            q = a + (b - a) * k / per_edge
+            ring.append((q[0], q[1]))
+    return ring
+
+
+def island(m, hx, hz, rng, d):
+    """The floor: the chapel's eight-sided floor slab, with a rocky underside below it."""
+    ring = octagon_ring(hx, hz, d)
     n = len(ring)
     y1, y0 = FLOOR_Y, FLOOR_Y - 4
     for i in range(n):
@@ -156,14 +170,16 @@ def island(m, hx, hz, rng):
         m.face(pts, [top_uv(p) for p in pts], (0, -1, 0))
 
 
-ISLAND = {"four": (100.0, 100.0), "twohg": (110.0, 100.0)}
+# walls (tools/make_room.py) + 4 so they stand on the floor: (hx, hz, corner cut)
+ISLAND = {"four": (104.0, 104.0, 116.0), "twohg": (108.0, 104.0, 124.0)}
 
 
 def model(layout):
     rng = np.random.default_rng(7)
     hx, hz = FRAME_HALF[layout]
     m = Mesh()
-    island(m, *ISLAND[layout], rng)
+    hx_, hz_, d_ = ISLAND[layout]
+    island(m, hx_, hz_, rng, d_)
     for top, margin in DAIS:
         box(m, -hx - margin, hx + margin, -hz - margin, hz + margin, FLOOR_Y, top)
     suffix = "" if layout == "four" else "_2hg"

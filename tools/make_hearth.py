@@ -149,6 +149,8 @@ def build(wing_angle, wing_len):
         R = np.array([[dx, 0, nx], [0, 1, 0], [dz, 0, nz]])
         M = np.hstack([R, [[sd * (hw + 3)], [0], [zb + 1.5]]])
         seg = 7
+        if wing_len <= 0:
+            continue
         rng = np.random.default_rng(3 if sd > 0 else 5)
         for k in range(seg):
             a0, b0 = wing_len * k / seg, wing_len * (k + 1) / seg
@@ -159,6 +161,7 @@ def build(wing_angle, wing_len):
 
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
-    build(45, 46).write(os.path.join(OUT, "hearth_corner.obj"))
-    build(0, 40).write(os.path.join(OUT, "hearth_edge.obj"))
+    # The chapel walls (tools/make_room.py) now run past the fireplaces, so no wall wings.
+    build(45, 0).write(os.path.join(OUT, "hearth_corner.obj"))
+    build(0, 0).write(os.path.join(OUT, "hearth_edge.obj"))
     print("done")

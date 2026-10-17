@@ -502,7 +502,7 @@ end
 -- (tools/make_floor.py; the texture was painted with Gemini). It catches everything a table flip throws. One locked custom
 -- model, kept between loads; replaced when its files change version.
 local FLOOR_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/floor/"
-local FLOOR_VERSION = "?v=3"
+local FLOOR_VERSION = "?v=4"
 local FLOOR_Y = -31
 
 function TableSetup.ensureFloor()
@@ -543,6 +543,52 @@ function TableSetup.ensureFloor()
     normal = FLOOR_BASE .. "stone_floor_n.png" .. FLOOR_VERSION,
     collider = mesh,
     convex = false, type = 0, material = 1 })
+end
+
+-- The chapel around the table: a ruined eight-sided gothic chapel standing on the floor -- walls with
+-- tall open windows onto the sky, pilasters, and stone rib arches overhead with the roof long gone; the
+-- two fireplaces (fires.lua) are built into its cut corners (tools/make_room.py). Its walls face inward
+-- only, so a camera pulled back outside the chapel sees straight through them.
+local ROOM_VERSION = "?v=1"
+
+function TableSetup.ensureRoom()
+  local state = GameState.data.table
+  local suffix = TableSetup.layout() == "twohg" and "_2hg" or ""
+  local base = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/"
+  local mesh = base .. "room/room" .. suffix .. ".obj" .. ROOM_VERSION
+  local room = state.room and getObjectFromGUID(state.room)
+  local co = room and room.getCustomObject()
+  if room and co and co.mesh == mesh then
+    room.setLock(true)
+    room.interactable = false
+    room.setPosition({ 0, FLOOR_Y, 0 })
+    room.setRotation({ 0, 0, 0 })
+    return
+  end
+  if room then
+    room.destruct()
+  end
+  for _, obj in ipairs(getObjectsWithTag("TableRoom")) do
+    obj.destruct()
+  end
+  local obj = spawnObject({
+    type = "Custom_Model",
+    position = { 0, FLOOR_Y, 0 },
+    rotation = { 0, 0, 0 },
+    scale = { 1, 1, 1 },
+    sound = false,
+    callback_function = function(o)
+      o.setLock(true)
+      o.setPosition({ 0, FLOOR_Y, 0 })
+      o.setRotation({ 0, 0, 0 })
+      o.interactable = false
+      o.setName("Ruined Chapel")
+      o.addTag("TableRoom")
+      state.room = o.getGUID()
+    end,
+  })
+  obj.setCustomObject({ mesh = mesh, diffuse = base .. "table/stone.png?v=3", collider = mesh, convex = false,
+    type = 0, material = 1, cast_shadows = false })
 end
 
 -- Spectral torches: an iron sconce on the inner corner of each of the frame's four towers, with cold
@@ -663,7 +709,7 @@ function TableSetup.ignorePointer()
       pcall(function() o.interactable = false end)
     end
   end
-  for _, tag in ipairs({ "PlaySurface", "TableFrame", "TableFloor", "TableHearth", "HearthFire", "TableTorch", "MatLabel" }) do
+  for _, tag in ipairs({ "PlaySurface", "TableFrame", "TableFloor", "TableHearth", "HearthFire", "TableTorch", "TableRoom", "MatLabel" }) do
     for _, o in ipairs(getObjectsWithTag(tag)) do
       pcall(function() o.interactable = false end)
     end
@@ -721,6 +767,7 @@ function TableSetup.ensure()
   TableSetup.ensureFrame()
   pcall(TableSetup.ensureFloor)
   pcall(TableSetup.ensureTorches)
+  pcall(TableSetup.ensureRoom)
   if Fires then
     pcall(Fires.ensure)
   end
@@ -871,6 +918,7 @@ function TableSetup.setLayout(layout)
   TableSetup.ensureFrame()
   pcall(TableSetup.ensureFloor)
   pcall(TableSetup.placeTorches)
+  pcall(TableSetup.ensureRoom)
   if Fires then
     pcall(Fires.ensure)
   end
