@@ -119,7 +119,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.82 (Forge effects: flicker, end-step actions, animate, token copies, gain control, regenerate)"
+SCRIPT_VERSION = "1.83 (Forge statics: anthems and keyword grants, can't block / can't be blocked, cost changes in chat)"
 
 function onLoad(saved)
   GameLog.setup()

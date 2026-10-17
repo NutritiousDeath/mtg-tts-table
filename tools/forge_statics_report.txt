@@ -1,0 +1,74 @@
+Forge static abilities tools/forge_statics.py maps (Forge 64569999, 2026-10-16).
+Regenerate with tools/forge_triggers.py (it writes all three data files).
+
+How the table uses them: statics.lua pairs each Forge S: line with its rules-text line and uses it
+only where its own reader didn't understand that line, so what worked stays exactly as it was:
+  Continuous   P/T in Statics.compute, keywords in Statics.grants (e.g. "... get +1/+1 and have flying")
+  CantBlock / CantBlockBy   combat.lua refuses the block, like flying ("can't be blocked except by
+               creatures with flying", "can block only creatures with flying", color / type / power limits)
+  CantAttack   combat.lua warns, like defender
+  ReduceCost / RaiseCost   chat line when a spell is cast (net generic change and sources; payment unchanged)
+Not used on purpose: Enchanted / Equipped statics (equip.lua does those), anything with a condition
+(IsPresent, CheckSVar, Condition...), X amounts, other zones (AffectedZone / EffectZone).
+
+Cards the table now reads better (Lupa harness, every Forge card, probe creature that fits the filter):
+  continuous P/T or keywords   84 better, 517 the same, 0 worse
+  combat restrictions          323 cards (the table had no reading of these before)
+  cost changes                 126 cards (none before)
+  total                        532 cards read better, 0 worse
+  Liege check: Kavu 3/3 with Leyline of the Guildpact + Deathbringer + Boartusk Liege = 7/7 (text and Forge alike)
+  Decks: Jared - Lieges unchanged (text reading kept); Yuriko - Changeling Outcast "can't be blocked" enforced;
+  Beamtown - no change.
+
+Statics: 1187 of 6953 static abilities mapped (17.1%) on 1139 cards. Written: forge_statics_data.lua (88 KB)
+
+Mapped, by mode:
+     731  Continuous
+     216  CantBlockBy
+     109  ReduceCost
+     106  CantBlock
+      19  RaiseCost
+       4  CantAttack
+       2  CantAttack,CantBlock
+
+Not mapped, by mode (count, then the most common reasons):
+    4007  Continuous             affects Enchanted 552, affects Equipped 430, key AffectedZone 393, key AddAbility 338
+     410  ReduceCost             amount X 125, key ValidTarget 48, key CheckSVar 47, key IsPresent 44
+     147  AlternativeCost        mode 147
+     124  CantBlockBy            prop EnchantedBy 21, key IsPresent 19, key CheckSVar 12, prop EquippedBy 11
+     109  CantAttack             key UnlessDefender 44, key Target 21, key IsPresent 12, prop EnchantedBy 11
+      97  CantBeCast             mode 97
+      86  MustAttack             mode 86
+      74  RaiseCost              key Cost 35, key ValidTarget 14, key ValidSpell 6, key Relative 4
+      57  CastWithFlash          mode 57
+      56  CantAttack,CantBlock   prop EnchantedBy 26, key IsPresent 12, key CheckSVar 10, prop powerLT 1
+      43  MinMaxBlocker          mode 43
+      40  OptionalCost           mode 40
+      38  Panharmonicon          mode 38
+      32  CantBlock              prop EnchantedBy 11, key IsPresent 8, key Condition 5, key CheckSVar 4
+      31  CanAttackDefender      mode 31
+      30  CantBeActivated        mode 30
+      28  OptionalAttackCost     mode 28
+      27  CantTarget             mode 27
+      26  CantAttackUnless       mode 26
+      22  CantAttack,CantBlock,CantBeActivated mode 22
+      20  CantGainLife           mode 20
+      20  CombatDamageToughness  mode 20
+      15  UntapOtherPlayer       mode 15
+      14  ManaConvert            mode 14
+      14  AssignCombatDamageAsUnblocked mode 14
+      11  CantPreventDamage      mode 11
+      11  IgnoreLegendRule       mode 11
+      11  IgnoreLandWalk         mode 11
+      10  CantPutCounter         mode 10
+      10  TapPowerValue          mode 10
+      10  CantPlayLand           mode 10
+       9  DisableTriggers        mode 9
+       8  AttackRestrict         mode 8
+       8  CantSacrifice          mode 8
+       7  CantDraw               mode 7
+       7  CantAttach             mode 7
+       6  UnspentMana            mode 6
+       5  MustBlock              mode 5
+       4  CanBlockIfShadow       mode 4
+       4  AttackRequirement      mode 4
