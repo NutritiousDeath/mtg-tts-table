@@ -306,6 +306,9 @@ function Statics.forgeMatches(filter, q, src)
       end
       if FS_TYPES[tok] then
         ok = tok == "permanent" or q.tl:find(tok, 1, true) ~= nil
+      elseif tok == "perm" then
+        -- A permanent (spell): anything but an instant or sorcery.
+        ok = q.tl:find("instant", 1, true) == nil and q.tl:find("sorcery", 1, true) == nil
       elseif FS_COLORS[tok] then
         ok = Statics.colorsOf(q.obj, q.seat)[tok] == true
       elseif tok == "you" then
@@ -1177,6 +1180,11 @@ Events.on("spellCast", function(d)
   if d == nil or d.card == nil or d.controller == nil then
     return
   end
+  local okC, banned = pcall(Statics.cantCast, d.card, d.controller)
+  if okC and banned then
+    broadcastToAll(d.card.getName() .. ": " .. d.controller .. " can't cast this spell (" .. banned .. ") - take it back if so.",
+      { 1, 0.55, 0.3 })
+  end
   local ok, n, from = pcall(Statics.costChange, d.card, d.controller)
   if ok and n and #from > 0 and n ~= 0 then
     printToAll("MTG > " .. d.card.getName() .. " costs {" .. math.abs(n) .. "} " .. (n > 0 and "less" or "more")
@@ -1209,6 +1217,33 @@ function Statics.mustAttack(card)
   local q = asQ(card)
   for _, s in ipairs(Statics.forgeOthers()) do
     if s.kind == "MA" and Statics.forgeMatches(s.f.f, q, s.src) then
+      return s.name
+    end
+  end
+  return nil
+end
+
+local function whoFits(w, actor, srcSeat)
+  return w == "all" or (w == "you" and actor == srcSeat) or (w == "opp" and actor ~= srcSeat)
+end
+
+-- "Your opponents can't cast creature spells": the permanent that says so, or nil.
+function Statics.cantCast(card, caster)
+  local q = asQ(card)
+  q.seat = caster
+  for _, s in ipairs(Statics.forgeOthers()) do
+    if s.kind == "NC" and whoFits(s.f.w, caster, s.src.seat) and Statics.forgeMatches(s.f.f, q, s.src) then
+      return s.name
+    end
+  end
+  return nil
+end
+
+-- "Activated abilities of artifacts can't be activated": the permanent that says so, or nil.
+function Statics.cantActivate(obj, seat, isMana)
+  local q = asQ(obj)
+  for _, s in ipairs(Statics.forgeOthers()) do
+    if s.kind == "NA" and not (isMana and s.f.nm) and whoFits(s.f.w, seat, s.src.seat) and Statics.forgeMatches(s.f.f, q, s.src) then
       return s.name
     end
   end

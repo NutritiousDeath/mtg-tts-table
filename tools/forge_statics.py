@@ -42,7 +42,7 @@ class Unmapped(Exception):
 
 
 TYPES = {"Creature": "creature", "Artifact": "artifact", "Enchantment": "enchantment", "Land": "land",
-         "Planeswalker": "planeswalker", "Permanent": "permanent", "Card": "permanent", "Instant": "instant",
+         "Planeswalker": "planeswalker", "Permanent": "perm", "Card": "permanent", "Instant": "instant",
          "Sorcery": "sorcery"}
 COLORS = {"White": "W", "Blue": "U", "Black": "B", "Red": "R", "Green": "G"}
 PROPS = {"YouCtrl": "you", "OppCtrl": "opp", "Other": "other", "StrictlyOther": "other", "Self": "self",

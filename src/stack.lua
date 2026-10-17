@@ -821,6 +821,13 @@ function Stack.activate(obj, playerColor, ab)
   if obj == nil or obj.isDestroyed() then
     return
   end
+  -- "Activated abilities of ... can't be activated" (Forge static): warn, naming the source.
+  if not ab.xDone and not ab.sacDone and Statics and Statics.cantActivate then
+    local okA, src = pcall(Statics.cantActivate, obj, playerColor, false)
+    if okA and src then
+      broadcastToColor(obj.getName() .. ": its activated abilities can't be activated (" .. src .. ").", playerColor, WARN)
+    end
+  end
   if ab.station then
     local sseat, sregion = seatOf(obj)
     if not (sregion == "battlefield" or sregion == "lands") or (sseat ~= playerColor and not GameState.solo()) then
