@@ -1127,3 +1127,49 @@ function Statics.cantBlock(blocker, attacker)
   end
   return nil
 end
+
+-- Forge's cost statics ("Artifact spells you cast cost {1} less", "Noncreature spells cost {1} more"):
+-- the generic mana a spell costs less (negative: more), and which permanents say so. Chat only:
+-- the payment itself stays as it is.
+function Statics.costChange(card, caster)
+  local q = asQ(card)
+  q.seat = caster
+  local n, from = 0, {}
+  local function use(e, src)
+    local w = e.f.w
+    if (w == "you" and caster ~= src.seat) or (w == "opp" and caster == src.seat) then
+      return
+    end
+    if Statics.forgeMatches(e.f.f, q, src) then
+      local k = tonumber(e.f.n) or 0
+      n = n + k
+      table.insert(from, src.obj.getName() .. (k >= 0 and (" -" .. k) or (" +" .. -k)))
+    end
+  end
+  for _, p in ipairs(perms()) do
+    for _, e in pairs(Statics.forgeLines(p.obj.getName(), p.oracle)) do
+      if e.kind == "RC" and not tostring(e.f.f):find("self", 1, true) then
+        use(e, { obj = p.obj, seat = p.seat })
+      end
+    end
+  end
+  -- "This spell costs {2} less to cast" on the card itself.
+  local d = dataOf(card)
+  for _, e in pairs(Statics.forgeLines(card.getName(), tostring(d.oracle or ""):lower())) do
+    if e.kind == "RC" and tostring(e.f.f):find("self", 1, true) then
+      use(e, { obj = card, seat = caster })
+    end
+  end
+  return n, from
+end
+
+Events.on("spellCast", function(d)
+  if d == nil or d.card == nil or d.controller == nil then
+    return
+  end
+  local ok, n, from = pcall(Statics.costChange, d.card, d.controller)
+  if ok and n and #from > 0 and n ~= 0 then
+    printToAll("MTG > " .. d.card.getName() .. " costs {" .. math.abs(n) .. "} " .. (n > 0 and "less" or "more")
+      .. " (" .. table.concat(from, ", ") .. "). Adjust the payment by hand.", { 0.75, 0.8, 0.9 })
+  end
+end)

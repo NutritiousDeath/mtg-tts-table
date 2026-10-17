@@ -38,7 +38,8 @@ class Unmapped(Exception):
 
 
 TYPES = {"Creature": "creature", "Artifact": "artifact", "Enchantment": "enchantment", "Land": "land",
-         "Planeswalker": "planeswalker", "Permanent": "permanent", "Card": "permanent"}
+         "Planeswalker": "planeswalker", "Permanent": "permanent", "Card": "permanent", "Instant": "instant",
+         "Sorcery": "sorcery"}
 COLORS = {"White": "W", "Blue": "U", "Black": "B", "Red": "R", "Green": "G"}
 PROPS = {"YouCtrl": "you", "OppCtrl": "opp", "Other": "other", "StrictlyOther": "other", "Self": "self",
          "token": "token", "nonToken": "nontoken", "attacking": "attacking", "blocking": "blocking"}
@@ -134,7 +135,28 @@ def combat(p):
     return kind, {"f": card_filter(p["ValidCard"])}
 
 
-MODES = {"Continuous": continuous, "CantAttack": combat, "CantBlock": combat, "CantBlockBy": combat,
+COST_KEYS = {"Mode", "ValidCard", "Type", "Activator", "Amount", "EffectZone", "Description", "Secondary", "AILogic"}
+
+
+def cost(p):
+    if set(p) - COST_KEYS:
+        raise Unmapped("key " + sorted(set(p) - COST_KEYS)[0])
+    if p.get("Type", "Spell") != "Spell":
+        raise Unmapped("type " + p["Type"])
+    if not re.fullmatch(r"\d+", p.get("Amount", "1")):
+        raise Unmapped("amount " + p["Amount"][:10])
+    f = card_filter(p.get("ValidCard", "Card"))
+    zone = p.get("EffectZone", "Battlefield")
+    if zone not in ("Battlefield", "All") or (zone == "All" and f != "permanent.self"):
+        raise Unmapped("from " + zone)
+    w = {"You": "you", "Opponent": "opp", "Player.Opponent": "opp", "Player": "all", None: "all"}.get(p.get("Activator"))
+    if w is None:
+        raise Unmapped("activator " + p["Activator"][:12])
+    n = int(p.get("Amount", "1"))
+    return "RC", {"f": f, "n": n if p["Mode"] == "ReduceCost" else -n, "w": w}
+
+
+MODES = {"ReduceCost": cost, "RaiseCost": cost, "Continuous": continuous, "CantAttack": combat, "CantBlock": combat, "CantBlockBy": combat,
          "CantAttack,CantBlock": combat}
 
 
