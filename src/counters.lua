@@ -441,7 +441,7 @@ function Counters.render(obj)
   -- EQUIPPED: what the tucked gear adds in total, and the keywords it gives. Hover for each piece.
   if #eqList > 0 then
     local gold = {}
-    local head = "EQUIPPED"
+    local head = tostring(cardData(obj).typeLine or ""):find("Land", 1, true) and "ENCHANTED" or "EQUIPPED"
     if gearP ~= 0 or gearT ~= 0 then
       head = head .. " " .. sgn(gearP) .. "/" .. sgn(gearT)
     end
@@ -873,6 +873,21 @@ function Counters.setup(obj)
   if region == "hand" and Effects and Effects.suspendInfo and Effects.suspendInfo(obj) then
     obj.addContextMenuItem("Suspend (pay cost, exile with time counters)", function(playerColor)
       Effects.suspend(obj, (Zones.locationOf(obj) or {}).seat or playerColor)
+    end)
+  end
+  -- Dropping a card from the hand onto the battlefield CASTS it (stack.lua). For "put onto the battlefield"
+  -- effects (Mindwrack Liege, Elvish Piper...): this puts it there without casting.
+  if region == "hand" then
+    obj.addContextMenuItem("Put onto battlefield (not cast)", function(playerColor)
+      local loc = Zones.locationOf(obj)
+      local seat = (Zones.handOwner and Zones.handOwner(obj)) or (loc and loc.seat) or playerColor
+      local tl = tostring(cardData(obj).typeLine or "")
+      local where = (tl:find("Land", 1, true) and not tl:find("Creature", 1, true)) and "lands" or "battlefield"
+      obj.setLock(false)
+      obj.setRotation({ 0, TableSetup.seat(seat).yaw, 0 })
+      obj.setPosition(TableSetup.slot(seat, where, TableSetup.SURFACE_TOP + 2))
+      Wait.time(function() if not obj.isDestroyed() then Zones.refresh(obj) end end, 0.8)
+      printToAll("MTG > " .. seat .. " puts " .. obj.getName() .. " onto the battlefield from their hand (not cast).", { 0.75, 0.8, 0.9 })
     end)
   end
   -- Spirit Guides: "Exile this card from your hand: Add {G}." Right-click in the hand.

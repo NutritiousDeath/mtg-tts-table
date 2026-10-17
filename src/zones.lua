@@ -224,6 +224,11 @@ function Zones.refresh(obj)
     moveTo(obj, obj.getName(), obj.getGUID(), { seat = owner, region = "hand" })
     return
   end
+  -- A spell just cast (dropped on the battlefield): it's on the stack, still gliding to the mat.
+  if Stack and Stack.has and Stack.has(obj.getGUID()) then
+    moveTo(obj, obj.getName(), obj.getGUID(), { seat = nil, region = "stack" })
+    return
+  end
   moveTo(obj, obj.getName(), obj.getGUID(), Zones.regionAt(obj.getPosition()))
 end
 

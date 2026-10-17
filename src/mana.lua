@@ -397,7 +397,50 @@ function ManaChips.sacForMana(obj, seat)
   ManaChips.onTap(obj, seat)
 end
 
+-- Land Auras: Wild Growth ("Whenever enchanted land is tapped for mana, its controller adds an additional {G}"),
+-- Overgrowth ({G}{G}), Utopia Sprawl ("an additional one mana of the chosen color").
+local COLOR_KEY = { White = "W", Blue = "U", Black = "B", Red = "R", Green = "G" }
+local function landAuraBonus(obj, seat)
+  if not (Equip and Equip.attachments) then
+    return
+  end
+  for _, a in ipairs(Equip.attachments(obj)) do
+    local ol = tostring(CardData.get(a).oracle or ""):lower()
+    local tail = ol:match("whenever enchanted [%a]+ is tapped for mana, its controller adds an additional ([^%.]+)")
+    if tail then
+      local added = {}
+      if tail:find("chosen color", 1, true) then
+        local col = Effects and Effects.chosenColor and Effects.chosenColor(a)
+        local k = col and COLOR_KEY[col]
+        if k then
+          table.insert(added, k)
+        else
+          Effects.askChoice(seat, a.getName() .. ": which color?", "No color was chosen for " .. a.getName() .. " yet: pick it (it's kept).",
+            { { label = "W", value = "White" }, { label = "U", value = "Blue" }, { label = "B", value = "Black" },
+              { label = "R", value = "Red" }, { label = "G", value = "Green" } }, function(c)
+              GameState.data.chosenColor = GameState.data.chosenColor or {}
+              GameState.data.chosenColor[a.getGUID()] = c
+              ManaChips.add(seat, COLOR_KEY[c], 1)
+              printToAll("MTG > " .. a.getName() .. ": +" .. COLOR_KEY[c] .. " (" .. c .. ") for " .. seat .. ".", { 0.55, 0.9, 0.6 })
+            end)
+        end
+      else
+        for sym in tail:gmatch("{(%a)}") do
+          table.insert(added, sym:upper())
+        end
+      end
+      for _, k in ipairs(added) do
+        ManaChips.add(seat, k, 1)
+      end
+      if #added > 0 then
+        printToAll("MTG > " .. a.getName() .. ": +" .. table.concat(added, "") .. " for " .. seat .. ".", { 0.55, 0.9, 0.6 })
+      end
+    end
+  end
+end
+
 function ManaChips.onTap(obj, seat)
+  pcall(landAuraBonus, obj, seat)
   local text = oracleOf(obj)
   if text:find("{t}, sacrifice [^:]*: add") then
     sacAfterMana(obj, seat)

@@ -61,10 +61,55 @@ function Equip.isAttachment(obj)
   end
   if tl:find("Aura", 1, true) then
     local o = tostring(cardData(obj).oracle or ""):lower()
-    return o:find("enchanted creature", 1, true) ~= nil
+    return o:find("enchanted creature", 1, true) ~= nil or Equip.landAura(obj)
   end
   return false
 end
+
+-- An Aura that goes on a land: Wild Growth ("Enchant land"), Utopia Sprawl ("Enchant Forest"), Overgrowth...
+-- Returns the land subtype it needs ("forest") or "land".
+function Equip.landAura(obj)
+  if obj == nil or obj.isDestroyed() or not typeLine(obj):find("Aura", 1, true) then
+    return nil
+  end
+  local o = tostring(cardData(obj).oracle or ""):lower()
+  local w = o:match("^enchant (%a+)") or o:match("\nenchant (%a+)")
+  if w == "land" then
+    return "land"
+  end
+  for _, sub in ipairs({ "forest", "plains", "island", "swamp", "mountain" }) do
+    if w == sub then
+      return sub
+    end
+  end
+  return nil
+end
+
+local function isLand(obj)
+  return typeLine(obj):find("Land", 1, true) ~= nil
+end
+
+-- Can this Aura / Equipment go on that permanent? (Land Auras on lands of the right type; the rest on creatures.)
+local function fits(att, obj)
+  local la = Equip.landAura(att)
+  if la then
+    if not isLand(obj) then
+      return false
+    end
+    if la == "land" then
+      return true
+    end
+    local tl = typeLine(obj):lower()
+    if tl:find(la, 1, true) then
+      return true
+    end
+    -- Leyline of the Guildpact: lands are every basic land type.
+    local _, seat = onField(obj)
+    return seat ~= nil and Statics and Statics.landsEveryType and Statics.landsEveryType(seat) or false
+  end
+  return isCreature(obj)
+end
+Equip.fits = fits
 
 -- The creature an attachment sits on (nil when none or it left).
 function Equip.hostOf(att)
@@ -300,12 +345,12 @@ function Equip.detach(att, why)
   end
 end
 
--- Nearest creature (not an attachment) within reach of a spot.
+-- Nearest creature (or land, for a land Aura) within reach of a spot; not an attachment.
 local function creatureAt(pos, except)
   local best, bestD = nil, REACH
   for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
     if obj ~= except and obj.type == "Card" and not obj.isDestroyed() and obj.held_by_color == nil
-        and onField(obj) and isCreature(obj) and not Faces.unknown(obj) then
+        and onField(obj) and fits(except, obj) and not Equip.isAttachment(obj) and not Faces.unknown(obj) then
       local p = obj.getPosition()
       local dx, dz = p.x - pos.x, p.z - pos.z
       local d = math.sqrt(dx * dx + dz * dz)
@@ -338,7 +383,7 @@ function Equip.onDrop(color, obj)
         -- Dropped back near its creature: tuck it back into place.
         Equip.tuck(current)
       end
-    elseif isCreature(obj) then
+    elseif isCreature(obj) or isLand(obj) then
       Equip.tuck(obj)
     end
   end, 0.9)
@@ -459,7 +504,7 @@ function Equip.startEquip(att, byColor)
   local names = {}
   local isAura = typeLine(att):find("Aura", 1, true) ~= nil
   local function eligible(obj, owner)
-    if obj == att or not isCreature(obj) then
+    if obj == att or not fits(att, obj) then
       return false
     end
     -- Equipment goes on a creature its controller controls; an Aura on any creature.
@@ -480,11 +525,11 @@ function Equip.startEquip(att, byColor)
     end
   end
   if #names == 0 then
-    broadcastToColor("There's no creature " .. att.getName() .. " can go on.", byColor or seat, INFO)
+    broadcastToColor("There's nothing " .. att.getName() .. " can go on.", byColor or seat, INFO)
     return
   end
   local cost = equipCost(att)
-  local text = (cost and ("Equip " .. cost .. ": pay it, then ") or "") .. "click TARGET on the creature.\nLegal: "
+  local text = (cost and ("Equip " .. cost .. ": pay it, then ") or "") .. "click TARGET on the " .. (Equip.landAura(att) and "land" or "creature") .. ".\nLegal: "
     .. table.concat(names, ", ")
   Effects.askChoice(seat, "Equip " .. att.getName(), text, { { label = "CANCEL", value = false } }, function(obj)
     if obj then
@@ -498,7 +543,7 @@ function Equip.addMenu(obj)
     return
   end
   local isAura = typeLine(obj):find("Aura", 1, true) ~= nil
-  obj.addContextMenuItem(isAura and "Attach to creature..." or "Equip...", function(playerColor)
+  obj.addContextMenuItem(isAura and (Equip.landAura(obj) and "Attach to land..." or "Attach to creature...") or "Equip...", function(playerColor)
     Equip.startEquip(obj, playerColor)
   end)
   if Equip.hostOf(obj) then

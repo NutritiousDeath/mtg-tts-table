@@ -2,8 +2,8 @@
   stack.lua
   Phase 5: the stack. A STACK mat sits in the middle of the table.
 
-    Casting: drop a card on the mat, or on your own CAST mat just above your
-      life tracker (easier to reach). It goes on top of the stack, laid out
+    Casting: drop a card from your hand (or command zone) onto your battlefield,
+      or onto the stack mat. It goes on top of the stack, laid out
       newest lowest on the mat (on top of the others) and locked in place.
       A commander cast from its command zone this way raises its tax by 2.
     Abilities: right-click a card on the battlefield > "Ability to stack"
@@ -456,26 +456,40 @@ end
 -- Who let go of each card last (cards cast from the table have no seat).
 local dropper = {}
 
+function Stack.has(guid)
+  return indexOf(guid) ~= nil
+end
+
+-- Casting: a nonland card dropped from a HAND or the COMMAND ZONE onto a battlefield goes on the stack
+-- (it lands on the battlefield when it resolves). Lands are played straight onto the battlefield. Where it
+-- came from (for commander tax) is known from when it was picked up. Checked before the move settles
+-- (zones.lua waits a little longer), so nothing "enters" before it resolves.
+local CAST_FROM = { hand = true, command = true }
 function Stack.onDrop(color, obj)
   if obj == nil or color == nil then
     return
   end
   dropper[obj.getGUID()] = color
-  -- Dropped on a seat's CAST mat: put it on the stack in the middle. Where
-  -- it came from (for commander tax) is known from when it was picked up.
   local from = Zones.locationOf(obj)
+  if from == nil or not CAST_FROM[from.region] or obj.type ~= "Card" or not obj.hasTag("MTGCard") then
+    return
+  end
   Wait.time(function()
-    if obj.isDestroyed() or obj.held_by_color or obj.type ~= "Card" then
+    if obj.isDestroyed() or obj.held_by_color or obj.type ~= "Card" or indexOf(obj.getGUID()) then
       return
     end
-    for _, seat in ipairs(TableSetup.activeSeats()) do
-      if TableSetup.inRegion(seat, "castzone", obj.getPosition()) then
-        -- The CAST mat's seat is the caster (whoever's hand it came from).
-        Stack.pushCard(obj, seat, from)
-        return
-      end
+    local here = Zones.regionAt(obj.getPosition())
+    if here.region ~= "battlefield" and here.region ~= "lands" then
+      return
     end
-  end, 0.5)
+    local d = CardData.get(obj)
+    local tl = tostring(d.typeLine or "")
+    -- A land (the front face of a land card) is played, not cast. Face-down cards are cast (morph).
+    if tl:find("Land", 1, true) and not tl:find("//", 1, true) and not obj.is_face_down then
+      return
+    end
+    Stack.pushCard(obj, from.seat or color, from)
+  end, 0.25)
 end
 
 -- Picking a card up off the mat takes it off the stack.
@@ -507,10 +521,7 @@ local function ensureCastMats()
   local reg = data()
   reg.castTiles = reg.castTiles or {}
   local wanted = {}
-  for _, color in ipairs(TableSetup.activeSeats()) do
-    table.insert(wanted, { key = color, color = color, region = "castzone", name = "Cast (" .. color .. ")",
-      url = ART_BASE .. "cast_" .. color .. ".png" .. ART_VERSION, width = 13, draw = function() end })
-  end
+  -- No CAST mats any more: casting is dropping the card on the battlefield (Stack.onDrop). Old mats are removed.
   Trackers.syncTiles("CastZone", { { registry = reg.castTiles, wanted = wanted } })
 end
 

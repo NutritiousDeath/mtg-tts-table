@@ -114,7 +114,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.74 (filter lands: plain or FILTER, then pick the pair)"
+SCRIPT_VERSION = "1.75 (cast by dropping on the battlefield; no CAST mats; land Auras like Wild Growth)"
 
 function onLoad(saved)
   GameLog.setup()
