@@ -1423,7 +1423,13 @@ Events.on("stepStarted", function(d)
       local t = a.trig
       if t.kind == "step" and (t.step == d.step or (t.step == "main" and (d.step == "main1" or d.step == "main2"))) then
         local mine = p.controller == d.seat
-        if t.who == "each" or (t.who == "you" and mine) or (t.who == "opp" and not mine) then
+        local hostOk = false
+        if t.who == "host" and Equip then
+          -- "At the beginning of the upkeep of enchanted creature's controller" (Curses, Auras).
+          local host = Equip.hostOf(p.obj)
+          hostOk = host ~= nil and not host.isDestroyed() and Zones.regionAt(host.getPosition()).seat == d.seat
+        end
+        if t.who == "each" or (t.who == "you" and mine) or (t.who == "opp" and not mine) or hostOk then
           table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
         end
       end
@@ -1505,11 +1511,18 @@ Events.on("cardMoved", function(d)
     return
   end
   local entering = IN_PLAY[d.to.region] and not IN_PLAY[d.from.region]
+  local leaving = IN_PLAY[d.from.region] and not IN_PLAY[d.to.region]
   local dying = IN_PLAY[d.from.region] and d.to.region == "graveyard" and (typesOf(card).creature or typesOf(card).artifact)
-  if not entering and not dying then
+  -- A card discarded (hand -> graveyard): "whenever you discard a card", madness-style "when you discard ~".
+  if d.from.region == "hand" and d.to.region == "graveyard" and d.from.seat then
+    Triggers.onDiscard(card, d.from.seat)
     return
   end
-  local kind = entering and "enters" or "dies"
+  if not entering and not leaving then
+    return
+  end
+  -- One move can be several events: a creature dying also leaves the battlefield.
+  local kinds = entering and { "enters" } or (dying and { "dies", "leaves" } or { "leaves" })
   local cardController = entering and d.to.seat or d.from.seat
   -- Warn about triggers the table can't watch for on a card that just arrived.
   if entering and cardController then
@@ -1522,30 +1535,39 @@ Events.on("cardMoved", function(d)
     end
   end
   local found = {}
-  -- The card's own "when ~ enters / dies".
-  for _, a in ipairs(abilitiesOf(card)) do
-    if a.trig.kind == kind and (a.trig.self or a.trig.orSelf) then
-      table.insert(found, { obj = card, controller = cardController, text = a.text })
+  for _, kind in ipairs(kinds) do
+    -- The card's own "when ~ enters / dies / leaves the battlefield".
+    for _, a in ipairs(abilitiesOf(card)) do
+      if a.trig.kind == kind and (a.trig.self or a.trig.orSelf) then
+        table.insert(found, { obj = card, controller = cardController, text = a.text })
+      end
     end
-  end
-  -- Other permanents watching for it.
-  for _, p in ipairs(permanents()) do
-    if p.obj ~= card then
-      for _, a in ipairs(abilitiesOf(p.obj)) do
-        local t = a.trig
-        if t.kind == kind and not t.self and matchesSubject(card, t)
-            and not (t.tapped and not entersTappedNow(card))
-            and not (t.goaded and not (Counters.goadedBy(card) and Combat and Combat.inCombat and Combat.inCombat(card)))
-            and not (t.nontoken and isToken(card))
-            and not (t.playedOnly and d.from.region ~= "hand")
-            and not ((t.powerMin or t.toughMin) and not (function()
-              pcall(Statics.compute)   -- anthems (Lieges...) count toward the power
-              local st = Counters.stats(card)
-              return (tonumber(st.power) or 0) >= (t.powerMin or -99) and (tonumber(st.toughness) or 0) >= (t.toughMin or -99)
-            end)())
-            and not (t.mine and cardController ~= p.controller)
-            and not (t.theirs and cardController == p.controller) then
-          table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
+    -- Auras and Equipment on it: "when enchanted creature dies / leaves the battlefield".
+    if kind ~= "enters" then
+      for _, f in ipairs(attachedTriggers(card, kind)) do
+        f.thatCard = card.getGUID()
+        table.insert(found, f)
+      end
+    end
+    -- Other permanents watching for it (an Aura's "enchanted creature" triggers come from the card above).
+    for _, p in ipairs(permanents()) do
+      if p.obj ~= card then
+        for _, a in ipairs(abilitiesOf(p.obj)) do
+          local t = a.trig
+          if t.kind == kind and not t.self and not t.equipped and matchesSubject(card, t)
+              and not (t.tapped and not entersTappedNow(card))
+              and not (t.goaded and not (Counters.goadedBy(card) and Combat and Combat.inCombat and Combat.inCombat(card)))
+              and not (t.nontoken and isToken(card))
+              and not (t.playedOnly and d.from.region ~= "hand")
+              and not ((t.powerMin or t.toughMin) and not (function()
+                pcall(Statics.compute)   -- anthems (Lieges...) count toward the power
+                local st = Counters.stats(card)
+                return (tonumber(st.power) or 0) >= (t.powerMin or -99) and (tonumber(st.toughness) or 0) >= (t.toughMin or -99)
+              end)())
+              and not (t.mine and cardController ~= p.controller)
+              and not (t.theirs and cardController == p.controller) then
+            table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
+          end
         end
       end
     end
@@ -1777,6 +1799,197 @@ local function spellMatches(card, spellType, source)
   return first ~= nil and t[first] == true
 end
 
+-- A Forge spell/card filter (tools/forge_triggers.py spell_filter): "alt/alt", each
+-- alternative words joined by "+" that must all hold: card types, sub:<subtype>,
+-- colors, colorless, multicolored, non<type>, historic, legendary, permanent,
+-- mvge=N, mvle=N.
+local function spellSpecMatches(card, spec)
+  local t = typesOf(card)
+  local d = cardData(card) or {}
+  local tl = tostring(d.typeLine or ""):lower()
+  local cols
+  for alt in (tostring(spec) .. "/"):gmatch("([^/]*)/") do
+    local ok = alt ~= ""
+    for w in (alt .. "+"):gmatch("([^+]*)%+") do
+      if ok and w ~= "" then
+        if w:sub(1, 4) == "sub:" then
+          ok = tl:find(w:sub(5), 1, true) ~= nil
+        elseif w:sub(1, 5) == "mvge=" then
+          ok = (tonumber(d.cmc) or 0) >= (tonumber(w:sub(6)) or 0)
+        elseif w:sub(1, 5) == "mvle=" then
+          ok = (tonumber(d.cmc) or 0) <= (tonumber(w:sub(6)) or 99)
+        elseif w == "permanent" then
+          ok = not t.instant and not t.sorcery
+        elseif w == "historic" then
+          ok = t.artifact == true or tl:find("legendary", 1, true) ~= nil or tl:find("saga", 1, true) ~= nil
+        elseif w == "legendary" then
+          ok = tl:find("legendary", 1, true) ~= nil
+        elseif COLOR_LETTER[w] or w == "colorless" or w == "multicolored" then
+          cols = cols or spellColors(card)
+          local n = 0
+          for _ in pairs(cols) do
+            n = n + 1
+          end
+          if w == "colorless" then
+            ok = n == 0
+          elseif w == "multicolored" then
+            ok = n >= 2
+          else
+            ok = cols[COLOR_LETTER[w]] == true
+          end
+        elseif w:sub(1, 3) == "non" then
+          ok = not t[w:sub(4)]
+        else
+          ok = t[w] == true
+        end
+      end
+    end
+    if ok then
+      return true
+    end
+  end
+  return false
+end
+Triggers.spellSpecMatches = spellSpecMatches
+
+local function whoMatches(t, seat, controller)
+  return t.who == nil or t.who == "each" or (t.who == "you" and seat == controller) or (t.who == "opp" and seat ~= controller)
+end
+
+-- One event about a card (sacrificed, discarded, cycled, tapped, untapped): the
+-- card's own triggers ("when ~ is ..."), its Auras/Equipment ("enchanted
+-- creature"), and other permanents watching for it. seat = the player it
+-- happened to (its controller, or the player who discarded / cycled it).
+local function cardEvent(kind, card, seat)
+  if not enabled() or not GameState.data.started or card == nil or card.isDestroyed() then
+    return
+  end
+  local found = {}
+  for _, a in ipairs(abilitiesOf(card)) do
+    if a.trig.kind == kind and (a.trig.self or a.trig.orSelf) then
+      table.insert(found, { obj = card, controller = seat, text = a.text })
+    end
+  end
+  for _, f in ipairs(attachedTriggers(card, kind)) do
+    f.thatCard = card.getGUID()
+    table.insert(found, f)
+  end
+  for _, p in ipairs(permanents()) do
+    if p.obj ~= card then
+      for _, a in ipairs(abilitiesOf(p.obj)) do
+        local t = a.trig
+        if t.kind == kind and not t.self and not t.equipped and matchesSubject(card, t)
+            and not (t.mine and seat ~= p.controller) and not (t.theirs and seat == p.controller)
+            and not (t.nontoken and isToken(card)) and not (t.tokenOnly and not isToken(card))
+            and whoMatches(t, seat, p.controller) and (t.spell == nil or spellSpecMatches(card, t.spell)) then
+          table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, thatCard = card.getGUID() })
+        end
+      end
+    end
+  end
+  pushAll(found, seat)
+end
+
+-- A permanent was sacrificed (combat.lua Combat.sacrifice: costs and effects that sacrifice).
+function Triggers.onSacrificed(obj, seat)
+  cardEvent("sacrificed", obj, seat)
+end
+
+-- A card went from a player's hand to their graveyard (triggers.lua cardMoved).
+function Triggers.onDiscard(card, seat)
+  cardEvent("discard", card, seat)
+end
+
+-- A card was cycled (stack.lua: right-click > Cycle).
+function Triggers.onCycled(card, seat)
+  cardEvent("cycled", card, seat)
+end
+
+-- A permanent became tapped / untapped (a player turning it, attacking, a {T} cost, the untap step).
+function Triggers.onTapped(obj, seat)
+  cardEvent("tapped", obj, seat)
+end
+
+function Triggers.onUntapped(obj, seat)
+  cardEvent("untapped", obj, seat)
+end
+
+-- Damage was dealt: list of { obj = source (or nil), controller = its controller,
+-- seat = damaged player (or nil), target = damaged permanent (or nil), amount }.
+-- combat = true for combat damage. For "whenever ~ deals damage", "whenever a source
+-- you control deals noncombat damage to an opponent", "whenever ~ is dealt damage".
+function Triggers.onDamage(list, combat)
+  if not enabled() or not GameState.data.started or #list == 0 then
+    return
+  end
+  local found = {}
+  for _, p in ipairs(permanents()) do
+    for _, a in ipairs(abilitiesOf(p.obj)) do
+      local t = a.trig
+      if t.kind == "damage" and not (t.combat == "yes" and not combat) and not (t.combat == "no" and combat) then
+        local n, last = 0, nil
+        for _, h in ipairs(list) do
+          local src = h.obj
+          local okT = (t.tgt == "player" and h.seat ~= nil) or (t.tgt == "opp" and h.seat ~= nil and h.seat ~= p.controller)
+            or (t.tgt == "you" and h.seat == p.controller) or (t.tgt == "creature" and h.target ~= nil)
+            or (t.tgt == "self" and h.target == p.obj)
+          local okS
+          if t.tgt == "self" then
+            okS = not t.opp or h.controller ~= p.controller
+          elseif t.self then
+            okS = src == p.obj
+          elseif t.equipped then
+            okS = src ~= nil and Equip ~= nil and Equip.hostOf(p.obj) == src
+          else
+            okS = (src == nil and t.subjects == nil) or (src ~= nil and not src.isDestroyed() and matchesSubject(src, t))
+            okS = okS and not (t.mine and h.controller ~= p.controller) and not (t.theirs and h.controller == p.controller)
+          end
+          if okT and okS then
+            n, last = n + 1, h
+          end
+        end
+        for _ = 1, (t.once and math.min(n, 1) or n) do
+          table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, amount = last.amount, that = last.seat })
+        end
+      end
+    end
+  end
+  pushAll(found, list[1] and list[1].seat)
+end
+
+-- Attackers no creature blocked: list of { obj, controller } ("whenever ~ attacks and isn't blocked").
+function Triggers.onUnblocked(list)
+  if not enabled() or not GameState.data.started then
+    return
+  end
+  local found = {}
+  for _, u in ipairs(list) do
+    for _, a in ipairs(abilitiesOf(u.obj)) do
+      if a.trig.kind == "unblocked" and a.trig.self then
+        table.insert(found, { obj = u.obj, controller = u.controller, text = a.text })
+      end
+    end
+    for _, f in ipairs(attachedTriggers(u.obj, "unblocked")) do
+      f.controller = u.controller
+      f.thatCard = u.obj.getGUID()
+      table.insert(found, f)
+    end
+  end
+  for _, p in ipairs(permanents()) do
+    for _, a in ipairs(abilitiesOf(p.obj)) do
+      local t = a.trig
+      if t.kind == "unblocked" and t.mine then
+        for _, u in ipairs(list) do
+          if u.controller == p.controller and not u.obj.isDestroyed() and matchesSubject(u.obj, t) then
+            table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, thatCard = u.obj.getGUID() })
+          end
+        end
+      end
+    end
+  end
+  pushAll(found)
+end
+
 Events.on("spellCast", function(d)
   if not enabled() or not GameState.data.started or d.card == nil then
     return
@@ -1834,7 +2047,8 @@ Events.on("spellCast", function(d)
             firstOk = false
           end
         end
-        if firstOk and (t.who == "each" or (t.who == "you" and mine) or (t.who == "opp" and not mine)) and spellMatches(d.card, t.spellType, p.obj) then
+        if firstOk and (t.who == "each" or (t.who == "you" and mine) or (t.who == "opp" and not mine)) and spellMatches(d.card, t.spellType, p.obj)
+            and (t.spell == nil or spellSpecMatches(d.card, t.spell)) and not (t.mvMax and (tonumber((cardData(d.card) or {}).cmc) or 0) > t.mvMax) then
           -- "That spell" (Gandalf copies it) is the spell that was cast.
           local that = tostring(a.text):lower():find("that spell", 1, true) and d.card.getGUID() or nil
           table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, thatCard = that })
@@ -1957,8 +2171,18 @@ function Triggers.onAttack(list)
             okType = not tostring(dd and dd.typeLine or ""):lower():find(t.nonType, 1, true)
           end
           if t.onlyType then
+            -- "Dragon", or several: "samurai/warrior" (any of them).
             local dd = cardData(at.obj)
-            okType = tostring(dd and dd.typeLine or ""):lower():find(t.onlyType, 1, true) ~= nil
+            local tl = tostring(dd and dd.typeLine or ""):lower()
+            okType = false
+            for w in (tostring(t.onlyType) .. "/"):gmatch("([^/]*)/") do
+              if w ~= "" and tl:find(w, 1, true) then
+                okType = true
+              end
+            end
+          end
+          if t.commander then
+            okType = okType and Combat ~= nil and Combat.isCommander ~= nil and Combat.isCommander(at.obj) == true
           end
           if at.controller == p.controller and okType then
             mineCount = mineCount + 1
@@ -2016,14 +2240,46 @@ function Triggers.onBlock(list)
       table.insert(found, f)
     end
     local att = b.attacker
-    if att and not att.isDestroyed() and not blockedDone[att.getGUID()] then
-      blockedDone[att.getGUID()] = true
-      for _, f in ipairs(ringTriggers(att, "blocked")) do
-        table.insert(found, f)
+    if att and not att.isDestroyed() then
+      local g = att.getGUID()
+      if not blockedDone[g] then
+        blockedDone[g] = { att = att, controller = b.attackerController, blockers = {} }
+        table.insert(blockedDone, blockedDone[g])
       end
-      for _, a in ipairs(abilitiesOf(att)) do
-        if a.trig.kind == "blocked" and a.trig.self then
-          table.insert(found, { obj = att, controller = b.attackerController, text = a.text })
+      table.insert(blockedDone[g].blockers, b.obj)
+    end
+  end
+  -- Each blocked attacker: "whenever ~ becomes blocked" (once), "...blocked by a creature" (once per
+  -- blocker), its Auras / Equipment, and "whenever a creature you control becomes blocked".
+  for _, e in ipairs(blockedDone) do
+    local att = e.att
+    for _, f in ipairs(ringTriggers(att, "blocked")) do
+      table.insert(found, f)
+    end
+    for _, a in ipairs(abilitiesOf(att)) do
+      if a.trig.kind == "blocked" and a.trig.self then
+        if a.trig.perBlocker then
+          for _, bl in ipairs(e.blockers) do
+            table.insert(found, { obj = att, controller = e.controller, text = a.text, thatCard = bl.getGUID() })
+          end
+        else
+          table.insert(found, { obj = att, controller = e.controller, text = a.text })
+        end
+      end
+    end
+    for _, f in ipairs(attachedTriggers(att, "blocked")) do
+      f.controller = e.controller
+      f.thatCard = att.getGUID()
+      table.insert(found, f)
+    end
+    for _, p in ipairs(permanents()) do
+      for _, a in ipairs(abilitiesOf(p.obj)) do
+        local t = a.trig
+        if t.kind == "blocked" and t.mine and p.controller == e.controller and matchesSubject(att, t) then
+          local times = t.perBlocker and #e.blockers or 1
+          for _ = 1, times do
+            table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, thatCard = att.getGUID() })
+          end
         end
       end
     end
@@ -2081,6 +2337,14 @@ function Triggers.onCombatDamage(list)
         end
       end
     end
+  end
+  -- "Whenever ~ deals damage" (combat or not) and friends: the same damage as a damage event.
+  do
+    local dl = {}
+    for _, h in ipairs(list) do
+      table.insert(dl, { obj = h.obj, controller = h.controller, seat = h.seat, amount = h.amount })
+    end
+    Triggers.onDamage(dl, true)
   end
   -- The damaged player ("they get that many poison counters"): each trigger
   -- is about the player its creature hit.

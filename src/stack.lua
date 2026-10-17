@@ -794,6 +794,9 @@ end
 
 -- The card itself is sacrificed: to its graveyard (a token goes away after).
 local function sacrifice(obj, seat)
+  if Triggers and Triggers.onSacrificed then
+    pcall(Triggers.onSacrificed, obj, seat)
+  end
   local s = TableSetup.seat(seat)
   obj.setLock(false)
   obj.setRotation({ 0, s.yaw, 0 })
@@ -895,7 +898,7 @@ function Stack.activate(obj, playerColor, ab)
           local vmv = 0
           pcall(function() vmv = tonumber(CardData.get(victim).cmc) or 0 end)
           GameState.data.lastSac = { seat = playerColor, mv = vmv, name = vname, at = os.time() }
-          Combat.removeCard(victim, "graveyard")
+          Combat.sacrifice(victim)
           local eff = ab.effect
           local lowE = eff:lower()
           local needle = "cards equal to the sacrificed creature's power"
@@ -973,6 +976,9 @@ function Stack.activate(obj, playerColor, ab)
     local r = obj.getRotation()
     obj.setRotationSmooth({ r.x, (TableSetup.seat(seat).yaw + 90) % 360, r.z }, false, true)
     table.insert(paid, "tapped it")
+    if Triggers and Triggers.onTapped then
+      pcall(Triggers.onTapped, obj, seat)
+    end
   end
   if remN then
     Counters.change(obj, remKey, -remN, playerColor)
@@ -1041,7 +1047,80 @@ function Stack.activate(obj, playerColor, ab)
 end
 
 -- Right-click on a card: put one of its abilities on the stack.
+-- Cycling: "Cycling {2}" (discard it, draw a card) or typecycling ("Basic landcycling {1}",
+-- "Plainscycling {2}", "Wizardcycling {3}": discard it, search for that card type). Returns
+-- { cost, search } or nil.
+function Stack.cyclingOf(obj)
+  local text = oracleOf(obj)
+  for line in (text .. "\n"):gmatch("([^\n]*)\n") do
+    local low = (Triggers and Triggers.stripReminder and Triggers.stripReminder(line) or line):lower()
+    local a = low:find("cycling ", 1, true)
+    if a and not low:find(":", 1, true) then
+      local pre = low:sub(1, a - 1):gsub("^%s+", ""):gsub("%s+$", "")
+      local cost = low:sub(a + 8):match("^(%S+)")
+      -- Only the keyword line itself ("Cycling {2}", "Basic landcycling {1}"), not text about cycling.
+      if cost and cost:sub(1, 1) == "{" and #pre < 20 and not pre:find("whenever", 1, true) then
+        return { cost = cost, search = pre ~= "" and pre or nil }
+      end
+    end
+  end
+  return nil
+end
+
+-- Cycle a card from its owner's hand: pay, discard it, then draw (or search, for typecycling).
+function Stack.cycle(obj, playerColor)
+  local cy = Stack.cyclingOf(obj)
+  if cy == nil or obj == nil or obj.isDestroyed() then
+    return
+  end
+  local seat
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    for _, h in ipairs(Player[c].getHandObjects() or {}) do
+      if h == obj then
+        seat = c
+      end
+    end
+  end
+  if seat == nil then
+    broadcastToColor(obj.getName() .. " has to be in your hand to cycle it.", playerColor, WARN)
+    return
+  end
+  if seat ~= playerColor and not GameState.solo() then
+    broadcastToColor("That's " .. seat .. "'s card.", playerColor, WARN)
+    return
+  end
+  local name = obj.getName()
+  if ManaChips and ManaChips.pay then
+    ManaChips.pay(seat, cy.cost, name .. " (cycling)")
+  end
+  -- Cycle triggers first, while the card can still be read (it merges into the graveyard pile).
+  if Triggers and Triggers.onCycled then
+    pcall(Triggers.onCycled, obj, seat)
+  end
+  local s = TableSetup.seat(seat)
+  obj.setRotation({ 0, s.yaw, 0 })
+  obj.setPosition(TableSetup.slot(seat, "graveyard", TableSetup.SURFACE_TOP + 2))
+  Zones.refresh(obj)          -- hand -> graveyard: "whenever you discard a card" sees it
+  Library.toGraveyard(seat, obj)
+  if cy.search then
+    printToAll("MTG > " .. seat .. " cycles " .. name .. " (" .. cy.search .. "cycling " .. cy.cost .. "): search for a "
+      .. cy.search .. " card.", INFO)
+    LibSearch.open(seat, cy.search, name .. ": take a " .. cy.search .. " card into your hand, then CLOSE + SHUFFLE.", "hand",
+      false, { typeOnly = true })
+  else
+    printToAll("MTG > " .. seat .. " cycles " .. name .. " (" .. cy.cost .. ") and draws a card.", INFO)
+    Wait.time(function() Actions.draw(seat, 1, name .. " (cycling)") end, 0.4)
+  end
+end
+
 function Stack.addCardMenu(obj, full)
+  -- Cycling, from the hand.
+  local cy = Stack.cyclingOf(obj)
+  if cy then
+    obj.addContextMenuItem("Cycle (" .. cy.cost .. ")", function(playerColor)
+      Stack.cycle(obj, playerColor)
+    end)
+  end
   for _, ab in ipairs(Stack.activatedAbilities(obj)) do
     local label = "Activate: " .. ab.cost
     if #label > 38 then

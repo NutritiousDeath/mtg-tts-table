@@ -656,12 +656,14 @@ local function declare(color)
   c.declared = true
   local list, parts = {}, {}
   local keep = {}
+  local tappedNow = {}
   for _, guid in ipairs(c.order) do
     local a = live(guid)
     if a then
       table.insert(keep, guid)
       if not hasKeyword(a, "Vigilance") and not isTapped(a) then
         tap(a)
+        table.insert(tappedNow, a)
       end
       table.insert(list, { obj = a, controller = color, target = targetSeat(c.attackers[guid]) })
       table.insert(parts, a.getName() .. " -> " .. targetLabel(c.attackers[guid]))
@@ -689,6 +691,12 @@ local function declare(color)
   broadcastToColor("Attack declared. Resolve any attack triggers, then NEXT STEP for blockers.", color, INFO)
   if Triggers and Triggers.onAttack then
     Triggers.onAttack(list)
+  end
+  -- Attacking tapped them: "whenever ~ becomes tapped" (Quest for Renewal...).
+  if Triggers and Triggers.onTapped then
+    for _, a in ipairs(tappedNow) do
+      Triggers.onTapped(a, color)
+    end
   end
   Combat.refresh()
 end
@@ -889,6 +897,19 @@ local function lockBlocks()
   end
   if #blockList > 0 and Triggers and Triggers.onBlock then
     Triggers.onBlock(blockList)
+  end
+  -- "Whenever ~ attacks and isn't blocked".
+  if Triggers and Triggers.onUnblocked then
+    local unblocked = {}
+    for _, ag in ipairs(c.order) do
+      local a = live(ag)
+      if a and not c.blocked[ag] then
+        table.insert(unblocked, { obj = a, controller = turn().activeSeat })
+      end
+    end
+    if #unblocked > 0 then
+      Triggers.onUnblocked(unblocked)
+    end
   end
 end
 
@@ -1412,6 +1433,19 @@ local function sendToGraveyard(card, zone)
   end)
 end
 Combat.removeCard = sendToGraveyard
+
+-- Sacrifice a permanent: "whenever you sacrifice ..." / "when ~ is sacrificed" triggers
+-- see it (triggers.lua), then it goes to its graveyard like any other removal.
+function Combat.sacrifice(card)
+  if card == nil or card.isDestroyed() then
+    return
+  end
+  local seat = controller(card)
+  if seat and Triggers and Triggers.onSacrificed then
+    pcall(Triggers.onSacrificed, card, seat)
+  end
+  sendToGraveyard(card, "graveyard")
+end
 
 local function applyRound(byColor)
   local c = state()

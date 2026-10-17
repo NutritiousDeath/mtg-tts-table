@@ -40,6 +40,7 @@
     !triggers card       show the triggers read on the card under your mouse
     !triggers audit      list trigger text on the battlefield the table can't watch for
     !triggers forge off / on   read triggers from rules text only / prefer Forge's card data
+    !effects forge off / on    read effects from rules text only / use Forge's card data too
     !solo on / off       solo test mode: one person plays every seat
     !attraction  open an Attraction (top of your Attraction deck)
     !visit       roll to visit your Attractions now
@@ -76,6 +77,7 @@ require("src/libsearch")
 require("src/gamelog")
 require("src/stack")
 require("src/forge_triggers_data")
+require("src/forge_effects_data")
 require("src/triggers")
 require("src/combat")
 require("src/equip")
@@ -116,7 +118,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.79 (YIELD / RESOLVE ALL, land drops counted, Lost in Space, Lotus Field, Maelstrom free cast, faster untap)"
+SCRIPT_VERSION = "1.80 (Forge data: more triggers - leaves, sacrifice, discard, cycle, tap, noncombat damage, blocks - and Forge effects)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -751,6 +753,13 @@ function onChat(message, sender)
   if message == "!triggers forge off" or message == "!triggers forge on" then
     Triggers.setForge(message == "!triggers forge on")
     broadcastToAll("Forge trigger data " .. (message == "!triggers forge on" and "ON" or "OFF (rules text only)")
+      .. " (by " .. sender.color .. ").", { 0.7, 0.85, 1 })
+    return false
+  end
+
+  if message == "!effects forge off" or message == "!effects forge on" then
+    GameState.data.forgeFxOff = message == "!effects forge off" or nil
+    broadcastToAll("Forge effect data " .. (message == "!effects forge on" and "ON" or "OFF (rules text only)")
       .. " (by " .. sender.color .. ").", { 0.7, 0.85, 1 })
     return false
   end
