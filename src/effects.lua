@@ -2239,6 +2239,11 @@ local function fxSentence(st, name, it, notes)
     return "Counter target " .. ((p.f and p.f ~= "") and (p.f .. " ") or "") .. "spell."
   elseif api == "Proliferate" then
     return "Proliferate."
+  elseif api == "CopyPermanent" then
+    if p.on == "self" then
+      return "Create a token that's a copy of " .. name .. "."
+    end
+    return "Create a token that's a copy of target creature" .. (p.any and "" or " you control") .. "."
   elseif api == "Dig" then
     local look = "Look at the top " .. (FX_NUM[n] and n > 1 and FX_NUM[n] or tostring(n)) .. " cards of your library. "
     local rest = " Put the rest on the bottom of your library in any order."
@@ -2381,6 +2386,17 @@ local function forgePlan(text, name, it)
           if a.what == "look" then
             a.picks = tonumber(st.p.k) or a.picks
             a.restToYard = a.restToYard or st.p.yard ~= nil
+          end
+        end
+      end
+      -- What the sentence can't say: haste, not legendary, gone at the next end step, whose creature.
+      if st.api == "CopyPermanent" then
+        for _, a in ipairs(got) do
+          if a.what == "copyCreature" or a.what == "copySelf" then
+            a.haste = a.haste or st.p.h ~= nil
+            a.nonlegendary = a.nonlegendary or st.p.nl ~= nil
+            a.endHow = a.endHow or (st.p["end"] == "sacrifice" and "sacrifice") or (st.p["end"] == "exile" and "exile") or nil
+            a.anyOwner = st.p.any ~= nil
           end
         end
       end
@@ -3292,7 +3308,7 @@ local function apply(it, plan, target)
         elseif a.what == "copySelf" then
           local src = it.source and getObjectFromGUID(it.source)
           if src and not src.isDestroyed() then
-            Effects.copyCard(src, seat, {}, it.name)
+            Effects.copyCard(src, seat, { haste = a.haste, endHow = a.endHow }, it.name)
           else
             broadcastToColor(it.name .. ": make the token copy yourself (the card wasn't found).", seat, INFO)
           end
@@ -4265,7 +4281,7 @@ end
 
 function Effects.copyCreature(seat, a, it)
   local function filter(obj, owner)
-    if owner ~= seat or not Effects.cardTypes(obj).creature then
+    if (owner ~= seat and not a.anyOwner) or not Effects.cardTypes(obj).creature then
       return false
     end
     if a.nonlegendary then

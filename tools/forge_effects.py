@@ -614,6 +614,34 @@ def step(p, tokens, raw, token_db, self_trigger=False):
         out = {"f": f.strip()}
     elif api == "Proliferate":
         out = {}
+    elif api == "CopyPermanent":
+        if get("NumCopies", "1") != "1":
+            raise Unmapped("copies " + p["NumCopies"][:8])
+        out = {}
+        if get("NonLegendary") == "True":
+            out["nl"] = 1
+        kw = get("AddKeywords") or get("PumpKeywords")
+        if kw:
+            if kw.strip().lower() != "haste":
+                raise Unmapped("copy keywords")
+            out["h"] = 1
+        eot = get("AtEOT")
+        if eot:
+            if eot not in ("Exile", "Sacrifice"):
+                raise Unmapped("copy at end " + eot[:10])
+            out["end"] = eot.lower()
+        if "ValidTgts" in p:
+            v = get("ValidTgts")
+            mine = {"Creature": None, "Creature.YouCtrl": 1, "Creature.Other+YouCtrl": 1, "Creature.YouCtrl+Other": 1}
+            if v not in mine:
+                raise Unmapped("copy of " + v[:20])
+            out["on"] = "tgt"
+            if mine[v] is None:
+                out["any"] = 1
+        elif get("Defined", "Self") == "Self":
+            out["on"] = "self"
+        else:
+            raise Unmapped("copy of " + p["Defined"][:16])
     elif api == "Animate":
         pw, tg = get("Power"), get("Toughness")
         types = [t for t in get("Types", "").split(",") if t]
