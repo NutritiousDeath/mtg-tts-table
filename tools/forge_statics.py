@@ -81,7 +81,7 @@ def card_filter(expr):
 
 KEYWORD = re.compile(r"[A-Z][A-Za-z ]*")
 CONTINUOUS_KEYS = {"Mode", "Affected", "AddPower", "AddToughness", "AddKeyword", "Description", "EffectZone",
-                   "AffectedDefined", "AILogic", "Secondary"}
+                   "AffectedDefined", "AILogic", "Secondary", "AddAbility", "AddTrigger", "AddSVar"}
 
 
 def continuous(p):
@@ -108,6 +108,11 @@ def continuous(p):
         if any(not KEYWORD.fullmatch(k) for k in kws):
             raise Unmapped("keyword")
         out["k"] = "/".join(k.lower() for k in kws)
+    if "AddAbility" in p or "AddTrigger" in p:
+        # Granted abilities: the table reads them from the quoted text of the rules line.
+        if '"' not in p.get("Description", "") and "“" not in p.get("Description", ""):
+            raise Unmapped("ability without quotes")
+        out["q"] = 1
     if len(out) == 1:
         raise Unmapped("nothing added")
     return "C", out

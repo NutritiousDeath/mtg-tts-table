@@ -897,11 +897,21 @@ local function grantSources()
         end
         -- Forge's reading of a line the reader above doesn't understand ("... get +1/+1 and have flying").
         local fe = fl[idx]
-        if rec == nil and fe and fe.kind == "C" and fe.f.k then
+        if rec == nil and fe and fe.kind == "C" and (fe.f.k or fe.f.q) then
           rec = { forge = fe.f.f, scope = "all", kws = {}, lines = {} }
-          for k in (fe.f.k .. "/"):gmatch("([^/]*)/") do
+          for k in ((fe.f.k or "") .. "/"):gmatch("([^/]*)/") do
             if k ~= "" then
               table.insert(rec.kws, k)
+            end
+          end
+          -- Granted abilities ("have '{T}: Add {G}.'"): their quoted text, as the reader above takes it.
+          if fe.f.q then
+            for qt in l2:gmatch('"([^"]*)"') do
+              local t = qt:gsub("%s+$", "")
+              if t:sub(-1) ~= "." then
+                t = t .. "."
+              end
+              table.insert(rec.lines, t)
             end
           end
         end
