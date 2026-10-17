@@ -2,170 +2,187 @@ Forge effects (ApiType steps) tools/forge_effects.py maps (Forge 64569999, 2026-
 Regenerate with tools/forge_triggers.py (it writes both data files). Mana abilities are left to mana.lua.
 
 How the table uses them (effects.lua Effects.parseBest): each step becomes one plain sentence the
-rules-text reader already handles. Forge's reading is used when the card's text reads to nothing or to
-fewer actions; on a tie the text's reading stands. Paragraphs with "if", "for each", "equal to", X...
-are always read from the text (Forge keeps such conditions on the trigger line, not in the effect).
+rules-text reader already handles, or one of the table's own actions where it has no words (damage to
+a creature, exile itself, pay-or-sacrifice, "that creature"). Forge's reading is used only when the
+card's text reads to nothing or to fewer actions; on a tie, or when the text reading uses one of the
+table's hand-written handlers (The One Ring, Castle Locthwain...), the text's reading stands.
+Paragraphs with "if", "unless" or "instead" are always read from the text.
+Counts (X = creatures you control, its power, counters on it, cards in hand / graveyard, life,
+domain) are worked out when the ability resolves and said in chat. A count that a step before it
+would change, or the power / counters of a card that has just left the battlefield, is left to the text.
 
-Effect readings vs v1.79 (all Forge cards, triggered paragraphs + activated abilities):
-  0 lost; 50 abilities the text couldn't read now carried out; 24 now carried out more completely
-  (e.g. "you draw a card and lose 1 life" did only the draw, Hopeless Nightmare skipped the life loss).
+Before / after (abilities = triggered + activated; v1.81 also counts each mode of a modal ability):
+                         v1.80                      v1.81 (Phase 3b)
+  abilities mapped       8340 of 25517 (32.7%)      10275 of 26097 (39.4%)
+  effects carried out    11916 of 22248 (53.6%)     12353 of 22248 (55.5%)   (all Forge cards, table's Lua)
+  readings lost vs v1.80                            0
+  newly carried out                                 437 (X counts, damage to creatures, DamageAll variants,
+                                                    reanimate / return from graveyard, tapped / attacking /
+                                                    opponent tokens, sacrifice, pay-or-sacrifice, Dig, "that creature")
+  carried out more fully                            53 (e.g. Krydle: + mill; Dusk Mangler: + discard and life loss)
+  modal modes (bullet lines) read more fully        31 of 1944, none worse
+  Jared 22/25, Yuriko 20/29 -> 21/29 (Cunning Evasion), Beamtown 24/29 effects carried out
 
-Effects: 8340 of 25517 triggered/activated abilities mapped (32.7%) on 7383 cards. Written: forge_effects_data.lua (614 KB)
+Effects: 10275 of 26097 triggered/activated abilities and modes mapped (39.4%) on 8862 cards. Written: forge_effects_data.lua (766 KB)
 
 Mapped steps by ApiType:
-    1517  Pump
-    1444  Draw
-    1404  Token
-    1204  PutCounter
-     708  GainLife
-     484  DealDamage
-     390  LoseLife
-     281  ChangeZone
-     269  Discard
-     222  Scry
-     212  Destroy
-     196  PumpAll
-     173  Mill
-     166  Untap
-     159  Tap
-     147  Surveil
-      53  Proliferate
-      51  PutCounterAll
-      18  Counter
-      17  UntapAll
+    1798  Token
+    1754  Pump
+    1546  Draw
+    1319  PutCounter
+     818  GainLife
+     721  DealDamage
+     482  ChangeZone
+     474  LoseLife
+     318  Discard
+     268  Destroy
+     236  Scry
+     213  PumpAll
+     194  Untap
+     191  Mill
+     188  Sacrifice
+     172  Tap
+     152  Surveil
+      87  DamageAll
+      65  Dig
+      59  PutCounterAll
+      56  Proliferate
+      50  PayOrSac
+      19  Counter
+      18  UntapAll
        5  TapAll
-       2  DamageAll
 
 Abilities not mapped, by the ApiType of their first step (count, then the most common reasons):
-    2701  ChangeZone           condition RememberChanged 384, zones Graveyard->Battlefield 375, zones Graveyard->Hand 185, zones Graveyard->Exile 164
-    1304  Pump                 pump amount +X 195, pump nothing 189, pump keyword 158, target prop Other 74
-    1006  PutCounter           amount X 148, counter on You 115, several targets 62, api 57
-     934  Token                token owner/tapped/attacking 208, amount X 193, token abilities 187, key RememberTokens 55
-     864  DealDamage           amount X 293, damage to Creature 88, several targets 37, damage to TriggeredPlayer 35
-     618  Effect               api 596, condition UnlessCost 12, several targets 4, condition ConditionDefined 4
-     591  Dig                  condition RememberChanged 235, condition Optional 180, api 176
-     539  Draw                 amount X 130, defined TriggeredCardController 43, api 34, condition ConditionCheckSVar 29
-     515  Sacrifice            Sacrifice by you 202, condition UnlessCost 137, key Defined 30, condition Optional 28
-     445  Animate              api 422, condition ConditionPresent 11, several targets 7, condition Optional 2
-     374  Destroy              Destroy TriggeredTargetLKICopy 26, target prop nonBlack 22, target prop nonBasic 22, target prop ControlledBy 20
-     316  PumpAll              pump amount +X 36, PumpAll Creature.StrictlyOther+YouCtrl 16, PumpAll Creature.attacking 15, PumpAll Creature 12
-     296  Tap                  Tap Enchanted 60, several targets 31, counter Stun 31, pump keyword 22
-     275  LoseLife             amount X 73, defined TriggeredCardController 28, defined TriggeredPlayer 22, defined TriggeredDefendingPlayer 15
-     256  Discard              defined TriggeredTarget 42, Discard mode Hand 40, condition Optional 24, Discard for tgto 21
-     251  SetState             api 233, condition RememberChanged 12, several targets 2, condition Optional 2
-     241  Charm                api 239, condition ConditionCheckSVar 1, condition Optional 1
-     231  GainLife             amount X 128, defined TriggeredCardController 21, condition ConditionCheckSVar 6, amount Y 6
+    2560  ChangeZone           condition RememberChanged 391, zones Graveyard->Exile 167, zones Battlefield->Hand 142, zones Graveyard->Battlefield 132
+    1111  Pump                 pump nothing 191, pump keyword 163, target prop attacking 64, key Duration 56
+     948  PutCounter           counter on You 120, several targets 64, counter  44, api 43
+     651  DealDamage           defined TriggeredCardControl 37, amount Count$xPaid 35, damage target prop attacking 34, damage to You 33
+     641  Token                key RememberTokens 62, token owner TriggeredCardCon 38, legendary token 37, key TokenPower 29
+     623  Effect               api 601, condition UnlessCost 12, several targets 4, condition ConditionDefined 4
+     538  Dig                  condition RememberChanged 254, dig how 126, amount X 41, dig to Library 6
+     498  Draw                 defined TriggeredCardControl 45, api 33, condition ConditionCheckSVar 29, condition Optional 18
+     451  Animate              api 428, condition ConditionPresent 11, several targets 7, condition Optional 2
+     353  Destroy              defined TriggeredTargetLKICo 27, target prop nonBlack 22, target prop nonBasic 22, target prop ControlledBy 21
+     321  PumpAll              PumpAll Creature.StrictlyOther+YouCtrl 17, PumpAll Creature.attacking 16, PumpAll Creature 14, PumpAll Creature.OppCtrl 13
+     295  Tap                  defined Targeted 65, Tap Enchanted 60, several targets 31, api 18
+     294  Sacrifice            condition Optional 28, key RememberSacrificed 25, Sacrifice by that 13, Sacrifice by tgto 10
+     254  SetState             api 236, condition RememberChanged 12, several targets 2, condition Optional 2
+     241  Charm                modal (modes mapped one by one) 241
+     236  Discard              Discard mode Hand 48, Discard for tgto 26, condition Optional 24, key RememberDiscarded 22
+     231  LoseLife             defined TriggeredCardControl 30, defined TriggeredDefendingPl 15, defined TriggeredActivator 15, amount Number$0 10
      229  Regenerate           api 229
-     223  Mill                 key RememberMilled 55, condition Optional 33, amount X 30, Mill for each 24
-     215  ChangeZoneAll        api 171, condition RememberChanged 42, several targets 1, condition ConditionCheckSVar 1
-     183  CopyPermanent        api 180, condition ConditionDefined 1, condition ConditionPresent 1, several targets 1
-     162  DelayedTrigger       api 162
-     156  PutCounterAll        counters on Creature.YouCtrl+StrictlyOther 13, amount X 9, counters on Creature.StrictlyOther+YouCtrl 7, counters on Creature.Dragon+YouCtrl+StrictlyOther 5
-     155  GainControl          api 146, several targets 4, condition ConditionCheckSVar 3, condition UnlessCost 1
-     153  DamageAll            amount X 32, DamageAll None 23, DamageAll Creature 19, DamageAll Creature.withoutFlying 16
+     219  ChangeZoneAll        api 172, condition RememberChanged 41, defined TriggeredCardOwner 3, defined TriggeredDefendingPl 1
+     208  Mill                 key RememberMilled 57, condition Optional 33, Mill for each 24, api 9
+     193  GainLife             amount TriggerCount$DamageAmount 26, defined TriggeredCardControl 21, amount Sacrificed$CardToughness 9, count prop YouCtrl 8
+     185  CopyPermanent        api 172, defined Targeted 4, defined Imprinted.ExiledWith 3, defined TriggeredSpellAbilit 2
+     163  DelayedTrigger       api 163
+     159  PutCounterAll        counters on Creature.YouCtrl+StrictlyOther 13, counters on Creature.StrictlyOther+YouCtrl 7, counters on Creature.Dragon+YouCtrl+StrictlyOther 5, counters on Creature.YouCtrl+counters_GE1_P1P1 5
+     155  GainControl          api 143, several targets 4, condition ConditionCheckSVar 3, defined TriggeredTargetLKICo 2
+     148  CopySpellAbility     defined TriggeredSpellAbilit 100, api 44, defined TriggeredSourceSA 3, condition UnlessCost 1
      148  ImmediateTrigger     api 137, condition ConditionCheckSVar 8, condition UnlessCost 2, condition ConditionDefined 1
-     146  CopySpellAbility     api 138, condition Optional 3, condition ConditionPresent 2, condition UnlessCost 1
-     140  Untap                target prop Other 22, several targets 22, api 17, Untap Enchanted 14
-     129  ChooseCard           api 128, condition Optional 1
-     119  Attach               api 112, several targets 4, condition Optional 3
-     118  Mana                 api 116, condition UnlessCost 1, condition ConditionDefined 1
-     114  PeekAndReveal        api 112, several targets 1, condition ConditionCheckSVar 1
+     131  ChooseCard           api 124, defined TriggeredDefendingPl 3, defined TriggeredAttackingPl 1, defined TriggeredCardControl 1
+     122  Untap                several targets 23, api 15, Untap Enchanted 14, defined Targeted 12
+     120  Mana                 api 99, defined TriggeredCardControl 19, defined TriggeredActivator 1, condition UnlessCost 1
+     119  Attach               api 111, several targets 4, defined Targeted 2, condition Optional 1
+     115  MakeCard             api 114, defined TriggeredCardControl 1
+     114  RemoveCounter        api 112, defined Targeted 1, defined Imprinted 1
+     114  PeekAndReveal        api 111, defined TargetedAndYou 1, several targets 1, condition ConditionCheckSVar 1
      112  RepeatEach           api 112
-     109  Counter              condition UnlessCost 46, key Defined 18, counter Card,Emblem 7, key TargetValidTargeting 6
-     108  MakeCard             api 108
-     107  RemoveCounter        api 107
-      96  DigUntil             api 95, condition Optional 1
-      94  Play                 condition Optional 84, api 7, condition Defined 2, condition ConditionCheckSVar 1
-      89  Investigate          api 86, condition Optional 3
-      87  DestroyAll           api 85, condition ConditionDefined 2
+     110  Counter              condition UnlessCost 31, defined TriggeredSpellAbilit 23, defined TriggeredSourceSA 10, counter Card,Emblem 8
+      96  DigUntil             api 94, condition Optional 1, defined TriggeredDefendingPl 1
+      95  Play                 condition Optional 84, api 7, condition ConditionCheckSVar 1, defined Remembered 1
+      90  Investigate          api 87, condition Optional 3
+      90  DestroyAll           api 88, condition ConditionDefined 2
       83  PreventDamage        api 81, several targets 2
       76  RollDice             api 76
-      69  GenericChoice        api 69
-      68  Seek                 api 67, condition Defined 1
-      67  AlterAttribute       api 64, condition ConditionDefined 2, condition Optional 1
-      58  AnimateAll           api 58
+      76  DamageAll            amount TriggerCount$DamageAmount 9, amount Count$xPaid 8, DamageAll Creature,Planeswalker 5, key Activator 3
+      69  Seek                 api 67, defined ImprintedController 1, defined RememberedOwner 1
+      69  GenericChoice        api 68, defined TargetedController 1
+      69  AlterAttribute       api 64, defined Targeted 2, defined TriggeredTargetLKICo 1, condition ConditionDefined 1
+      63  AnimateAll           api 63
       55  BecomeMonarch        api 55
-      52  Clone                api 43, condition Optional 8, condition Defined 1
+      53  Clone                api 42, condition Optional 8, defined Remembered 1, defined Targeted 1
       52  FlipCoin             api 52
       48  ChooseType           api 48
       46  ChooseSource         api 45, condition UnlessCost 1
       45  Branch               api 45
       43  UntapAll             api 6, UntapAll Creature.attacking 6, UntapAll Creature 3, UntapAll Permanent.enchanted+YouCtrl 2
-      41  Connive              api 41
-      40  ManaReflected        api 40
+      41  Connive              api 40, defined TriggeredSourceLKICo 1
+      40  ManaReflected        api 29, defined TriggeredActivator 10, defined TriggeredCardControl 1
+      39  Fight                api 38, defined TriggeredTargetLKICo 1
       38  Amass                api 38
       38  ChooseColor          api 38
-      36  TapOrUntap           api 36
+      38  TapOrUntap           api 38
+      36  ChoosePlayer         api 35, defined TriggeredCardOwner 1
       35  Debuff               api 35
-      35  ChoosePlayer         api 35
       35  Reveal               api 34, condition Optional 1
       34  Protection           api 34
-      34  Fight                api 34
       34  Explore              api 34
       33  Venture              api 33
       33  Draft                api 33
-      31  RevealHand           api 30, condition UnlessCost 1
-      31  TapAll               TapAll Land 3, TapAll Creature.StrictlyOther 3, api 2, TapAll Creature 2
+      33  RevealHand           api 27, defined Targeted 4, condition UnlessCost 1, defined TriggeredDefendingPl 1
+      31  Goad                 api 25, several targets 6
+      31  TapAll               TapAll Creature.StrictlyOther 3, TapAll Land 2, api 2, TapAll Creature 2
       31  NameCard             api 30, condition ConditionCheckSVar 1
-      30  Goad                 api 24, several targets 6
-      29  MultiplyCounter      api 27, several targets 2
-      29  Scry                 amount X 5, condition RememberChanged 5, api 5, condition Optional 3
-      29  SacrificeAll         api 27, condition UnlessCost 2
+      30  MultiplyCounter      api 27, several targets 2, defined TriggeredSourceLKICo 1
+      29  Scry                 condition RememberChanged 5, dig how 3, condition ConditionCheckSVar 3, condition Optional 2
+      29  SacrificeAll         api 20, defined TriggeredObjectLKICo 3, defined Targeted 3, defined Imprinted 1
       26  ManifestDread        api 25, condition ConditionCheckSVar 1
       26  Discover             api 26
       25  MoveCounter          api 19, several targets 6
-      23  Earthbend            api 23
+      24  Earthbend            api 24
+      24  Phases               api 19, condition UnlessCost 2, condition ConditionPresent 1, defined TriggeredTargetLKICo 1
       23  WinsGame             api 21, condition ConditionCheckSVar 2
-      23  Phases               api 19, condition UnlessCost 2, condition ConditionPresent 1, several targets 1
+      23  SetLife              api 21, defined TriggeredDefender 1, defined TriggeredSourceContr 1
       22  RingTemptsYou        api 22
       22  RearrangeTopOfLibrary api 22
       22  Surveil              api 3, condition ConditionCheckSVar 3, condition Optional 3, key RememberMoved 2
-      22  SetLife              api 22
+      21  Incubate             api 21
       21  TakeInitiative       api 21
       21  Empower              api 21
-      20  Incubate             api 20
-      20  Poison               api 19, condition ConditionCheckSVar 1
+      20  Poison               api 12, defined TriggeredDefendingPl 3, defined TriggeredCardControl 2, condition ConditionCheckSVar 1
+      20  Manifest             api 19, several targets 1
+      19  PutSticker           condition Optional 12, api 7
       19  MustBlock            api 19
-      19  Manifest             api 18, several targets 1
+      19  OpenAttraction       api 19
       19  AddTurn              api 19
-      18  PutSticker           condition Optional 11, api 7
-      18  OpenAttraction       api 18
+      17  LosesGame            api 16, condition ConditionCheckSVar 1
       17  Repeat               api 17
-      15  Abandon              api 12, condition Optional 2, condition UnlessCost 1
-      15  ChangeTargets        api 12, condition ConditionTargetValidTargeting 2, condition Optional 1
+      15  Abandon              api 12, condition Optional 2, condition UnlessPayer 1
+      15  ChangeTargets        api 9, defined TriggeredSpellAbilit 3, condition ConditionTargetValidTargeting 2, condition Optional 1
       15  Vote                 api 15
-      14  LosesGame            api 13, condition ConditionCheckSVar 1
-      13  Radiation            api 13
+      13  Radiation            api 12, defined TriggeredDefendingPl 1
       12  Endure               api 12
       12  ChooseNumber         api 12
       12  ExchangeControl      api 7, several targets 4, condition Optional 1
       11  RemoveCounterAll     api 11
-      11  Clash                api 11
+      11  Clash                api 10, defined TriggeredDefendingPl 1
       11  Shuffle              api 11
+      11  AddOrRemoveCounter   api 9, condition ConditionDefined 1, condition Optional 1
+      11  Detain               api 9, several targets 2
       11  AssembleContraption  api 11
       10  AddPhase             api 7, condition ConditionPhases 2, condition ConditionPlayerTurn 1
-      10  AddOrRemoveCounter   api 8, condition ConditionDefined 1, condition Optional 1
-      10  Detain               api 8, several targets 2
+      10  Airbend              api 9, several targets 1
       10  Cleanup              no steps 8, api 1, condition RememberChanged 1
       10  Fog                  api 10
        9  Recruit              api 9
-       8  SkipPhase            api 7, condition ConditionManaSpent 1
-       8  Airbend              api 7, several targets 1
+       8  SkipPhase            api 5, defined TriggeredCardControl 2, condition ConditionManaSpent 1
        8  Learn                api 8
        7  Intensify            api 6, condition ConditionCheckSVar 1
        7  ExchangeLife         api 5, several targets 2
        7  Proliferate          key Amount 7
        6  GainControlVariant   api 6
        6  Meld                 api 4, condition ConditionPresent 2
-       5  RemoveFromCombat     api 5
-       5  VillainousChoice     api 5
+       5  RemoveFromCombat     api 4, defined Targeted 1
+       5  VillainousChoice     api 4, defined TriggeredDefendingPl 1
        5  Heist                api 5
        4  StoreSVar            condition ConditionCheckSVar 2, api 2
        4  ChooseDirection      api 4
        4  TimeTravel           api 4
        4  DigMultiple          condition Optional 4
+       4  Cloak                api 4
        4  Blight               api 3, condition UnlessCost 1
-       4  EachDamage           api 4
+       4  EachDamage           api 3, defined Targeted 1
        3  ChangeCombatants     api 2, condition Optional 1
        3  UnlockDoor           api 3
        3  ControlPlayer        api 3
@@ -175,11 +192,11 @@ Abilities not mapped, by the ApiType of their first step (count, then the most c
        3  ExchangeLifeVariant  api 3
        3  ChaosEnsues          api 3
        3  ProtectionAll        api 3
-       3  Cloak                api 3
        2  SkipTurn             api 2
+       2  ExchangePower        several targets 1, api 1
        2  TwoPiles             api 2
        2  SwitchBlock          several targets 2
-       2  ChangeX              api 2
+       2  ChangeX              defined TriggeredSpellAbilit 2
        2  LookAt               api 2
        2  ChooseSector         api 2
        1  ChangeText           api 1
@@ -188,12 +205,11 @@ Abilities not mapped, by the ApiType of their first step (count, then the most c
        1  RestartGame          api 1
        1  TaporUntapAll        api 1
        1  RollPlanarDice       api 1
-       1  ControlSpell         api 1
+       1  ControlSpell         defined TriggeredSpellAbilit 1
        1  ActivateAbility      api 1
        1  Block                api 1
        1  Unattach             api 1
        1  FlipOntoBattlefield  api 1
        1  AdvanceCrank         api 1
        1  ExchangeTextBox      several targets 1
-       1  ExchangePower        api 1
        1  Planeswalk           api 1

@@ -4,11 +4,12 @@ Not mapped on purpose: Phase/SpellCast with TriggerZones Command (planes and sch
 SpellCast TargetsValid (heroic: a spell's targets aren't known when it's cast), TapsForMana (mana.lua).
 
 Table coverage (tools/forge_coverage.py, every Forge card through the table's own Lua):
-                  v1.79 rules text   v1.79 + Phase 1 data   v1.80 (Phase 2 + 3)
-  triggers watched     78.6%               80.7%                 86.4%  (12855 of 14873 paragraphs)
-  Jared deck           17/18               17/18                 17/18
-  Yuriko deck          19/22               19/22                 20/22
-  Beamtown deck        16/22               16/22                 19/22
+                  v1.79 rules text   v1.79 + Phase 1 data   v1.80 (Phase 2 + 3)   v1.81 (Phase 3b)
+  triggers watched     78.6%               80.7%                 86.4%               86.4%  (12855 of 14873 paragraphs)
+  Jared deck           17/18               17/18                 17/18               17/18
+  Yuriko deck          19/22               19/22                 20/22               20/22
+  Beamtown deck        16/22               16/22                 19/22               19/22
+(Phase 3b changed effects only: the trigger data is the same as v1.80.)
 
 Forge 64569999 2026-10-16: 11946 cards with mapped triggers, 13526 of 17086 triggers mapped (79.2%).
 Written: /home/user/mtg-tts-table/src/forge_triggers_data.lua (759 KB)

@@ -1917,10 +1917,181 @@ local FX_PLAYER = { you = "You", opp = "Each opponent", each = "Each player", tg
   tgto = "Target opponent", that = "That player" }
 local FX_SIMPLE = { Scry = "Scry", Surveil = "Surveil" }
 
+-- Forge counts ("$v.creature.you" = creatures you control...): worked out when the
+-- ability resolves. Without a stack item (reading a card ahead of time) they count as 1.
+local FX_BASICS = { "plains", "island", "swamp", "mountain", "forest" }
+
+local function fxTypeLine(notes)
+  local tl = tostring(notes or ""):match('"typeLine":"([^"]*)"') or ""
+  return " " .. (tl:lower():gsub("[^%a]", " ")) .. " "
+end
+
+local function fxFieldCount(seat, words, ctrl, skipGuid)
+  local n = 0
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) and obj.held_by_color == nil then
+      local owner = Effects.fieldSeat(obj)
+      if owner and (ctrl == "all" or (ctrl == "you" and owner == seat) or (ctrl == "opp" and owner ~= seat))
+          and obj.getGUID() ~= skipGuid then
+        local ty = Effects.cardTypes(obj)
+        local tl
+        local hit = false
+        for _, w in ipairs(words) do
+          if w == "permanent" or ty[w] then
+            hit = true
+          else
+            tl = tl or fxTypeLine(obj.getGMNotes())
+            if tl:find(" " .. w .. " ", 1, true) then
+              hit = true
+            end
+          end
+        end
+        if hit then
+          n = n + (Pile and Pile.count(obj) or 1)
+        end
+      end
+    end
+  end
+  return n
+end
+
+local function fxYardCount(seat, words)
+  local pile = Library and Library.pileIn and Library.pileIn(seat, "graveyard")
+  if pile == nil then
+    return 0
+  end
+  local notes = {}
+  if pile.type == "Deck" then
+    for _, e in ipairs(pile.getObjects()) do
+      table.insert(notes, e.gm_notes or "")
+    end
+  else
+    table.insert(notes, pile.getGMNotes())
+  end
+  local n = 0
+  for _, g in ipairs(notes) do
+    local tl = fxTypeLine(g)
+    for _, w in ipairs(words) do
+      if w == "permanent" or tl:find(" " .. w .. " ", 1, true) then
+        n = n + 1
+        break
+      end
+    end
+  end
+  return n
+end
+
+local FX_COUNT_SAYS = { hand = "cards in hand", life = "life", domain = "basic land types among your lands",
+  yard = "cards in your graveyard" }
+
+-- "$v.creature/artifact.you.o*2" -> number, what it counted.
+function Effects.forgeCount(expr, it)
+  local body, tail = tostring(expr):match("^%$([%a%./]+)(.*)$")
+  if body == nil then
+    return nil
+  end
+  local parts = {}
+  for w in (body .. "."):gmatch("([^%.]*)%.") do
+    table.insert(parts, w)
+  end
+  local kind = parts[1]
+  local n, says
+  if it == nil then
+    n, says = 1, "counted when it resolves"
+  else
+    local seat = it.controller
+    local src = it.source and getObjectFromGUID(it.source)
+    local words = {}
+    for w in tostring(parts[2] or ""):gmatch("[^/]+") do
+      table.insert(words, w)
+    end
+    if kind == "v" then
+      local ctrl = parts[3] or "all"
+      n = fxFieldCount(seat, words, ctrl, parts[4] == "o" and it.source or nil)
+      says = table.concat(words, "/") .. (ctrl == "you" and " you control" or (ctrl == "opp" and " your opponents control"
+        or " on the battlefield"))
+    elseif kind == "yard" then
+      n = fxYardCount(seat, words)
+      says = table.concat(words, "/") .. " cards in your graveyard"
+    elseif kind == "hand" then
+      n = 0
+      pcall(function()
+        for _, o in ipairs(Player[seat].getHandObjects()) do
+          if o.type == "Card" then
+            n = n + 1
+          end
+        end
+      end)
+      says = FX_COUNT_SAYS.hand
+    elseif kind == "life" then
+      local p = GameState.player(seat)
+      n, says = p and tonumber(p.life) or nil, "your life"
+    elseif kind == "domain" then
+      n = 0
+      for _, b in ipairs(FX_BASICS) do
+        if fxFieldCount(seat, { b }, "you", nil) > 0 then
+          n = n + 1
+        end
+      end
+      says = FX_COUNT_SAYS.domain
+    elseif kind == "pow" or kind == "tou" then
+      local obj = parts[2] == "that" and it.thatCard and getObjectFromGUID(it.thatCard) or (parts[2] == "self" and src)
+      if obj and not obj.isDestroyed() then
+        local st = Counters.stats(obj)
+        n = tonumber(kind == "pow" and st.power or st.toughness)
+        says = (kind == "pow" and "power of " or "toughness of ") .. obj.getName()
+      end
+    elseif kind == "ctr" then
+      if src and not src.isDestroyed() then
+        n = Counters.get(src)[parts[2]]
+        says = tostring(parts[2]) .. " counters on " .. src.getName()
+      end
+    end
+  end
+  if n == nil then
+    return nil
+  end
+  for op, v in tostring(tail):gmatch("([%*%+%-])(%w*)") do
+    local k = tonumber(v)
+    if op == "*" and v == "h" then
+      n = math.floor(n / 2)
+    elseif op == "*" and v == "H" then
+      n = math.ceil(n / 2)
+    elseif op == "*" and k then
+      n = n * k
+    elseif op == "+" and k then
+      n = n + k
+    elseif op == "-" and k then
+      n = n - k
+    end
+  end
+  return math.max(0, n), says
+end
+
+-- A step's amount: a number, or a count. notes collects "X = 3 (creatures you control)".
+local function fxNum(v, it, notes)
+  local n = tonumber(v)
+  if n then
+    return n
+  end
+  local c, says = Effects.forgeCount(v, it)
+  if c and notes and it then
+    table.insert(notes, c .. " (" .. tostring(says) .. ")")
+  end
+  return c
+end
+
+local function fxTarget(p)
+  return (p.o and "another target " or "target ") .. tostring(p.t)
+end
+
 -- One step -> a sentence (nil: not one the table can say).
-local function fxSentence(st, name)
+local function fxSentence(st, name, it, notes)
   local p, api = st.p, st.api
-  local n = tonumber(p.n) or 1
+  local n = fxNum(p.n or "1", it, notes)
+  if n == nil then
+    return nil
+  end
   local w = p.w
   if api == "Draw" then
     if w == "you" then
@@ -1949,7 +2120,7 @@ local function fxSentence(st, name)
     return FX_PLAYER[w] and (FX_PLAYER[w] .. " discards " .. fxCount(n, "card") .. ".")
   elseif api == "DealDamage" then
     local to = { any = "any target", tgtp = "target player", tgto = "target opponent", opp = "each opponent",
-      each = "each player" }
+      each = "each player", that = "that player" }
     return to[w] and (name .. " deals " .. n .. " damage to " .. to[w] .. ".")
   elseif api == "DamageAll" then
     return name .. " deals " .. n .. " damage to each creature."
@@ -1961,32 +2132,45 @@ local function fxSentence(st, name)
       what = (FX_NUM[n] or tostring(n)) .. " " .. tostring(p.c) .. " counters"
     end
     local on = p.on == "self" and name or (p.on == "yours" and "each creature you control"
-      or (p.on == "tgt" and p.t and ("target " .. p.t)))
+      or (p.on == "that" and "it") or (p.on == "tgt" and p.t and fxTarget(p)))
     return on and ("Put " .. what .. " on " .. on .. ".")
   elseif api == "Token" then
+    local tapped = p.tap and not p.att and " tapped" or ""
+    local tail = (p.tap and p.att) and " that are tapped and attacking" or ""
+    if n == 1 and tail ~= "" then
+      tail = " that's tapped and attacking"
+    end
     if p.name then
-      return "Create " .. fxCount(n, p.name .. " token") .. "."
+      return "Create " .. fxCount(n, p.name .. " token") .. tapped .. tail .. "."
     end
     local col = (p.col == nil or p.col == "") and "colorless" or p.col
     local desc = tostring(p.pt) .. " " .. col .. " " .. tostring(p.sub or "") .. " " .. tostring(p.ty or "creature")
     desc = (desc:gsub("%s+", " "))
     local kw = (p.kw and p.kw ~= "") and (" with " .. p.kw) or ""
     if n == 1 then
-      return "Create " .. fxArticle(desc .. " token") .. kw .. "."
+      return "Create " .. fxArticle(desc .. " token") .. kw .. tapped .. tail .. "."
     end
-    return "Create " .. (FX_NUM[n] or tostring(n)) .. " " .. desc .. " tokens" .. kw .. "."
+    return "Create " .. (FX_NUM[n] or tostring(n)) .. " " .. desc .. " tokens" .. kw .. tapped .. tail .. "."
   elseif api == "Destroy" then
-    return p.t and ("Destroy target " .. p.t .. ".")
+    return p.t and ("Destroy " .. fxTarget(p) .. ".")
   elseif api == "ChangeZone" then
+    local bf = p.to == "bft" and "the battlefield tapped" or "the battlefield"
     if p.z == "bounce" then
-      return "Return target " .. tostring(p.t) .. " to its owner's hand."
+      return "Return " .. fxTarget(p) .. " to its owner's hand."
     elseif p.z == "bounceSelf" then
       return "Return " .. name .. " to its owner's hand."
     elseif p.z == "exile" then
-      return "Exile target " .. tostring(p.t) .. "."
+      return "Exile " .. fxTarget(p) .. "."
     elseif p.z == "graveHand" then
       local t = p.t == "card" and "card" or (tostring(p.t) .. " card")
       return "Return target " .. t .. " from your graveyard to your hand."
+    elseif p.z == "reanimate" then
+      local t = p.t == "card" and "card" or (tostring(p.t) .. " card")
+      return "Return target " .. t .. " from your graveyard to " .. bf .. "."
+    elseif p.z == "reanimateAny" then
+      return "Put target creature card from a graveyard onto the battlefield under your control."
+    elseif p.z == "yardSelf" then
+      return "Return " .. name .. " from your graveyard to " .. (p.to == "hand" and "your hand" or bf) .. "."
     elseif p.z == "search" then
       local card = fxArticle(tostring(p.t) .. " card")
       if p.to == "hand" then
@@ -2001,16 +2185,31 @@ local function fxSentence(st, name)
     if p.on == "self" then
       who = name
     elseif p.on == "tgt" and p.t then
-      who = "Target " .. p.t
+      local t = fxTarget(p)
+      who = t:sub(1, 1):upper() .. t:sub(2)
     elseif p.on == "yours" then
       who, plural = "Creatures you control", true
+    elseif p.on == "that" then
+      who = "That creature"
     end
     if who == nil then
       return nil
     end
+    local function signed(v)
+      local sign, rest = tostring(v):match("^([+-])(.*)$")
+      if sign == nil then
+        return nil
+      end
+      local k = fxNum(rest, it, notes)
+      return k and (sign .. k)
+    end
+    local a, b = signed(p.a), signed(p.b)
+    if a == nil or b == nil then
+      return nil
+    end
     local parts = {}
-    if p.a ~= "+0" or p.b ~= "+0" then
-      table.insert(parts, (plural and "get " or "gets ") .. tostring(p.a) .. "/" .. tostring(p.b))
+    if a ~= "+0" or b ~= "+0" then
+      table.insert(parts, (plural and "get " or "gets ") .. a .. "/" .. b)
     end
     if p.kw and p.kw ~= "" then
       table.insert(parts, (plural and "gain " or "gains ") .. p.kw)
@@ -2020,16 +2219,64 @@ local function fxSentence(st, name)
     end
     return who .. " " .. table.concat(parts, " and ") .. " until end of turn."
   elseif api == "Tap" or api == "Untap" then
-    local on = p.on == "self" and name or (p.t and ("target " .. p.t))
+    local on = p.on == "self" and name or (p.on == "that" and "that creature") or (p.t and fxTarget(p))
     return on and (api .. " " .. on .. ".")
   elseif api == "TapAll" or api == "UntapAll" then
     return p.t and ((api == "TapAll" and "Tap" or "Untap") .. " all " .. p.t .. ".")
   elseif api == "Sacrifice" then
-    return FX_PLAYER[w] and p.t and (FX_PLAYER[w] .. " sacrifices " .. fxArticle(p.t) .. ".")
+    if p.self then
+      return "Sacrifice " .. name .. "."
+    end
+    if w == "you" then
+      return nil
+    end
+    local what = n == 1 and fxArticle(tostring(p.t)) or ((FX_NUM[n] or tostring(n)) .. " " .. tostring(p.t) .. "s")
+    return FX_PLAYER[w] and p.t and (FX_PLAYER[w] .. " sacrifices " .. what .. ".")
   elseif api == "Counter" then
     return "Counter target " .. ((p.f and p.f ~= "") and (p.f .. " ") or "") .. "spell."
   elseif api == "Proliferate" then
     return "Proliferate."
+  elseif api == "Dig" then
+    local look = "Look at the top " .. (FX_NUM[n] and n > 1 and FX_NUM[n] or tostring(n)) .. " cards of your library. "
+    local rest = " Put the rest on the bottom of your library in any order."
+    if p.q == nil or p.q == "" then
+      return look .. "Put one of them into your hand and the rest on the bottom of your library in any order."
+    end
+    local into = p.to == "hand" and "put it into your hand."
+      or ("put it onto the battlefield" .. (p.to == "bft" and " tapped." or "."))
+    return look .. "You may reveal " .. fxArticle(p.q .. " card") .. " from among them and " .. into .. rest
+  end
+  return nil
+end
+
+-- Steps the rules-text reader has no words for: the table's own actions.
+local function fxAction(st, it, notes)
+  local p, api = st.p, st.api
+  if api == "DealDamage" and p.w == "c" then
+    local n = fxNum(p.n or "1", it, notes)
+    local kinds = {}
+    for k in tostring(p.k or "creature"):gmatch("[^/]+") do
+      kinds[k] = true
+    end
+    return n and { what = "forgeDamage", who = "you", n = n, kinds = kinds, scope = p.c or "all",
+      count = tonumber(p.m) or 1 }
+  elseif api == "DamageAll" and (p.c ~= "all" or p.pl) then
+    local n = fxNum(p.n or "1", it, notes)
+    return n and { what = "forgeDamageAll", who = "you", n = n, cards = p.c, players = p.pl }
+  elseif api == "ChangeZone" and p.z == "exileSelf" then
+    return { what = "forgeExileSelf", who = "you", n = 1 }
+  elseif api == "ChangeZone" and (p.z == "bounceThat" or p.z == "exileThat") then
+    return { what = "forgeThat", who = "you", n = 1, verb = p.z == "bounceThat" and "bounce" or "exile" }
+  elseif api == "Destroy" and p.that then
+    return { what = "forgeThat", who = "you", n = 1, verb = "destroy" }
+  elseif api == "DealDamage" and p.w == "thatc" then
+    local n = fxNum(p.n or "1", it, notes)
+    return n and { what = "forgeThat", who = "you", n = n, verb = "damage" }
+  elseif api == "PayOrSac" then
+    return { what = "forgePayOrSac", who = "you", n = 1, cost = p.cost }
+  elseif api == "Sacrifice" and p.w == "you" and not p.self then
+    local n = fxNum(p.n or "1", it, notes)
+    return n and { what = "edict", who = "you", n = n, scope = "you", ty = p.t }
   end
   return nil
 end
@@ -2052,14 +2299,6 @@ function Effects.forgeFx(text, name)
   if raw == "" or raw:find("\n", 1, true) then
     return nil
   end
-  -- A condition or a count in the words ("if", "for each", "equal to"...) may live on
-  -- Forge's trigger line rather than in its effect: leave those to the text.
-  local low = " " .. raw:lower() .. " "
-  for _, m in ipairs(MANUAL) do
-    if low:find(m, 1, true) then
-      return nil
-    end
-  end
   local key = Triggers.forgeKey(raw, name)
   local hit
   for _, e in ipairs(entries) do
@@ -2073,11 +2312,90 @@ function Effects.forgeFx(text, name)
   if hit == nil or hit.steps == false then
     return nil
   end
+  -- A condition in the words ("if", "unless", "instead") may live on Forge's trigger
+  -- line rather than in its effect: leave those to the text. Counts ("for each",
+  -- "equal to") are fine when the entry counts them itself.
+  local counted = false
+  for _, st in ipairs(hit.steps) do
+    for _, v in pairs(st.p) do
+      if tostring(v):find("$", 1, true) then
+        counted = true
+      end
+    end
+  end
+  local low = " " .. raw:lower() .. " "
+  for _, m in ipairs(MANUAL) do
+    local isCount = m ~= " if " and m ~= " unless " and m ~= " instead"
+    if low:find(m, 1, true) and not (counted and isCount) then
+      return nil
+    end
+  end
   return hit
 end
 
--- The Forge entry as rules text the table reads ("You may draw a card. Scry 1."), or nil,
--- plus how many steps it has.
+-- The Forge entry as a plan of actions, or nil, plus what its counts came to.
+local function forgePlan(text, name, it)
+  local e = Effects.forgeFx(text, name)
+  if e == nil then
+    return nil
+  end
+  local nm = tostring(name or "it")
+  local actions, notes = {}, {}
+  for _, st in ipairs(e.steps) do
+    local got = {}
+    local direct = fxAction(st, it, notes)
+    if direct then
+      got = { direct }
+    else
+      local s = fxSentence(st, nm, it, notes)
+      if s == nil then
+        return nil
+      end
+      local ok, sp = pcall(Effects.parse, s, nm)
+      if not ok or sp == nil then
+        return nil
+      end
+      got = sp.actions or {}
+      -- What the sentence can't say: how many cards are kept and where the rest go.
+      if st.api == "Dig" then
+        for _, a in ipairs(got) do
+          if a.what == "look" then
+            a.picks = tonumber(st.p.k) or a.picks
+            a.restToYard = a.restToYard or st.p.yard ~= nil
+          end
+        end
+      end
+      -- What the sentence can't say: who gets the tokens, tapped / attacking.
+      if st.api == "Token" then
+        for _, a in ipairs(got) do
+          if a.what == "token" then
+            if st.p.w == "opp" then
+              a.who = "opponents"
+            elseif st.p.w == "each" then
+              a.who = "all"
+            end
+            a.tapped = a.tapped or st.p.tap ~= nil
+            a.attacking = a.attacking or st.p.att ~= nil
+          end
+        end
+      end
+    end
+    -- Each step should read to at least one action; none means it was lost on the way.
+    if #got == 0 then
+      return nil
+    end
+    for _, a in ipairs(got) do
+      table.insert(actions, a)
+    end
+  end
+  if #actions == 0 then
+    return nil
+  end
+  return { optional = e.optional, actions = actions, notes = {}, conds = {}, forge = true }, notes
+end
+
+-- The Forge entry as rules text ("You may draw a card. Scry 1."), or nil: for showing
+-- what the data says (the table itself runs forgePlan).
 function Effects.forgeSentence(text, name)
   local e = Effects.forgeFx(text, name)
   if e == nil then
@@ -2085,14 +2403,8 @@ function Effects.forgeSentence(text, name)
   end
   local out = {}
   for _, st in ipairs(e.steps) do
-    local s = fxSentence(st, tostring(name or "it"))
-    if s == nil then
-      return nil
-    end
+    local s = fxSentence(st, tostring(name or "it"), nil, nil) or ("[" .. st.api .. "]")
     table.insert(out, s)
-  end
-  if #out == 0 then
-    return nil
   end
   local s = table.concat(out, " ")
   if e.optional then
@@ -2101,24 +2413,37 @@ function Effects.forgeSentence(text, name)
   return s, #out
 end
 
+-- The actions Forge's steps turn into. A text reading with any other action is a
+-- card the table has its own handler for (The One Ring, Castle Locthwain...): it stays.
+local FX_GENERIC = {}
+for _, w in ipairs({ "draw", "gain", "lose", "mill", "discard", "mayDiscard", "scry", "counter", "counterOn",
+  "counterAll", "token", "pump", "tap", "tapX", "tapTarget", "untap", "untapSelf", "untapAll", "removeTarget", "bounce",
+  "bounceSelf", "graveReturn", "reanimate", "search", "look", "edict", "sacSelf", "counterSpell", "proliferate",
+  "damageAll", "forgeDamage", "forgeDamageAll", "forgeExileSelf", "forgePayOrSac", "forgeThat" }) do
+  FX_GENERIC[w] = true
+end
+
 -- Effects.parse, preferring Forge's data for the paragraph when the rules text
 -- reads to nothing or to fewer actions (on a tie the text's reading stands:
--- it already worked, and Forge's scripts have the odd slip too).
-function Effects.parseBest(text, name)
+-- it already worked, and Forge's scripts have the odd slip too). `it` (the stack
+-- item) lets Forge's counts be worked out; without it they count as 1.
+function Effects.parseBest(text, name, it)
   local plan, why = Effects.parse(text, name)
-  local s, steps = Effects.forgeSentence(text, name)
-  if s == nil then
-    return plan, why
-  end
-  local ok, fp = pcall(Effects.parse, s, name)
-  -- Each step should read to at least one action; fewer means one was lost on the way.
-  if not ok or fp == nil or #fp.actions < steps then
+  local ok, fp, notes = pcall(forgePlan, text, name, it)
+  if not ok or fp == nil then
     return plan, why
   end
   if plan ~= nil and (#plan.actions >= #fp.actions or #(plan.conds or {}) > 0) then
     return plan, why
   end
-  fp.forge = true
+  for _, a in ipairs(plan and plan.actions or {}) do
+    if not FX_GENERIC[a.what] then
+      return plan, why
+    end
+  end
+  if it and notes and #notes > 0 then
+    printToAll("MTG > " .. tostring(name) .. ": X = " .. table.concat(notes, ", ") .. ".", INFO)
+  end
   return fp
 end
 
@@ -2210,6 +2535,18 @@ local function describe(a, target, controller)
     return "a spell on the stack is countered"
   elseif a.what == "blink" then
     return "a creature is exiled and returns to the battlefield"
+  elseif a.what == "forgeDamage" then
+    return a.n .. " damage to a target " .. (a.kinds and a.kinds.planeswalker and not a.kinds.creature and "planeswalker"
+      or (a.kinds and a.kinds.planeswalker and "creature or planeswalker" or "creature"))
+  elseif a.what == "forgeDamageAll" then
+    return a.n .. " damage to " .. (a.cards and "each creature" or "") .. (a.cards and a.players and " and " or "")
+      .. (a.players == "opp" and "each opponent" or (a.players and "each player" or ""))
+  elseif a.what == "forgeExileSelf" then
+    return "it is exiled"
+  elseif a.what == "forgeThat" then
+    return a.verb == "damage" and (a.n .. " damage to that creature") or ("that creature: " .. tostring(a.verb))
+  elseif a.what == "forgePayOrSac" then
+    return "pay " .. tostring(a.cost) .. " or sacrifice it"
   elseif a.what == "copyCreature" then
     return "a token copy of a creature is made"
   elseif a.what == "counter" then
@@ -2501,7 +2838,12 @@ local function apply(it, plan, target)
       seats = { it.that or target }
     elseif a.who == "any" and target == "other" then
       seats = {}
-      printToAll("MTG > " .. it.name .. ": " .. a.n .. " damage to a creature or planeswalker: change its damage / loyalty by hand.", INFO)
+      if a.what == "lose" and Effects.pickDamage then
+        Effects.pickDamage(controller, { n = amountOf(a, controller, it.name, it), kinds = { creature = true, planeswalker = true, battle = true },
+          scope = "all", count = 1 }, it)
+      else
+        printToAll("MTG > " .. it.name .. ": " .. a.n .. " damage to a creature or planeswalker: change its damage / loyalty by hand.", INFO)
+      end
     else
       seats = { target }
     end
@@ -3188,6 +3530,22 @@ local function apply(it, plan, target)
           Effects.blink(seat, a, it)
         elseif a.what == "copyCreature" then
           Effects.copyCreature(seat, a, it)
+        elseif a.what == "forgeDamage" then
+          Effects.pickDamage(seat, a, it)
+        elseif a.what == "forgeDamageAll" then
+          Effects.forgeDamageAll(seat, a, it)
+        elseif a.what == "forgeExileSelf" then
+          local src = it.source and getObjectFromGUID(it.source)
+          if src and not src.isDestroyed() and Effects.fieldSeat(src) then
+            printToAll("MTG > " .. it.name .. " is exiled.", GOOD)
+            Combat.removeCard(src, "exile")
+          else
+            broadcastToColor(it.name .. ": exile it yourself.", seat, INFO)
+          end
+        elseif a.what == "forgePayOrSac" then
+          Effects.payOrSacrifice(seat, a, it)
+        elseif a.what == "forgeThat" then
+          Effects.forgeThat(seat, a, it)
         elseif a.what == "sacSelf" then
           local src = it.source and getObjectFromGUID(it.source)
           if src and not src.isDestroyed() then
@@ -4003,6 +4361,9 @@ function Effects.edict(seat, a, it)
     run()
   elseif a.scope == "each player" then
     victims = orderFrom(seat)
+    run()
+  elseif a.scope == "you" then
+    victims = { seat }
     run()
   elseif a.scope == "that player" or a.scope == "defending player" then
     victims = { it.that or seat }
@@ -6794,7 +7155,7 @@ function Effects.resolve(it)
       return
     end
   end
-  local plan, why = Effects.parseBest(it.text, it.name)
+  local plan, why = Effects.parseBest(it.text, it.name, it)
   if plan == nil then
     printToAll("MTG > " .. it.name .. ": resolve it by hand (" .. tostring(why) .. ").", INFO)
     return
@@ -8318,4 +8679,170 @@ function Effects.revealUntil(seat, a, it)
     end
     Library.putBottomRandom(seat, others)
   end)
+end
+
+---------------------------------------------------------------------------
+-- Damage to creatures and planeswalkers, pay-or-sacrifice (Forge effects, "any target")
+---------------------------------------------------------------------------
+
+-- Damage marked on creatures this turn, outside combat (cleared when the turn changes).
+local function markedDamage(obj, add)
+  local d = GameState.data
+  local t = d.turn or {}
+  local now = tostring(t.number or 0) .. ":" .. tostring(t.activeSeat or "")
+  if d.fxDamage == nil or d.fxDamage.turn ~= now then
+    d.fxDamage = { turn = now, on = {} }
+  end
+  local g = obj.getGUID()
+  d.fxDamage.on[g] = (d.fxDamage.on[g] or 0) + add
+  return d.fxDamage.on[g]
+end
+
+-- `n` damage to a creature or planeswalker on the battlefield from `src` (may be nil).
+function Effects.damageCreature(obj, n, src, sourceName, controller)
+  if obj == nil or obj.isDestroyed() or n <= 0 then
+    return
+  end
+  local name = obj.getName()
+  local ty = cardTypes(obj)
+  if ty.planeswalker and not ty.creature then
+    Counters.change(obj, "loyalty", -n, controller)
+    printToAll("MTG > " .. tostring(sourceName) .. " deals " .. n .. " damage to " .. name .. ": " .. n .. " loyalty removed.", GOOD)
+  else
+    local tough = tonumber(Counters.stats(obj).toughness or "")
+    local total = markedDamage(obj, n)
+    local deathtouch = src ~= nil and not src.isDestroyed() and hasKeyword(src, "deathtouch")
+    if tough and (total >= tough or deathtouch) then
+      if hasKeyword(obj, "indestructible") then
+        printToAll("MTG > " .. tostring(sourceName) .. " deals " .. n .. " damage to " .. name .. ": lethal, but it's indestructible.", INFO)
+      else
+        printToAll("MTG > " .. tostring(sourceName) .. " deals " .. n .. " damage to " .. name .. ": it dies.", GOOD)
+        Combat.removeCard(obj, "graveyard")
+      end
+    else
+      printToAll("MTG > " .. tostring(sourceName) .. " deals " .. n .. " damage to " .. name
+        .. (tough and (" (" .. total .. " this turn, toughness " .. tough .. ")") or " (check its toughness)") .. ".", INFO)
+    end
+  end
+  if Triggers and Triggers.onDamage then
+    pcall(Triggers.onDamage, { { obj = src, controller = controller, target = obj, amount = n } }, false)
+  end
+end
+
+local function damageFits(obj, owner, a, seat, skip)
+  if (a.scope == "you" and owner ~= seat) or (a.scope == "opp" and owner == seat) or skip[obj.getGUID()] then
+    return false
+  end
+  local ty = cardTypes(obj)
+  for k in pairs(a.kinds or { creature = true }) do
+    if ty[k] then
+      return true
+    end
+  end
+  return false
+end
+
+-- "~ deals 3 damage to target creature": a DAMAGE button on each candidate (a.count times).
+function Effects.pickDamage(seat, a, it)
+  local src = (it.source and getObjectFromGUID(it.source)) or (it.card and getObjectFromGUID(it.card)) or nil
+  local count, done = a.count or 1, {}
+  local what = (a.kinds and a.kinds.planeswalker) and (a.kinds.creature and "creature or planeswalker" or "planeswalker")
+    or "creature"
+  local function one(k)
+    if k > count then
+      return
+    end
+    ask(seat, it.name .. ": " .. a.n .. " damage to target " .. what .. (count > 1 and (" (" .. k .. " of " .. count .. ")") or ""),
+      "Click DAMAGE on the target, or SKIP.", { { label = "SKIP", value = false } }, function(obj)
+        if obj then
+          done[obj.getGUID()] = true
+          Effects.damageCreature(obj, a.n, src, it.name, seat)
+          one(k + 1)
+        else
+          printToAll("MTG > " .. it.name .. ": " .. (k == 1 and "no target chosen." or "no more targets."), INFO)
+        end
+      end, { filter = function(obj, owner) return damageFits(obj, owner, a, seat, done) end, label = "DAMAGE" })
+  end
+  one(1)
+end
+
+-- "~ deals 2 damage to each creature your opponents control (and each opponent)".
+function Effects.forgeDamageAll(seat, a, it)
+  local src = (it.source and getObjectFromGUID(it.source)) or (it.card and getObjectFromGUID(it.card)) or nil
+  if a.cards then
+    local parts = {}
+    for w in tostring(a.cards):gmatch("[^%.]+") do
+      parts[w] = true
+    end
+    local hit = {}
+    for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+      if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) and obj.held_by_color == nil then
+        local owner = fieldSeat(obj)
+        if owner and cardTypes(obj).creature
+            and not (parts.you and owner ~= seat) and not (parts.opp and owner == seat)
+            and not (parts.o and it.source and obj.getGUID() == it.source)
+            and not (parts.fly and not hasKeyword(obj, "flying")) and not (parts.nofly and hasKeyword(obj, "flying")) then
+          table.insert(hit, obj)
+        end
+      end
+    end
+    for _, obj in ipairs(hit) do
+      Effects.damageCreature(obj, a.n, src, it.name, seat)
+    end
+    if #hit == 0 then
+      printToAll("MTG > " .. it.name .. ": no creatures to damage.", INFO)
+    end
+  end
+  if a.players then
+    for _, c in ipairs(players()) do
+      if a.players == "each" or c ~= seat then
+        Trackers.changeLife(c, -a.n, it.name)
+        if Triggers and Triggers.onDamage then
+          pcall(Triggers.onDamage, { { obj = src, controller = seat, seat = c, amount = a.n } }, false)
+        end
+      end
+    end
+  end
+end
+
+-- "Sacrifice ~ unless you pay {2}": the controller picks.
+function Effects.payOrSacrifice(seat, a, it)
+  local src = it.source and getObjectFromGUID(it.source)
+  if src == nil or src.isDestroyed() or not fieldSeat(src) then
+    printToAll("MTG > " .. it.name .. ": it's gone already.", INFO)
+    return
+  end
+  ask(seat, it.name .. ": pay " .. tostring(a.cost) .. "?", "Pay " .. tostring(a.cost) .. ", or " .. it.name .. " is sacrificed.",
+    { { label = "PAY " .. tostring(a.cost), value = true }, { label = "SACRIFICE", value = false } }, function(pay)
+      if pay then
+        local covered = false
+        if ManaChips and ManaChips.pay then
+          local okP, _, cov = pcall(ManaChips.pay, seat, a.cost, it.name)
+          covered = okP and cov
+        end
+        printToAll("MTG > " .. seat .. " pays " .. tostring(a.cost) .. " for " .. it.name
+          .. (covered and "." or " (take the mana from your pool by hand if it wasn't)."), GOOD)
+      else
+        printToAll("MTG > " .. seat .. " sacrifices " .. it.name .. ".", GOOD)
+        Combat.sacrifice(src)
+      end
+    end)
+end
+
+-- "Return it to its owner's hand" / destroy / exile / damage: the creature that triggered it.
+function Effects.forgeThat(seat, a, it)
+  local obj = it.thatCard and getObjectFromGUID(it.thatCard)
+  if obj == nil or obj.isDestroyed() or not fieldSeat(obj) then
+    printToAll("MTG > " .. it.name .. ": that creature isn't on the battlefield any more - nothing happens.", INFO)
+    return
+  end
+  local name = obj.getName()
+  if a.verb == "damage" then
+    local src = (it.source and getObjectFromGUID(it.source)) or nil
+    Effects.damageCreature(obj, a.n, src, it.name, seat)
+  elseif a.verb == "bounce" then
+    returnToHand(obj)
+  elseif removeOne(obj, a.verb) then
+    printToAll("MTG > " .. it.name .. ": " .. (a.verb == "exile" and "exiled " or "destroyed ") .. name .. ".", GOOD)
+  end
 end
