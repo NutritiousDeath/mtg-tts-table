@@ -16,10 +16,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "..", "assets", "room")
 TILE = 8.0
 T = 3.0            # wall thickness
-SILL = 40.0        # window sill above the floor (the table top is 32 above the floor)
-SPRING = 68.0      # window arch spring line
-TOP = 92.0         # wall top (ragged)
-VAULT = 45.0       # rib apex above the wall top
+SILL = 46.0        # window sill above the floor (the table top is 32 above the floor)
+SPRING = 86.0      # window arch spring line
+TOP = 116.0        # wall top (ragged)
+VAULT = 60.0       # rib apex above the wall top
 
 
 class Mesh:
@@ -235,21 +235,23 @@ def octagon(hx, hz, d):
 def build(layout):
     m = Mesh()
     rng = np.random.default_rng(17 if layout == "four" else 23)
+    # NOTE: TTS mirrors a model left-right (x) when it imports it, so anything asymmetric is built
+    # mirrored here: the fireplaces stand at +x+z and -x-z in the game, so their solid corners are
+    # (+x,-z) and (-x,+z) in this file.
     if layout == "four":
-        hx, hz, d = 100.0, 100.0, 112.0
-        hearth_corners = {(1, 1), (-1, -1)}          # NE and SW: where the deck importers point
-        win_x = [(-39, 14), (0, 14), (39, 14)]       # (centre offset from the wall middle, width)
+        hx, hz, d = 140.0, 140.0, 155.0
+        hearth_corners = {(1, -1), (-1, 1)}
+        win_x = [(-64, 14), (-32, 14), (0, 14), (32, 14), (64, 14)]   # (offset from the wall middle, width)
         win_z = win_x
-        ribs_x = [-19.5, 19.5]                       # ribs spanning between the x walls at these z
-        ribs_z = [-19.5, 19.5]
-        hearth_edges = {}
+        ribs_x = [-48.0, -16.0, 16.0, 48.0]          # ribs spanning between the x walls at these z
+        ribs_z = [-48.0, -16.0, 16.0, 48.0]
     else:
-        hx, hz, d = 104.0, 100.0, 120.0
+        hx, hz, d = 150.0, 140.0, 165.0
         hearth_corners = set()
-        win_x = [(-45, 14), (45, 14)]                # short walls (x = +-hx): the fireplace in the middle
-        win_z = [(-52, 14), (-17.5, 14), (17.5, 14), (52, 14)]
-        ribs_x = [-30.0, 30.0]
-        ribs_z = [-34.75, 0.0, 34.75]
+        win_x = [(-68, 14), (-40, 14), (40, 14), (68, 14)]   # short walls (x = +-hx): fireplace in the middle
+        win_z = [(-77.5, 14), (-46.5, 14), (-15.5, 14), (15.5, 14), (46.5, 14), (77.5, 14)]
+        ribs_x = [-54.0, 54.0]
+        ribs_z = [-62.0, -31.0, 0.0, 31.0, 62.0]
     s = d * np.sqrt(2)
     walls = []
     # straight walls
@@ -269,7 +271,7 @@ def build(layout):
         cs = sorted([mid + c for c, _ in wins])
         piers = [(a + b) / 2 for a, b in zip(cs[:-1], cs[1:])]
         if layout == "twohg" and kind == "x":
-            piers = [mid - 30, mid + 30]
+            piers = [mid - 54, mid + 54]
         for u in piers:
             pilaster(m, wall, u, TOP)
     # cut corners

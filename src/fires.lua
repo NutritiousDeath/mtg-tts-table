@@ -16,7 +16,7 @@ Fires = {}
 
 local BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/"
 local HEARTH_VERSION = "?v=3"
-local HEARTH_FIRE_URL = BASE .. "torch/mtg_hearth.unity3d?v=1"
+local HEARTH_FIRE_URL = BASE .. "torch/mtg_hearth.unity3d?v=2"
 local STONE_URL = BASE .. "table/stone.png?v=3"
 local FLOOR_Y = -31
 
@@ -34,11 +34,11 @@ end
 local function hearthSpots()
   if TableSetup.layout() == "twohg" then
     return {
-      { x = -100, z = 0, mesh = "hearth_edge.obj" },
-      { x = 100, z = 0, mesh = "hearth_edge.obj" },
+      { x = -146, z = 0, mesh = "hearth_edge.obj" },
+      { x = 146, z = 0, mesh = "hearth_edge.obj" },
     }
   end
-  local r = 110 / math.sqrt(2)
+  local r = 152 / math.sqrt(2)
   return {
     { x = -r, z = -r, mesh = "hearth_corner.obj" },
     { x = r, z = r, mesh = "hearth_corner.obj" },

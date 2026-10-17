@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.94 (the ruined chapel: walls, open windows, rib arches; fireplaces built into the corners)"
+SCRIPT_VERSION = "1.95 (bigger chapel; fireplaces back in solid corners)"
 
 function onLoad(saved)
   GameLog.setup()

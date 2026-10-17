@@ -502,7 +502,7 @@ end
 -- (tools/make_floor.py; the texture was painted with Gemini). It catches everything a table flip throws. One locked custom
 -- model, kept between loads; replaced when its files change version.
 local FLOOR_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/floor/"
-local FLOOR_VERSION = "?v=4"
+local FLOOR_VERSION = "?v=5"
 local FLOOR_Y = -31
 
 function TableSetup.ensureFloor()
@@ -549,7 +549,7 @@ end
 -- tall open windows onto the sky, pilasters, and stone rib arches overhead with the roof long gone; the
 -- two fireplaces (fires.lua) are built into its cut corners (tools/make_room.py). Its walls face inward
 -- only, so a camera pulled back outside the chapel sees straight through them.
-local ROOM_VERSION = "?v=1"
+local ROOM_VERSION = "?v=2"
 
 function TableSetup.ensureRoom()
   local state = GameState.data.table

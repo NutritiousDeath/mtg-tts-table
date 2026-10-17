@@ -171,7 +171,7 @@ def island(m, hx, hz, rng, d):
 
 
 # walls (tools/make_room.py) + 4 so they stand on the floor: (hx, hz, corner cut)
-ISLAND = {"four": (104.0, 104.0, 116.0), "twohg": (108.0, 104.0, 124.0)}
+ISLAND = {"four": (144.0, 144.0, 159.0), "twohg": (154.0, 144.0, 169.0)}
 
 
 def model(layout):
