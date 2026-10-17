@@ -285,7 +285,7 @@ STEP_IGNORED = {"_api", "DB", "AB", "SpellDescription", "StackDescription", "Tgt
                 "RememberTargets", "Activation", "ActivationLimit", "NoReveal", "Hidden", "Shuffle", "Mandatory",
                 "ShowCurrentPlayer", "ChangeNum", "NumCardsDesc", "SpellDescriptionPermanent", "RestRandomOrder",
                 "Reveal", "ForceRevealToController", "NoLooking", "AIMinTgts", "AIMaxTgts", "TokenScript_Desc",
-                "ValidDescription"}
+                "ValidDescription", "ChangeTypeDesc"}
 
 
 # Forge's names for the card that triggered the ability (the table's "that creature").
@@ -519,12 +519,20 @@ def step(p, tokens, raw, token_db, self_trigger=False):
                 used.add("GainControl")
         elif o == "Library" and d in ("Hand", "Battlefield"):
             ct = get("ChangeType", "")
+            mv = None
+            m = re.fullmatch(r"(\w+)\.cmcLE(\d+)", ct)
+            if m:
+                ct, mv = m.group(1), m.group(2)
             q = {"Land.Basic": "basic land", "Land": "land", "Creature": "creature", "Artifact": "artifact",
                  "Enchantment": "enchantment", "Instant": "instant", "Sorcery": "sorcery", "Planeswalker": "planeswalker",
-                 "Forest": "Forest", "Plains": "Plains", "Island": "Island", "Swamp": "Swamp", "Mountain": "Mountain"}.get(ct)
-            if not q or get("ChangeNum", "1") != "1" or get("DefinedPlayer") is not None:
+                 "Forest": "Forest", "Plains": "Plains", "Island": "Island", "Swamp": "Swamp", "Mountain": "Mountain",
+                 "Card": "any"}.get(ct)
+            if not q or get("ChangeNum", "1") != "1" or get("DefinedPlayer") is not None \
+                    or (q == "any" and d == "Battlefield"):
                 raise Unmapped("search " + ct)
             out = {"z": "search", "t": q, "to": "hand" if d == "Hand" else ("bft" if tapped else "bf")}
+            if mv:
+                out["mv"] = int(mv)
         if out is None:
             raise Unmapped("zones %s->%s" % (o, d))
     elif api in ("Pump", "PumpAll"):
@@ -653,11 +661,101 @@ def counts_in(prm):
     return [m.group(1) for v in prm.values() for m in [re.search(r"\$([a-z]+)", str(v))] if m]
 
 
+RETURN_KEYS = {"_api", "DB", "Defined", "Origin", "Destination", "SubAbility", "StackDescription", "SpellDescription",
+               "GainControl", "ForgetOtherRemembered"}
+DELAY_KEYS = {"_api", "DB", "Mode", "Phase", "Execute", "SubAbility", "StackDescription", "SpellDescription",
+              "TriggerDescription", "RememberObjects", "ThisTurn", "AILogic"}
+
+
+def target_kinds(v):
+    """ValidTgts -> ('creature/artifact', control you|opp|all, other?) for the table's own picker."""
+    kinds, ctrl, other = [], "all", False
+    for alt in v.split(","):
+        head, _, rest = alt.strip().partition(".")
+        if head not in TARGET_TYPES or head == "Card":
+            raise Unmapped("target " + head)
+        kinds.append(TARGET_TYPES[head])
+        for pr in [x for x in rest.split("+") if x]:
+            if pr in ("YouCtrl", "YouOwn"):
+                ctrl = "you"
+            elif pr == "OppCtrl":
+                ctrl = "opp"
+            elif pr in ("Other", "StrictlyOther"):
+                other = True
+            elif pr.startswith("non") and pr[3:] in TARGET_TYPES:
+                kinds[-1] = "non" + TARGET_TYPES[pr[3:]]
+            else:
+                raise Unmapped("target prop " + re.sub(r"[^A-Za-z].*", "", pr))
+    return "/".join(kinds), ctrl, other
+
+
+def returns_it(q, delayed):
+    """A step that puts the exiled card back onto the battlefield."""
+    if q is None or q.get("_api") != "ChangeZone" or q.get("Origin") != "Exile" or q.get("Destination") != "Battlefield":
+        return False
+    names = ("DelayTriggerRememberedLKI", "DelayTriggerRemembered", "Remembered") if delayed else ("Remembered",)
+    return q.get("Defined") in names and not (set(q) - RETURN_KEYS) and q.get("GainControl") in (None, "True")
+
+
+def end_step_delay(q, svars):
+    """'At the beginning of the next end step, ...': (the delayed step's params) or None."""
+    if q is None or q.get("_api") != "DelayedTrigger" or q.get("Mode") != "Phase" \
+            or q.get("Phase", "").lower() != "end of turn" or set(q) - DELAY_KEYS:
+        return None
+    return svars.get(q.get("Execute"))
+
+
+def flicker(p, svars):
+    """Exile something, then return it (now, or at the beginning of the next end step):
+    (('Flicker', params), next SubAbility) or None."""
+    if p.get("_api") != "ChangeZone" or p.get("Origin") != "Battlefield" or p.get("Destination") != "Exile" \
+            or p.get("RememberChanged") != "True":
+        return None
+    known = {"_api", "DB", "AB", "Origin", "Destination", "RememberChanged", "ValidTgts", "Defined", "TgtPrompt",
+             "SubAbility", "StackDescription", "SpellDescription", "Cost", "AILogic", "TargetMin", "TargetMax",
+             "SorcerySpeed", "ActivationLimit", "IsCurse", "AITgts", "PrecostDesc", "CostDesc", "ValidTgtsDesc",
+             "Mandatory", "Planeswalker", "Ultimate", "ActivationZone"}
+    if set(p) - known or p.get("TargetMax", "1") != "1":
+        raise Unmapped("flicker key " + sorted(set(p) - known or {"TargetMax"})[0])
+    if "ValidTgts" in p:
+        k, ctrl, other = target_kinds(p["ValidTgts"])
+        out = {"on": "tgt", "k": k, "c": ctrl}
+        if other:
+            out["o"] = 1
+    elif p.get("Defined") == "Self":
+        out = {"on": "self"}
+    elif p.get("Defined") in THAT_CARD:
+        out = {"on": "that"}
+    else:
+        raise Unmapped("flicker of " + str(p.get("Defined"))[:16])
+    nxt = svars.get(p.get("SubAbility"))
+    if returns_it(nxt, False):
+        out["when"] = "now"
+    elif returns_it(end_step_delay(nxt, svars), True):
+        out["when"] = "end"
+    else:
+        raise Unmapped("condition RememberChanged")
+    after = nxt.get("SubAbility")
+    if after and svars.get(after, {}).get("_api") == "Cleanup":
+        after = svars[after].get("SubAbility")
+    return ("Flicker", out), after
+
+
 def chain(first, svars, tokens, raw, token_db, left=False, self_trigger=False):
     """Follow SubAbility$ from the first step: [(api, params)]. left: the trigger is this card
     (or the card that triggered it) leaving the battlefield, so its power and counters are gone."""
     steps, seen, p = [], set(), first
     while p is not None:
+        fl = flicker(p, svars)
+        if fl:
+            steps.append(fl[0])
+            if fl[1] is None:
+                break
+            if fl[1] in seen or fl[1] not in svars:
+                raise Unmapped("subability")
+            seen.add(fl[1])
+            p = svars[fl[1]]
+            continue
         unless = p.get("UnlessCost")
         for k in p:
             if k.startswith("Condition") or k in ("ConditionCheckSVar", "RememberChanged", "UnlessSwitched") \

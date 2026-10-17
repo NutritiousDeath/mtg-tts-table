@@ -2172,7 +2172,10 @@ local function fxSentence(st, name, it, notes)
     elseif p.z == "yardSelf" then
       return "Return " .. name .. " from your graveyard to " .. (p.to == "hand" and "your hand" or bf) .. "."
     elseif p.z == "search" then
-      local card = fxArticle(tostring(p.t) .. " card")
+      local card = p.t == "any" and "a card" or fxArticle(tostring(p.t) .. " card")
+      if p.mv then
+        card = card .. " with mana value " .. p.mv .. " or less"
+      end
       if p.to == "hand" then
         return "Search your library for " .. card .. ", reveal it, put it into your hand, then shuffle."
       end
@@ -2274,6 +2277,13 @@ local function fxAction(st, it, notes)
     return n and { what = "forgeThat", who = "you", n = n, verb = "damage" }
   elseif api == "PayOrSac" then
     return { what = "forgePayOrSac", who = "you", n = 1, cost = p.cost }
+  elseif api == "Flicker" then
+    local kinds = {}
+    for k in tostring(p.k or ""):gmatch("[^/]+") do
+      kinds[k] = true
+    end
+    return { what = "forgeFlicker", who = "you", n = 1, on = p.on, kinds = kinds, scope = p.c or "all", other = p.o ~= nil,
+      atEnd = p.when == "end" }
   elseif api == "Sacrifice" and p.w == "you" and not p.self then
     local n = fxNum(p.n or "1", it, notes)
     return n and { what = "edict", who = "you", n = n, scope = "you", ty = p.t }
@@ -2419,7 +2429,8 @@ local FX_GENERIC = {}
 for _, w in ipairs({ "draw", "gain", "lose", "mill", "discard", "mayDiscard", "scry", "counter", "counterOn",
   "counterAll", "token", "pump", "tap", "tapX", "tapTarget", "untap", "untapSelf", "untapAll", "removeTarget", "bounce",
   "bounceSelf", "graveReturn", "reanimate", "search", "look", "edict", "sacSelf", "counterSpell", "proliferate",
-  "damageAll", "forgeDamage", "forgeDamageAll", "forgeExileSelf", "forgePayOrSac", "forgeThat" }) do
+  "damageAll", "forgeDamage", "forgeDamageAll", "forgeExileSelf", "forgePayOrSac", "forgeThat", "forgeFlicker",
+  "blink", "copyCreature", "copySelf" }) do
   FX_GENERIC[w] = true
 end
 
@@ -2543,6 +2554,8 @@ local function describe(a, target, controller)
       .. (a.players == "opp" and "each opponent" or (a.players and "each player" or ""))
   elseif a.what == "forgeExileSelf" then
     return "it is exiled"
+  elseif a.what == "forgeFlicker" then
+    return "it is exiled and returns" .. (a.atEnd and " at the beginning of the next end step" or "")
   elseif a.what == "forgeThat" then
     return a.verb == "damage" and (a.n .. " damage to that creature") or ("that creature: " .. tostring(a.verb))
   elseif a.what == "forgePayOrSac" then
@@ -3546,6 +3559,8 @@ local function apply(it, plan, target)
           Effects.payOrSacrifice(seat, a, it)
         elseif a.what == "forgeThat" then
           Effects.forgeThat(seat, a, it)
+        elseif a.what == "forgeFlicker" then
+          Effects.forgeFlicker(seat, a, it)
         elseif a.what == "sacSelf" then
           local src = it.source and getObjectFromGUID(it.source)
           if src and not src.isDestroyed() then
@@ -8844,5 +8859,60 @@ function Effects.forgeThat(seat, a, it)
     returnToHand(obj)
   elseif removeOne(obj, a.verb) then
     printToAll("MTG > " .. it.name .. ": " .. (a.verb == "exile" and "exiled " or "destroyed ") .. name .. ".", GOOD)
+  end
+end
+
+-- Does a permanent fit a Forge target ("creature/nonland", control, another)?
+local function kindsFit(obj, owner, a, seat, src)
+  if (a.scope == "you" and owner ~= seat) or (a.scope == "opp" and owner == seat) then
+    return false
+  end
+  if a.other and src and obj.getGUID() == src then
+    return false
+  end
+  local ty = cardTypes(obj)
+  for k in pairs(a.kinds or {}) do
+    if k == "permanent" or ty[k] or (k:sub(1, 3) == "non" and not ty[k:sub(4)]) then
+      return true
+    end
+  end
+  return false
+end
+
+-- Exile a permanent and return it now (blink) or at the beginning of the next end step.
+function Effects.forgeFlicker(seat, a, it)
+  local function go(obj)
+    if obj == nil or obj.isDestroyed() or not fieldSeat(obj) then
+      printToAll("MTG > " .. it.name .. ": it isn't on the battlefield any more - nothing happens.", INFO)
+      return
+    end
+    if not a.atEnd then
+      Effects.blinkCard(obj, seat, it.name)
+      return
+    end
+    local name, guid = obj.getName(), obj.getGUID()
+    local owner = (Effects.ownerOf and Effects.ownerOf(obj)) or fieldSeat(obj)
+    local token = obj.hasTag("Token")
+    Combat.removeCard(obj, "exile")
+    if token then
+      printToAll("MTG > " .. it.name .. ": " .. name .. " is exiled (a token: it won't come back).", GOOD)
+      return
+    end
+    printToAll("MTG > " .. it.name .. ": " .. name .. " is exiled; it returns at the beginning of the next end step.", GOOD)
+    Effects.addDelayed({ seat = seat, anySeat = true, step = "end", kind = "returnCard", guid = guid, owner = owner, name = it.name })
+  end
+  if a.on == "self" then
+    go(it.source and getObjectFromGUID(it.source))
+  elseif a.on == "that" then
+    go(it.thatCard and getObjectFromGUID(it.thatCard))
+  else
+    ask(seat, it.name .. ": exile a target" .. (a.atEnd and " (it returns at the next end step)" or " and return it"),
+      "Click EXILE on the target, or SKIP.", { { label = "SKIP", value = false } }, function(obj)
+        if obj then
+          go(obj)
+        else
+          printToAll("MTG > " .. it.name .. ": no target chosen.", INFO)
+        end
+      end, { filter = function(obj, owner) return kindsFit(obj, owner, a, seat, it.source) end, label = "EXILE" })
   end
 end
