@@ -210,6 +210,44 @@ function Effects.parse(text, sourceName)
           needStage = needStage, need = need, types = types, kw = tt:find("flying, and first strike", 1, true) ~= nil } })
       end
     end
+    -- Lost in Space: "Target artifact or creature's owner puts it on their choice of the top or bottom of their library."
+    do
+      local kinds = tt:match("target ([%a%s,]-)'s owner puts it on their choice of the top or bottom of their library")
+      if kinds then
+        local list = { { what = "tuckTarget", who = "you", n = 1, kinds = kinds } }
+        if tt:find("surveil 1", 1, true) then
+          table.insert(list, { what = "scry", who = "you", n = 1, surveil = true })
+        end
+        return only(list)
+      end
+    end
+    -- Lotus Field / Karoo lands: "When this land enters, sacrifice two lands" / "...return a land you control to its owner's hand".
+    do
+      local sw = tt:match("^sacrifice (%w+) lands?%.$")
+      local su = tt:match("^sacrifice (%w+) untapped lands?%.$")
+      if (sw and num(sw)) or (su and num(su)) then
+        return only({ { what = "sacLands", who = "you", n = num(sw or su), untapped = su ~= nil } })
+      end
+      if tt == "return a land you control to its owner's hand." then
+        return only({ { what = "bounceLand", who = "you", n = 1 } })
+      end
+    end
+    -- Maelstrom Archangel, Omniscience-style: "you may cast a spell from your hand without paying its mana cost".
+    if tt:find("you may cast a spell from your hand without paying its mana cost", 1, true)
+        or tt:find("you may cast a card from your hand without paying its mana cost", 1, true) then
+      return only({ { what = "freeCastHand", who = "you", n = 1 } })
+    end
+    -- Explore, Growth Spiral: "You may play an additional land this turn."
+    do
+      local lw = tt:match("you may play (%w+) additional lands? this turn")
+      if lw and num(lw) then
+        local list = { { what = "landBonus", who = "you", n = num(lw) } }
+        if tt:find("draw a card", 1, true) then
+          table.insert(list, { what = "draw", who = "you", n = 1 })
+        end
+        return only(list)
+      end
+    end
     -- Jared Carthalion deck.
     if tt:find("put a number of +1/+1 counters on it equal to the number of colors it is", 1, true) then
       return only({ { what = "colorCounters", who = "you", n = 2 } })
@@ -1923,6 +1961,16 @@ local function describe(a, target, controller)
     return "draw cards equal to your greatest creature power"
   elseif a.what == "becomeBase" then
     return "it becomes " .. a.p .. "/" .. a.t
+  elseif a.what == "tuckTarget" then
+    return "a " .. tostring(a.kinds) .. " goes on top or bottom of its owner's library"
+  elseif a.what == "sacLands" then
+    return "sacrifice " .. a.n .. (a.untapped and " untapped" or "") .. " land" .. (a.n == 1 and "" or "s")
+  elseif a.what == "bounceLand" then
+    return "return a land to its owner's hand"
+  elseif a.what == "freeCastHand" then
+    return "cast a spell from the hand without paying its mana cost"
+  elseif a.what == "landBonus" then
+    return a.n .. " additional land play" .. (a.n == 1 and "" or "s") .. " this turn"
   elseif a.what == "colorCounters" then
     return "up to two creatures get a +1/+1 counter for each of their colors"
   elseif a.what == "jaredUlt" then
@@ -2605,6 +2653,9 @@ local function apply(it, plan, target)
             or a.what == "guardianProject" or a.what == "drawIfPower" or a.what == "gainTarget" or a.what == "doubleCounters"
             or a.what == "nivReborn" or a.what == "tapTarget" or a.what == "teferiProt" or a.what == "reanimateAny" then
           Effects.jaredDeck(seat, a, it)
+        elseif a.what == "tuckTarget" or a.what == "sacLands" or a.what == "bounceLand" or a.what == "freeCastHand"
+            or a.what == "landBonus" then
+          Effects.misc2(seat, a, it)
         elseif a.what == "becomeBase" then
           local src = it.source and getObjectFromGUID(it.source)
           if src == nil or src.isDestroyed() then
@@ -3128,6 +3179,11 @@ function Effects.askAmount(seat, title, text, keepLabel, onPick)
   ask(seat, title, text, { { label = keepLabel, value = "keep" } }, function(v)
     onPick(v)
   end, nil, true)
+end
+
+-- Is a question still waiting for an answer? (RESOLVE ALL waits for it before the next item.)
+function Effects.busy()
+  return current ~= nil or #queue > 0
 end
 
 -- !unstick: drop every waiting question (a stuck pop-up that nobody can answer).
@@ -4828,6 +4884,113 @@ function Effects.nivReborn(seat, it)
   for i, o in ipairs(toHand) do
     local hp = hand.position
     spawnObjectData({ data = o, position = { hp.x, hp.y + 0.2 * i, hp.z }, rotation = { 0, yaw, 0 } })
+  end
+end
+
+
+-- Lost in Space, Lotus Field, Maelstrom Archangel, Explore.
+function Effects.misc2(seat, a, it)
+  local w = a.what
+  if w == "tuckTarget" then
+    local kinds = tostring(a.kinds)
+    ask(seat, it.name .. ": target", "Click TARGET on the " .. kinds .. ".", { { label = "CANCEL", value = false } }, function(obj)
+      if not obj or obj.isDestroyed() then
+        return
+      end
+      local owner = (Effects.ownerOf and Effects.ownerOf(obj)) or Effects.fieldSeat(obj) or seat
+      local nm = obj.getName()
+      ask(owner, it.name .. ": top or bottom?", nm .. " goes into your library: on TOP or on the BOTTOM?",
+        { { label = "TOP", value = "top" }, { label = "BOTTOM", value = "bottom" } }, function(where)
+          if obj.isDestroyed() then
+            return
+          end
+          if obj.hasTag("Token") then
+            Combat.removeCard(obj, "library")
+            printToAll("MTG > " .. it.name .. ": " .. nm .. " (a token) leaves the battlefield and is gone.", GOOD)
+            return
+          end
+          obj.setLock(false)
+          if where == "bottom" then
+            Library.putOnBottom(owner, { obj }, function() end)
+          else
+            Library.putAt(owner, obj, 0, function() end)
+          end
+          printToAll("MTG > " .. it.name .. ": " .. owner .. " puts " .. nm .. " on the " .. where .. " of their library.", GOOD)
+        end)
+    end, { filter = function(obj)
+      local ty = Effects.cardTypes(obj)
+      return (kinds:find("artifact", 1, true) and ty.artifact) or (kinds:find("creature", 1, true) and ty.creature)
+        or (kinds:find("enchantment", 1, true) and ty.enchantment) or (kinds:find("permanent", 1, true) and true)
+        or (kinds:find("planeswalker", 1, true) and ty.planeswalker) or false
+    end, label = "TARGET" })
+  elseif w == "sacLands" or w == "bounceLand" then
+    local left = a.n or 1
+    local verb = w == "sacLands" and "SACRIFICE" or "RETURN"
+    local function step()
+      if left <= 0 then
+        return
+      end
+      ask(seat, it.name .. ": " .. string.lower(verb) .. " a land", "Click " .. verb .. " on a" .. (a.untapped and "n untapped" or "")
+        .. " land you control (" .. left .. " to go).", { { label = "STOP", value = false } }, function(obj)
+          if not obj or obj.isDestroyed() then
+            return
+          end
+          left = left - 1
+          if w == "sacLands" then
+            Combat.removeCard(obj, "graveyard")
+          else
+            Effects.returnToHand(obj)
+          end
+          printToAll("MTG > " .. it.name .. ": " .. seat .. (w == "sacLands" and " sacrifices " or " returns ") .. obj.getName() .. ".", GOOD)
+          Wait.time(step, 0.8)
+        end, { filter = function(obj, owner)
+          if owner ~= seat or not Effects.cardTypes(obj).land then
+            return false
+          end
+          if a.untapped then
+            local s = TableSetup.seat(owner)
+            local r = obj.getRotation()
+            if s and math.abs(((r.y - s.yaw + 540) % 360) - 180) > 30 then
+              return false
+            end
+          end
+          return true
+        end, label = verb, protect = false })
+    end
+    step()
+  elseif w == "freeCastHand" then
+    local hand = {}
+    pcall(function() hand = Player[seat].getHandObjects() or {} end)
+    local ch, objs = {}, {}
+    for _, o in ipairs(hand) do
+      if o.type == "Card" and not tostring(CardData.get(o).typeLine or ""):find("Land", 1, true) and #ch < 9 then
+        table.insert(objs, o)
+        table.insert(ch, { label = tostring(o.getName()):sub(1, 22), value = #objs })
+      end
+    end
+    if #ch == 0 then
+      printToAll("MTG > " .. it.name .. ": " .. seat .. " has no spell in hand to cast.", INFO)
+      return
+    end
+    table.insert(ch, { label = "NONE", value = false })
+    ask(seat, it.name .. ": cast a spell free?", "Pick a spell from your hand to cast without paying its mana cost.", ch, function(i)
+      local o = i and objs[i]
+      if o and not o.isDestroyed() then
+        o.setLock(false)
+        Stack.pushCard(o, seat, { seat = seat, region = "hand" })
+        printToAll("MTG > " .. seat .. " casts " .. o.getName() .. " without paying its mana cost (" .. it.name .. ").", GOOD)
+      end
+    end)
+  elseif w == "landBonus" then
+    local t = GameState.data.turn or {}
+    GameState.data.landBonus = GameState.data.landBonus or {}
+    local b = GameState.data.landBonus[seat]
+    if b == nil or b.turn ~= t.taken then
+      b = { turn = t.taken, n = 0 }
+    end
+    b.n = b.n + (a.n or 1)
+    GameState.data.landBonus[seat] = b
+    printToAll("MTG > " .. it.name .. ": " .. seat .. " may play " .. b.n .. " additional land" .. (b.n == 1 and "" or "s") .. " this turn.", GOOD)
   end
 end
 

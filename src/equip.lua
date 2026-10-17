@@ -553,6 +553,27 @@ function Equip.addMenu(obj)
   end
 end
 
+-- An Aura spell that resolves (stack -> battlefield) asks right away what it enchants (Freed from the Real,
+-- Wild Growth...). Equipment just lands; it's equipped later.
+Events.on("cardMoved", function(d)
+  local card = d.card
+  if card == nil or card.isDestroyed() or d.from == nil or d.to == nil then
+    return
+  end
+  if d.from.region ~= "stack" or not ON_FIELD[d.to.region] then
+    return
+  end
+  if not typeLine(card):find("Aura", 1, true) or not Equip.isAttachment(card) or attached()[card.getGUID()] then
+    return
+  end
+  local seat = d.to.seat
+  Wait.time(function()
+    if not card.isDestroyed() and onField(card) and not attached()[card.getGUID()] then
+      Equip.startEquip(card, seat)
+    end
+  end, 1.0)
+end)
+
 -- Things leaving the battlefield separate from what they were attached to.
 Events.on("cardMoved", function(d)
   local card = d.card

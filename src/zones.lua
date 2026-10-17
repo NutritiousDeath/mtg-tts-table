@@ -175,16 +175,22 @@ end
 -- Re-check a card's area from where it is now (also usable by other modules
 -- after moving a card by script).
 -- The seat whose hand a card is in, or nil.
+-- Every seat's hand read once and kept for a moment: menus are rebuilt for every card at each step,
+-- and asking TTS for four hands per card made big boards lag.
+local handCache = { at = -100, map = {} }
 local function handOwner(obj)
-  local guid = obj.getGUID()
-  for _, color in ipairs(TableSetup.activeSeats()) do
-    for _, h in ipairs(Player[color].getHandObjects() or {}) do
-      if h.getGUID() == guid then
-        return color
+  local now = (Time and Time.time) or os.time()
+  if now - handCache.at > 0.3 then
+    local map = {}
+    for _, color in ipairs(TableSetup.activeSeats()) do
+      local ok, list = pcall(function() return Player[color].getHandObjects() end)
+      for _, h in ipairs(ok and list or {}) do
+        map[h.getGUID()] = color
       end
     end
+    handCache.at, handCache.map = now, map
   end
-  return nil
+  return handCache.map[obj.getGUID()]
 end
 
 Zones.handOwner = function(obj)

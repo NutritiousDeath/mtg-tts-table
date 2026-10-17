@@ -207,8 +207,14 @@ function ManaChips.parseTap(text)
         end
         found = true
         if sentence:find("any color", 1, true) or sentence:find("any one color", 1, true) then
+          -- "Add three mana of any one color" (Lotus Field, Gilded Lotus): that many of the color picked.
+          local many = ({ one = 1, two = 2, three = 3, four = 4, five = 5 })[sentence:match("^(%a+) mana of any one color") or ""] or 1
           for _, k in ipairs({ "W", "U", "B", "R", "G" }) do
-            table.insert(options, { k })
+            local opt = {}
+            for _ = 1, many do
+              table.insert(opt, k)
+            end
+            table.insert(options, opt)
           end
         elseif sentence:find(" or ", 1, true) then
           for sym in sentence:gmatch("{(%a)}") do

@@ -136,6 +136,12 @@ function Stack.xml()
       <Button onClick="ui_stackCounter" color="#DB5454" textColor="#1A0606" fontStyle="Bold"
               tooltip="The top item is countered: a spell goes to its graveyard, an ability disappears">COUNTER</Button>
     </HorizontalLayout>
+    <HorizontalLayout spacing="8" preferredHeight="32">
+      <Button onClick="ui_stackResolveAll" color="#1F6F66" textColor="#E6F1FF" fontStyle="Bold"
+              tooltip="Resolve the whole stack, top first, one item at a time (others are still asked; stops on a response)">RESOLVE ALL</Button>
+      <Button onClick="ui_stackYield" color="#2A3346" textColor="#E6F1FF" fontStyle="Bold"
+              tooltip="Pass on everything until the stack is empty (you won't be asked for responses)">YIELD</Button>
+    </HorizontalLayout>
   </VerticalLayout>
 </Panel>
 ]]
@@ -156,7 +162,12 @@ function Stack.render()
       UI.setValue("stackText_" .. r, (r == 1 and "TOP  " or (i .. ".  ")) .. it.name .. tag .. "  -  " .. it.controller)
     end
   end
-  UI.setAttribute("stackPanel", "height", 90 + shown * 31)
+  UI.setAttribute("stackPanel", "height", 130 + shown * 31)
+  -- The stack emptied: yields and RESOLVE ALL are over.
+  if #list == 0 then
+    GameState.data.yield = nil
+    Stack.autoResolve = nil
+  end
   if Turns and Turns.render then
     Turns.render()
   end
@@ -599,10 +610,47 @@ function ui_stackResolve(player)
       if now[#now] and now[#now].guid == it.guid then
         Stack.resolveTop()
       end
+      -- RESOLVE ALL: on to the next item once this one has finished (pop-ups it opened come first).
+      if Stack.autoResolve == who then
+        local function nextOne()
+          if Stack.autoResolve ~= who or Stack.isEmpty() then
+            return
+          end
+          -- Wait while a pop-up from the last item (a target, a choice) is still open.
+          if (Effects and Effects.busy and Effects.busy()) or (LibSearch and LibSearch.isOpen and LibSearch.isOpen(who)) then
+            Wait.time(nextOne, 1.0)
+            return
+          end
+          ui_stackResolve(Player[who])
+        end
+        Wait.time(nextOne, 1.5)
+      end
     end)
   else
     Stack.resolveTop()
   end
+end
+
+-- YIELD: pass on everything until the stack is empty.
+function ui_stackYield(player)
+  local c = player.color
+  if not TableSetup.isActive(c) then
+    return
+  end
+  GameState.data.yield = GameState.data.yield or {}
+  GameState.data.yield[c] = not GameState.data.yield[c] or nil
+  broadcastToAll(c .. (GameState.data.yield[c] and " yields: no responses until the stack is empty." or " stops yielding."), INFO)
+end
+
+-- RESOLVE ALL: resolve the top item, then the next, until the stack is empty or someone responds.
+function ui_stackResolveAll(player)
+  local c = player.color
+  if not TableSetup.isActive(c) or Stack.isEmpty() then
+    return
+  end
+  Stack.autoResolve = c
+  broadcastToAll(c .. " resolves the whole stack (one item at a time; I HAVE A RESPONSE stops it).", INFO)
+  ui_stackResolve(player)
 end
 
 function ui_stackCounter(player)

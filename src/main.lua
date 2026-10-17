@@ -116,7 +116,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.77 (Forge trigger data + attack taxes: Propaganda, Ghostly Prison, Windborn Muse, Norn's Annex)"
+SCRIPT_VERSION = "1.79 (YIELD / RESOLVE ALL, land drops counted, Lost in Space, Lotus Field, Maelstrom free cast, faster untap)"
 
 function onLoad(saved)
   GameLog.setup()

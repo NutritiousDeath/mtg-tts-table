@@ -93,7 +93,8 @@ function Actions.untapAll(color, quiet)
   local count = 0
   local skip = GameState.data.skipUntap or {}
   local held = {}
-  for _, obj in ipairs(getObjects()) do
+  -- Only table cards (not every object on the table: that was slow with big boards).
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
     if obj.type == "Card" and obj.held_by_color == nil then
       local loc = Zones.regionAt(obj.getPosition())
       if loc.seat == color and (loc.region == "battlefield" or loc.region == "lands") then
@@ -190,6 +191,71 @@ function Actions.othersUntap(active)
     end
   end
 end
+
+-- Land drops: each land played from the hand counts. Allowed: 1, plus "you may play an additional land on
+-- each of your turns" (Exploration, Azusa: "two additional lands"), plus this turn's bonuses (Explore).
+function Actions.landsAllowed(seat)
+  local n = 1
+  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+    if o.type == "Card" and not o.isDestroyed() then
+      local loc = Zones.regionAt(o.getPosition())
+      if loc.seat == seat and (loc.region == "battlefield" or loc.region == "lands") then
+        local ol = tostring(CardData.get(o).oracle or ""):lower()
+        local w = ol:match("you may play (%w+) additional lands? on each of your turns")
+        if w then
+          n = n + (({ an = 1, one = 1, two = 2, three = 3 })[w] or 1)
+        end
+        if ol:find("you may play any number of lands", 1, true) then
+          n = n + 99
+        end
+      end
+    end
+  end
+  local t = GameState.data.turn or {}
+  local b = GameState.data.landBonus and GameState.data.landBonus[seat]
+  if b and b.turn == t.taken then
+    n = n + (b.n or 0)
+  end
+  return n
+end
+
+function Actions.landsPlayed(seat)
+  local t = GameState.data.turn or {}
+  local lp = GameState.data.landsPlayed
+  if lp == nil or lp.turn ~= t.taken then
+    return 0
+  end
+  return lp.n[seat] or 0
+end
+
+Events.on("cardMoved", function(d)
+  if not GameState.data.started or d.card == nil or d.from == nil or d.to == nil or d.from.region ~= "hand" then
+    return
+  end
+  if d.to.region ~= "battlefield" and d.to.region ~= "lands" then
+    return
+  end
+  local tl = tostring(CardData.get(d.card).typeLine or "")
+  if not tl:find("Land", 1, true) then
+    return
+  end
+  local seat = d.to.seat
+  local t = GameState.data.turn or {}
+  local lp = GameState.data.landsPlayed
+  if lp == nil or lp.turn ~= t.taken then
+    lp = { turn = t.taken, n = {} }
+    GameState.data.landsPlayed = lp
+  end
+  lp.n[seat] = (lp.n[seat] or 0) + 1
+  local played, allowed = lp.n[seat], Actions.landsAllowed(seat)
+  if t.activeSeat and t.activeSeat ~= seat then
+    broadcastToAll(seat .. " played a land (" .. d.card.getName() .. ") on " .. t.activeSeat .. "'s turn: only with an effect that allows it.", WARN)
+  elseif played > allowed then
+    broadcastToAll(seat .. " played land " .. played .. " this turn but may only play " .. allowed .. ". Check it.", WARN)
+  else
+    printToAll("MTG > " .. seat .. ": land " .. played .. " of " .. (allowed >= 99 and "any" or allowed) .. " this turn.", INFO)
+  end
+end)
 
 -- Mark / unmark a permanent to stay tapped in its controller's next untap step.
 function Actions.setSkipUntap(obj, on, why)

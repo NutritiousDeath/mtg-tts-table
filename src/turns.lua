@@ -665,12 +665,22 @@ function Turns.ask(from, text, label, onAllPass)
     commit("ask")
     return
   end
+  local yielded = GameState.data.yield or {}
+  local skipped = {}
   for _ = 1, #players() do
     c = nextPlayer(c)
     if c == from then
       break
     end
-    table.insert(queue, c)
+    -- YIELD: this player passes on everything until the stack is empty.
+    if yielded[c] then
+      table.insert(skipped, c)
+    else
+      table.insert(queue, c)
+    end
+  end
+  if #skipped > 0 then
+    printToAll("MTG > " .. table.concat(skipped, ", ") .. " yielded: no response.", INFO)
   end
   pendingAction = onAllPass
   if #queue == 0 then
@@ -767,6 +777,9 @@ function Turns.respond(color, hasResponse)
       .. " can try again when it's done.", WARN)
     Turns.render()
     return
+  end
+  if hasResponse and Stack then
+    Stack.autoResolve = nil   -- RESOLVE ALL stops for a response
   end
   if hasResponse then
     -- Remember what the active player was doing: after an END TURN is
