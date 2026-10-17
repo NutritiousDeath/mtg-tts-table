@@ -114,12 +114,12 @@ def box(m, x0, x1, z0, z1, y0, y1):
         m.face(pts, uvs, np.mean(pts, axis=0) - c)
 
 
-def outline(hx, hz, rng, n=72, jag=0.06):
+def outline(hx, hz, rng, n=72, jag=0.03):
     ring = []
     for i in range(n):
         t = i / n * 2 * np.pi
         c, s = np.cos(t), np.sin(t)
-        q = 1 / max(abs(c), abs(s)) ** 0.8          # rounded square
+        q = 1 / max(abs(c), abs(s)) ** 0.97         # (nearly) square: the hearth walls run along its edges
         k = q * (1 - jag * rng.random())
         ring.append((c * hx * k, s * hz * k))
     return ring

@@ -1,0 +1,258 @@
+--[[
+  fires.lua
+  The turn fires: two gothic fireplaces on the floor (at the corners the deck importers point to, or
+  the two ends of the 2HG table) and the four tower torches all burn in one colour that follows the game:
+    * before the game and through mulligans: purple;
+    * when the last player keeps: a ROAR (big flare, sparks, a light flash and the roar sound) and every
+      fire turns the starting player's colour;
+    * each new turn: a WOOSH and the fires turn the new active player's colour;
+    * game over: a roar in the winner's colour.
+  The fires are Unity AssetBundles (tools/unity/MTGTorchBuilder.cs) with one looping effect per colour
+  and roar / woosh trigger effects; the stone fireplaces are plain TTS models (tools/make_hearth.py).
+  !fire <color> [roar|woosh] tries a colour by hand (Purple, White, Red, Green, Blue).
+--]]
+
+Fires = {}
+
+local BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/"
+local HEARTH_VERSION = "?v=1"
+local HEARTH_FIRE_URL = BASE .. "torch/mtg_hearth.unity3d?v=1"
+local STONE_URL = BASE .. "table/stone.png?v=3"
+local FLOOR_Y = -31
+
+local INDEX = { Purple = 0, White = 1, Red = 2, Green = 3, Blue = 4 }
+local ROAR, WOOSH, SILENT = 0, 5, 10   -- trigger effect offsets (see the builder)
+
+local function state()
+  GameState.data.table = GameState.data.table or {}
+  return GameState.data.table
+end
+
+-- Where the fireplaces stand: out past the deck importers, facing the table.
+--   four / two seats: the two corners (White/Red and Green/Blue), in the corner of the floor;
+--   2HG: the middle of the two short ends.
+local function hearthSpots()
+  if TableSetup.layout() == "twohg" then
+    return {
+      { x = -96, z = 0, mesh = "hearth_edge.obj" },
+      { x = 96, z = 0, mesh = "hearth_edge.obj" },
+    }
+  end
+  local r = 110 / math.sqrt(2)
+  return {
+    { x = -r, z = -r, mesh = "hearth_corner.obj" },
+    { x = r, z = r, mesh = "hearth_corner.obj" },
+  }
+end
+
+local function atan2(y, x)
+  return math.atan2 and math.atan2(y, x) or math.atan(y, x)
+end
+
+-- Hearth local space: +Z faces the table; the firebox sits 2 up (the hearth step), 1.5 forward.
+local function spotFrame(sp)
+  local len = math.sqrt(sp.x * sp.x + sp.z * sp.z)
+  local dx, dz = -sp.x / len, -sp.z / len            -- toward the table
+  local yaw = math.deg(atan2(dx, dz))
+  local fire = { sp.x + dx * 1.5, FLOOR_Y + 2.05, sp.z + dz * 1.5 }
+  return yaw, fire
+end
+
+function Fires.place()
+  local st = state()
+  for i, sp in ipairs(hearthSpots()) do
+    local yaw, fire = spotFrame(sp)
+    local m = st.hearths and st.hearths[i] and getObjectFromGUID(st.hearths[i])
+    if m then
+      m.setLock(true)
+      m.setPosition({ sp.x, FLOOR_Y, sp.z })
+      m.setRotation({ 0, yaw, 0 })
+    end
+    local f = st.hearthFires and st.hearthFires[i] and getObjectFromGUID(st.hearthFires[i])
+    if f then
+      f.setLock(true)
+      f.setPosition(fire)
+      f.setRotation({ 0, yaw, 0 })
+    end
+  end
+end
+
+local function spawnLocked(kind, pos, yaw, name, tag, custom, onReady)
+  local obj = spawnObject({
+    type = kind,
+    position = pos,
+    rotation = { 0, yaw, 0 },
+    scale = { 1, 1, 1 },
+    sound = false,
+    callback_function = function(o)
+      o.setLock(true)
+      o.setPosition(pos)
+      o.setRotation({ 0, yaw, 0 })
+      o.interactable = false
+      o.setName(name)
+      o.addTag(tag)
+      onReady(o)
+    end,
+  })
+  obj.setCustomObject(custom)
+end
+
+function Fires.ensure()
+  local st = state()
+  st.hearths = st.hearths or {}
+  st.hearthFires = st.hearthFires or {}
+  local spots = hearthSpots()
+  for i, sp in ipairs(spots) do
+    local yaw, fire = spotFrame(sp)
+    local mesh = BASE .. "hearth/" .. sp.mesh .. HEARTH_VERSION
+    local m = st.hearths[i] and getObjectFromGUID(st.hearths[i])
+    local co = m and m.getCustomObject()
+    if not (m and co and co.mesh == mesh) then
+      if m then
+        m.destruct()
+      end
+      spawnLocked("Custom_Model", { sp.x, FLOOR_Y, sp.z }, yaw, "Gothic Fireplace", "TableHearth",
+        { mesh = mesh, diffuse = STONE_URL, collider = mesh, convex = false, type = 0, material = 1 },
+        function(o) st.hearths[i] = o.getGUID() end)
+    end
+    local f = st.hearthFires[i] and getObjectFromGUID(st.hearthFires[i])
+    local fco = f and f.getCustomObject()
+    if not (f and fco and fco.assetbundle == HEARTH_FIRE_URL) then
+      if f then
+        f.destruct()
+      end
+      spawnLocked("Custom_AssetBundle", fire, yaw, "Hearth Fire", "HearthFire",
+        { assetbundle = HEARTH_FIRE_URL, type = 0 },
+        function(o)
+          st.hearthFires[i] = o.getGUID()
+          Wait.time(function() Fires.refresh() end, 1)
+        end)
+    end
+  end
+  -- Strays from an older layout / version.
+  for _, tag in ipairs({ "TableHearth", "HearthFire" }) do
+    for _, o in ipairs(getObjectsWithTag(tag)) do
+      local keep = false
+      for _, g in ipairs(tag == "TableHearth" and st.hearths or st.hearthFires) do
+        keep = keep or g == o.getGUID()
+      end
+      if not keep and o.getGUID() ~= nil then
+        Wait.time(function()
+          local still = false
+          for _, g in ipairs(tag == "TableHearth" and st.hearths or st.hearthFires) do
+            still = still or g == o.getGUID()
+          end
+          if not still and not o.isDestroyed() then
+            o.destruct()
+          end
+        end, 3)
+      end
+    end
+  end
+  Fires.place()
+  Wait.time(function() Fires.refresh() end, 2)
+end
+
+-- Every fire object: the hearth fires first (the first one is the one that makes the sound), then the torches.
+local function fireObjects()
+  local out = {}
+  local st = state()
+  for _, list in ipairs({ st.hearthFires or {}, st.torches or {} }) do
+    for _, g in ipairs(list) do
+      local o = getObjectFromGUID(g)
+      if o and not o.isDestroyed() then
+        table.insert(out, o)
+      end
+    end
+  end
+  return out
+end
+
+-- Run fn(o) once the bundle has loaded.
+local function whenLoaded(o, fn)
+  Wait.condition(function()
+    if not o.isDestroyed() then
+      pcall(fn, o)
+    end
+  end, function()
+    return o.isDestroyed() or (o.loading_custom == false and o.AssetBundle ~= nil)
+  end, 30)
+end
+
+-- Turn every fire to a colour (Purple, White, Red, Green, Blue), with a "roar" or "woosh" first.
+function Fires.set(color, mode)
+  local idx = INDEX[color] or 0
+  GameState.data.fireColor = color
+  for n, o in ipairs(fireObjects()) do
+    whenLoaded(o, function(obj)
+      if mode then
+        local t = (mode == "roar" and ROAR or WOOSH) + idx + (n == 1 and 0 or SILENT)
+        obj.AssetBundle.playTriggerEffect(t)
+        Wait.time(function()
+          if not obj.isDestroyed() then
+            pcall(function() obj.AssetBundle.playLoopingEffect(idx) end)
+          end
+        end, 0.35)
+      else
+        obj.AssetBundle.playLoopingEffect(idx)
+      end
+    end)
+  end
+end
+
+-- The colour the game is at right now (after a load, a respawn, a layout change).
+function Fires.current()
+  local d = GameState.data
+  local t = d.turn or {}
+  if d.started and t.activeSeat and INDEX[t.activeSeat] then
+    return t.activeSeat
+  end
+  return "Purple"
+end
+
+function Fires.refresh()
+  Fires.set(Fires.current(), nil)
+end
+
+-- Hooks into the game flow.
+local function hook()
+  if Turns and Turns.beginTurn and not Fires.hookedTurns then
+    Fires.hookedTurns = true
+    local begin = Turns.beginTurn
+    Turns.beginTurn = function(seat, number, newRound)
+      begin(seat, number, newRound)
+      local t = GameState.data.turn or {}
+      pcall(Fires.set, seat, (t.taken or 0) <= 1 and "roar" or "woosh")
+    end
+  end
+  if GameFlow and GameFlow.start and not Fires.hookedStart then
+    Fires.hookedStart = true
+    local start = GameFlow.start
+    GameFlow.start = function(...)
+      local r = start(...)
+      GameState.data.gameOverFired = nil
+      pcall(Fires.set, "Purple", nil)
+      return r
+    end
+  end
+end
+hook()
+
+Events.on("gameOver", function(d)
+  local w = d and d.winner
+  pcall(Fires.set, (w and INDEX[w]) and w or "Purple", "roar")
+end)
+
+function Fires.chat(message)
+  local c, mode = tostring(message):match("^!fire%s+(%a+)%s*(%a*)$")
+  if not c then
+    return false
+  end
+  c = c:sub(1, 1):upper() .. c:sub(2):lower()
+  if INDEX[c] == nil then
+    print("MTG > !fire Purple|White|Red|Green|Blue [roar|woosh]")
+    return true
+  end
+  Fires.set(c, mode ~= "" and mode:lower() or nil)
+  return true
+end

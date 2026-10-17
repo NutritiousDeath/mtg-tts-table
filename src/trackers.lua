@@ -345,6 +345,10 @@ function Trackers.confirmLoss(color, byColor)
       table.insert(left, c)
     end
   end
+  if #left <= 1 and not GameState.data.gameOverFired then
+    GameState.data.gameOverFired = true
+    Events.emit("gameOver", { winner = left[1] })
+  end
   if #left <= 1 and GameLog then
     GameLog.add("GAME", "========== GAME OVER ========== winner: " .. tostring(left[1]))
     GameLog.snapshot("game over")

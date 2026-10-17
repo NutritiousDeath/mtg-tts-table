@@ -502,7 +502,7 @@ end
 -- (tools/make_floor.py; the texture was painted with Gemini). It catches everything a table flip throws. One locked custom
 -- model, kept between loads; replaced when its files change version.
 local FLOOR_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/floor/"
-local FLOOR_VERSION = "?v=2"
+local FLOOR_VERSION = "?v=3"
 local FLOOR_Y = -31
 
 function TableSetup.ensureFloor()
@@ -547,10 +547,10 @@ end
 
 -- Spectral torches: an iron sconce on the inner corner of each of the frame's four towers, with cold
 -- blue-cyan fire, embers and a real flickering light (a Unity AssetBundle: tools/unity/MTGTorchBuilder.cs).
-local TORCH_URL = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/torch/mtg_torch.unity3d?v=1"
+local TORCH_URL = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/torch/mtg_torch.unity3d?v=3"
 local TORCH_Y = 7.5          -- cup height (the tower body runs 3.5 .. 10)
 local TOWER_INSET = 7.6      -- frame edge to the tower's inner corner
-local TORCH_OUT = 1.15       -- cup distance out from the corner, along each axis
+local TORCH_OUT = 0.85       -- cup distance out from the corner, along each axis (the arm runs into the stone)
 
 local function torchSpots()
   local hx = TableSetup.layout() == "twohg" and 66.7 or 56.7
@@ -622,6 +622,9 @@ function TableSetup.ensureTorches()
         o.setName("Spectral Torch")
         o.addTag("TableTorch")
         state.torches[i] = o.getGUID()
+        if Fires then
+          Wait.time(function() Fires.refresh() end, 1)
+        end
       end,
     })
     obj.setCustomObject({ assetbundle = TORCH_URL, type = 0, material = 2 })
@@ -660,7 +663,7 @@ function TableSetup.ignorePointer()
       pcall(function() o.interactable = false end)
     end
   end
-  for _, tag in ipairs({ "PlaySurface", "TableFrame", "TableFloor", "MatLabel" }) do
+  for _, tag in ipairs({ "PlaySurface", "TableFrame", "TableFloor", "TableHearth", "HearthFire", "TableTorch", "MatLabel" }) do
     for _, o in ipairs(getObjectsWithTag(tag)) do
       pcall(function() o.interactable = false end)
     end
@@ -718,6 +721,9 @@ function TableSetup.ensure()
   TableSetup.ensureFrame()
   pcall(TableSetup.ensureFloor)
   pcall(TableSetup.ensureTorches)
+  if Fires then
+    pcall(Fires.ensure)
+  end
   TableSetup.ignorePointer()
   TableSetup.applyLighting()
 
@@ -865,6 +871,9 @@ function TableSetup.setLayout(layout)
   TableSetup.ensureFrame()
   pcall(TableSetup.ensureFloor)
   pcall(TableSetup.placeTorches)
+  if Fires then
+    pcall(Fires.ensure)
+  end
   applyHandZones()
   TableSetup.drawMats()
   if Zones then

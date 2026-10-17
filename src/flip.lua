@@ -190,7 +190,7 @@ runChaos = function(color)
   for _, o in ipairs(getObjects()) do
     local ok, take = pcall(function()
       if not FLIES[o.type] or skip[o.getGUID()] or o.held_by_color ~= nil or inHand[o.getGUID()]
-          or o.hasTag("TableFloor") then
+          or o.hasTag("TableFloor") or o.hasTag("TableHearth") or o.hasTag("HearthFire") then
         return false
       end
       if o.type == "Card" and o.is_face_down then
@@ -323,7 +323,7 @@ function Flip.repair()
   pcall(Flip.fixTable)
   pcall(TableSetup.ensure)
   for _, f in ipairs({ "Trackers.ensureTableDisplay", "Actions.ensure", "Turns.ensureStrips", "ManaChips.ensure",
-    "Stack.ensure", "ImportCards.ensure", "Planechase.placeChest", "TableSetup.placeTorches" }) do
+    "Stack.ensure", "ImportCards.ensure", "Planechase.placeChest", "TableSetup.placeTorches", "Fires.place" }) do
     local mod, fn = f:match("^(%w+)%.(%w+)$")
     pcall(function() _G[mod][fn]() end)
   end

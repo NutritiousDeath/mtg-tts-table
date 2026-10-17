@@ -18,6 +18,7 @@
     !where       show which zones the card under your mouse is in
     !hover       show what is under your mouse (for alt-zoom problems)
     !zones       count the cards tracked in each of your areas
+    !fire <color> [roar|woosh]  set the turn fires to a colour by hand (Purple, White, Red, Green, Blue)
     !errors         list the last script errors (copy them and send them over)
     !unstick        clear stuck pop-ups / search panels / triggers (!unstick stack also empties the stack)
     !seat <Color>   take a free seat (after a disconnect); !resync refreshes your panels
@@ -91,6 +92,7 @@ require("src/soulbond")
 require("src/pile")
 require("src/faces")
 require("src/flip")
+require("src/fires")
 require("src/token_data")
 require("src/tokens")
 require("src/ui")
@@ -119,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.90 (spectral torches on the four towers)"
+SCRIPT_VERSION = "1.92 (turn fires: two gothic fireplaces + torches change colour with the turn, roar when everyone keeps)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -841,6 +843,9 @@ function onChat(message, sender)
     return false
   end
 
+  if Fires and Fires.chat(message) then
+    return false
+  end
   if Flip and Flip.chat(message, sender.color) then
     return false
   end
