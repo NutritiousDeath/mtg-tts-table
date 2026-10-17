@@ -15,7 +15,7 @@
 Fires = {}
 
 local BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/"
-local HEARTH_VERSION = "?v=3"
+local HEARTH_VERSION = "?v=4"
 local HEARTH_FIRE_URL = BASE .. "torch/mtg_hearth.unity3d?v=2"
 local STONE_URL = BASE .. "table/stone.png?v=3"
 local FLOOR_Y = -31
@@ -113,7 +113,7 @@ function Fires.ensure()
         m.destruct()
       end
       spawnLocked("Custom_Model", { sp.x, FLOOR_Y, sp.z }, yaw, "Gothic Fireplace", "TableHearth",
-        { mesh = mesh, diffuse = STONE_URL, collider = mesh, convex = false, type = 0, material = 1 },
+        { mesh = mesh, diffuse = STONE_URL, collider = mesh, convex = false, type = 0, material = 3 },
         function(o) st.hearths[i] = o.getGUID() end)
     end
     local f = st.hearthFires[i] and getObjectFromGUID(st.hearthFires[i])

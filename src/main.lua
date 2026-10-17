@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.96 (stained glass in the chapel windows)"
+SCRIPT_VERSION = "1.97 (matte stone on the chapel, floor and fireplaces; softer reflections)"
 
 function onLoad(saved)
   GameLog.setup()

@@ -502,7 +502,7 @@ end
 -- (tools/make_floor.py; the texture was painted with Gemini). It catches everything a table flip throws. One locked custom
 -- model, kept between loads; replaced when its files change version.
 local FLOOR_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/floor/"
-local FLOOR_VERSION = "?v=5"
+local FLOOR_VERSION = "?v=6"
 local FLOOR_Y = -31
 
 function TableSetup.ensureFloor()
@@ -542,14 +542,14 @@ function TableSetup.ensureFloor()
   obj.setCustomObject({ mesh = mesh, diffuse = FLOOR_BASE .. "stone_floor.jpg" .. FLOOR_VERSION,
     normal = FLOOR_BASE .. "stone_floor_n.png" .. FLOOR_VERSION,
     collider = mesh,
-    convex = false, type = 0, material = 1 })
+    convex = false, type = 0, material = 3 })   -- 3: matte (no shine on stone)
 end
 
 -- The chapel around the table: a ruined eight-sided gothic chapel standing on the floor -- walls with
 -- tall open windows onto the sky, pilasters, and stone rib arches overhead with the roof long gone; the
 -- two fireplaces (fires.lua) are built into its cut corners (tools/make_room.py). Its walls face inward
 -- only, so a camera pulled back outside the chapel sees straight through them.
-local ROOM_VERSION = "?v=2"
+local ROOM_VERSION = "?v=3"
 
 function TableSetup.ensureRoom()
   local state = GameState.data.table
@@ -588,7 +588,7 @@ function TableSetup.ensureRoom()
     end,
   })
   obj.setCustomObject({ mesh = mesh, diffuse = base .. "table/stone.png?v=3", collider = mesh, convex = false,
-    type = 0, material = 1, cast_shadows = false })
+    type = 0, material = 3, cast_shadows = false })   -- 3: matte (no shine on stone)
 end
 
 -- Stained glass in the chapel windows: translucent, glowing jewel-tone glass you can still see through;
@@ -731,7 +731,7 @@ function TableSetup.applyLighting()
     Lighting.setAmbientEquatorColor({ r = 0.16, g = 0.18, b = 0.28 })
     Lighting.setAmbientGroundColor({ r = 0.05, g = 0.05, b = 0.08 })
     Lighting.ambient_intensity = 1.1
-    Lighting.reflection_intensity = 0.6
+    Lighting.reflection_intensity = 0.35
     Lighting.apply()
   end)
 end
