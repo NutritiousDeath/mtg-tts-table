@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.00 (guild windows, rose tracery, and the active player's window glows on their turn)"
+SCRIPT_VERSION = "2.01 (real fire sounds for the roar and woosh)"
 
 function onLoad(saved)
   GameLog.setup()
