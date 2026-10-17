@@ -15,7 +15,7 @@
 Fires = {}
 
 local BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/"
-local HEARTH_VERSION = "?v=1"
+local HEARTH_VERSION = "?v=2"
 local HEARTH_FIRE_URL = BASE .. "torch/mtg_hearth.unity3d?v=1"
 local STONE_URL = BASE .. "table/stone.png?v=3"
 local FLOOR_Y = -31
@@ -49,12 +49,13 @@ local function atan2(y, x)
   return math.atan2 and math.atan2(y, x) or math.atan(y, x)
 end
 
--- Hearth local space: +Z faces the table; the firebox sits 2 up (the hearth step), 1.5 forward.
+-- Hearth local space: +Z faces the table; the firebox sits on a 30-high podium plus the 2 hearth step
+-- (so the fire burns at table height), 1.5 forward.
 local function spotFrame(sp)
   local len = math.sqrt(sp.x * sp.x + sp.z * sp.z)
   local dx, dz = -sp.x / len, -sp.z / len            -- toward the table
   local yaw = math.deg(atan2(dx, dz))
-  local fire = { sp.x + dx * 1.5, FLOOR_Y + 2.05, sp.z + dz * 1.5 }
+  local fire = { sp.x + dx * 1.5, FLOOR_Y + 32.05, sp.z + dz * 1.5 }
   return yaw, fire
 end
 

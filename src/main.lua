@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.92 (turn fires: two gothic fireplaces + torches change colour with the turn, roar when everyone keeps)"
+SCRIPT_VERSION = "1.93 (fireplaces raised on stone podiums: fire at table height)"
 
 function onLoad(saved)
   GameLog.setup()

@@ -2,7 +2,8 @@
 
 Output: assets/hearth/hearth_corner.obj (in a corner: the wall wings run out at 45 degrees along the
 two room walls) and hearth_edge.obj (in the middle of a wall: the wings run straight out sideways).
-Local space: the hearth faces +Z (toward the table) and its base sits on y = 0 (the floor top). Textured with the frame's stone (assets/table/stone.png). The mesh is its own collider.
+Local space: the hearth faces +Z (toward the table) and its podium sits on y = 0 (the floor top); the
+firebox floor is BASE + STEP up. Textured with the frame's stone (assets/table/stone.png). The mesh is its own collider.
 """
 import os
 import numpy as np
@@ -20,6 +21,8 @@ STEP = 2.0        # raised hearth step
 MANTEL = 26.0     # mantel shelf height
 TOP = 46.0        # chimney top
 FIRE_D = 7.0      # firebox depth
+BASE = 30.0       # stone podium the hearth stands on, so its fire burns at table height (the floor is 32
+                  # below the table top)
 
 
 class Mesh:
@@ -132,6 +135,11 @@ def build(wing_angle, wing_len):
     # firebox: back wall, sides and floor inside the opening
     fb = zb - FIRE_D + D       # the opening goes back FIRE_D from the front
     m.box(-OPEN_W / 2, OPEN_W / 2, y0, y0 + APEX, zf - FIRE_D - 1, zf - FIRE_D, skip=())
+    # lift the hearth onto its podium
+    m.v = [(x, y + BASE, z) for (x, y, z) in m.v]
+    m.box(-hw - 4, hw + 4, 0, BASE, zb - 1, zf + 3)
+    for k_, (dz, dy) in enumerate([(6.0, BASE - 2.5), (9.0, BASE - 5.0), (12.0, BASE - 7.5)]):
+        m.box(-hw + 1 + k_, hw - 1 - k_, 0, dy, zf + 3, zf + dz)
     # wall wings: ruined walls running out from each side of the hearth along the room's walls
     # (wing_angle 45: the hearth sits in a corner; 0: it sits in the middle of a wall)
     for sd in (-1, 1):
@@ -144,7 +152,7 @@ def build(wing_angle, wing_len):
         rng = np.random.default_rng(3 if sd > 0 else 5)
         for k in range(seg):
             a0, b0 = wing_len * k / seg, wing_len * (k + 1) / seg
-            h = 36 - 22 * (k / seg) + rng.uniform(-3, 3)      # crumbling lower as it runs away
+            h = BASE + 36 - 26 * (k / seg) + rng.uniform(-3, 3)      # crumbling lower as it runs away
             m.transformed_box(M, a0 - 0.05, b0, 0, h, -1.5, 1.5)
     return m
 
