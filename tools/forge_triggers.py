@@ -21,7 +21,8 @@ Usage:
   python3 tools/forge_triggers.py forge/forge-gui/res/cardsfolder [--out src/forge_triggers_data.lua]
 
 It also writes src/forge_effects_data.lua (tools/forge_effects.py): what each
-triggered and activated ability does, as Forge ApiType steps.
+triggered and activated ability does, as Forge ApiType steps; and
+src/forge_statics_data.lua (tools/forge_statics.py): static abilities.
 
 It prints the Forge trigger modes it could not map, with counts and the main
 reasons, so the next ones to support are easy to pick.
@@ -713,6 +714,7 @@ def main():
     ap.add_argument("--types", help="Forge's res/lists/TypeLists.txt (default: next to cardsfolder)")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "..", "src", "forge_triggers_data.lua"))
     ap.add_argument("--effects-out", default=os.path.join(os.path.dirname(__file__), "..", "src", "forge_effects_data.lua"))
+    ap.add_argument("--statics-out", default=os.path.join(os.path.dirname(__file__), "..", "src", "forge_statics_data.lua"))
     ap.add_argument("--tokens", help="Forge's res/tokenscripts (default: next to cardsfolder)")
     args = ap.parse_args()
     load_subtypes(args.types or os.path.join(args.cardsfolder, "..", "lists", "TypeLists.txt"))
@@ -794,6 +796,8 @@ def main():
     import forge_effects
     print("\n" + forge_effects.build(args.cardsfolder, args.tokens or os.path.join(args.cardsfolder, "..", "tokenscripts"),
                                      args.effects_out, commit))
+    import forge_statics
+    print("\n" + forge_statics.build(args.cardsfolder, args.statics_out, commit))
 
 
 if __name__ == "__main__":

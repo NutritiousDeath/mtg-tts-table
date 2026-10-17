@@ -211,6 +211,132 @@ local function subjectMatches(subj, q, p)
   return false
 end
 
+---------------------------------------------------------------------------
+-- Forge's static abilities (src/forge_statics_data.lua, tools/forge_statics.py): used only for a
+-- rules-text line this file's own reader doesn't understand.
+---------------------------------------------------------------------------
+
+local fsCache = {}
+-- A card's Forge static entries: { { key, kind, fields } } (kind false: Forge has one the data can't express).
+local function forgeStaticEntries(name)
+  if FORGE_STATICS == nil or name == nil or (GameState.data and GameState.data.forgeStaticsOff) then
+    return nil
+  end
+  local hit = fsCache[name]
+  if hit ~= nil then
+    return hit or nil
+  end
+  local raw = FORGE_STATICS[name]
+  if raw == nil then
+    fsCache[name] = false
+    return nil
+  end
+  local list = {}
+  for line in (raw .. "\n"):gmatch("([^\n]*)\n") do
+    local b1 = line:find("|", 1, true)
+    if b1 then
+      local key, rest = line:sub(1, b1 - 1), line:sub(b1 + 1)
+      local b2 = rest:find("|", 1, true)
+      if rest == "?" or b2 == nil then
+        table.insert(list, { key = key, kind = false })
+      else
+        local e = { key = key, kind = rest:sub(1, b2 - 1), f = {} }
+        for kv in (rest:sub(b2 + 1) .. ";"):gmatch("([^;]*);") do
+          local eq = kv:find("=", 1, true)
+          if eq then
+            e.f[kv:sub(1, eq - 1)] = kv:sub(eq + 1)
+          end
+        end
+        table.insert(list, e)
+      end
+    end
+  end
+  fsCache[name] = list
+  return list
+end
+
+-- { [line number] = entry } for the lines of a card's rules text that exactly one Forge entry fits.
+function Statics.forgeLines(name, oracle)
+  local entries = forgeStaticEntries(name)
+  if entries == nil or not (Triggers and Triggers.forgeKey) then
+    return {}
+  end
+  local keys, i = {}, 0
+  for line in (tostring(oracle or "") .. "\n"):gmatch("([^\n]*)\n") do
+    i = i + 1
+    keys[i] = Triggers.forgeKey(line, name)
+  end
+  local out, bad = {}, {}
+  for _, e in ipairs(entries) do
+    local hits = {}
+    for j, k in ipairs(keys) do
+      if k ~= "" and k:sub(1, #e.key) == e.key then
+        table.insert(hits, j)
+      end
+    end
+    if #hits == 1 and e.kind then
+      if out[hits[1]] then
+        bad[hits[1]] = true
+      end
+      out[hits[1]] = e
+    else
+      for _, j in ipairs(hits) do
+        bad[j] = true
+      end
+    end
+  end
+  for j in pairs(bad) do
+    out[j] = nil
+  end
+  return out
+end
+
+local FS_COLORS = { W = true, U = true, B = true, R = true, G = true }
+local FS_FLAGS = { you = true, opp = true, other = true, self = true, token = true, nontoken = true, attacking = true,
+  blocking = true }
+local FS_TYPES = { creature = true, artifact = true, enchantment = true, land = true, planeswalker = true, permanent = true }
+
+-- Does permanent q ({ obj, seat, tl, token }) fit a Forge filter from source src ({ obj, seat })?
+function Statics.forgeMatches(filter, q, src)
+  for alt in (tostring(filter) .. ","):gmatch("([^,]*),") do
+    local ok = alt ~= ""
+    for tok in alt:gmatch("[^%.]+") do
+      if not ok then
+        break
+      end
+      if FS_TYPES[tok] then
+        ok = tok == "permanent" or q.tl:find(tok, 1, true) ~= nil
+      elseif FS_COLORS[tok] then
+        ok = Statics.colorsOf(q.obj, q.seat)[tok] == true
+      elseif tok == "you" then
+        ok = q.seat == src.seat
+      elseif tok == "opp" then
+        ok = q.seat ~= src.seat
+      elseif tok == "other" then
+        ok = q.obj ~= src.obj
+      elseif tok == "self" then
+        ok = q.obj == src.obj
+      elseif tok == "token" then
+        ok = q.token == true
+      elseif tok == "nontoken" then
+        ok = not q.token
+      elseif tok == "attacking" then
+        ok = Combat ~= nil and Combat.isAttacking ~= nil and Combat.isAttacking(q.obj) == true
+      elseif FS_FLAGS[tok] then
+        ok = false
+      else
+        -- A subtype; changelings are every creature type.
+        ok = q.tl:find(tok, 1, true) ~= nil
+          or (q.tl:find("creature", 1, true) ~= nil and tostring(dataOf(q.obj).oracle or ""):lower():find("changeling", 1, true) ~= nil)
+      end
+    end
+    if ok then
+      return true
+    end
+  end
+  return false
+end
+
 -- "<subject> you control get +1/+1" -> subject, "mine"; "... your opponents control get -2/-2" -> "opps";
 -- "All Slivers get +1/+1" -> "all". Plain searches only (TTS gives up on lazy patterns over long text).
 local function parseAnthem(line)
@@ -270,14 +396,20 @@ function Statics.compute()
     end
   end
   for _, p in ipairs(list) do
+    local fl = Statics.forgeLines(p.obj.getName(), p.oracle)
+    local idx = 0
     for line in (p.oracle .. "\n"):gmatch("([^\n]*)\n") do
+      idx = idx + 1
+      local understood = false
       -- "This creature gets +1/+1 for each artifact you control."
       local a, b = line:match("^this creature gets %+(%d+)/%+(%d+) for each artifact you control")
       if a then
+        understood = true
         add(p, tonumber(a) * (artifacts[p.seat] or 0), tonumber(b) * (artifacts[p.seat] or 0))
       end
       -- Faeburrow Elder: "~ gets +1/+1 for each color among permanents you control."
       if line:find(" gets +1/+1 for each color among permanents you control", 1, true) then
+        understood = true
         local have = {}
         for _, q in ipairs(list) do
           if q.seat == p.seat then
@@ -305,6 +437,7 @@ function Statics.compute()
         end
         local mp, mt, mn = l2:match("^this creature gets %+(%d+)/%+(%d+) as long as you control (%w+) or more artifacts")
         if mp then
+          understood = true
           local need = tonumber(mn) or ({ two = 2, three = 3, four = 4, five = 5, six = 6 })[mn] or 3
           if (artifacts[p.seat] or 0) >= need then
             add(p, tonumber(mp), tonumber(mt))
@@ -321,6 +454,7 @@ function Statics.compute()
             and not line:find(":", 1, true) and not line:find("until end of turn", 1, true) then
           local gx, gy, gw = line:sub(gat + 5):match("^([%+%-]%d+)/([%+%-]%d+) for each other (%a+) on the battlefield")
           if gx then
+            understood = true
             local subj = line:sub(1, gat - 1)
             if subj:sub(1, 4) == "all " then
               subj = subj:sub(5)
@@ -363,6 +497,9 @@ function Statics.compute()
         if line:find(" as long as ", 1, true) then
           okCond = line:find("as long as you have the city's blessing", 1, true) ~= nil and Statics.blessing(p.seat) == true
         end
+        if subj then
+          understood = true
+        end
         if subj and #subj < 40 and okCond then
           if subj:sub(1, 4) == "all " then
             subj = subj:sub(5)
@@ -372,6 +509,17 @@ function Statics.compute()
             if sideOk and subjectMatches(subj, q, p) then
               add(q, tonumber(x), tonumber(y))
             end
+          end
+        end
+      end
+      -- A line the reader above didn't understand: Forge's reading of it, if any (P/T only;
+      -- its keywords go through Statics.grants).
+      local fe = fl[idx]
+      if not understood and fe and fe.kind == "C" and (fe.f.p or fe.f.t) then
+        local fp, ft = tonumber(fe.f.p) or 0, tonumber(fe.f.t) or 0
+        for _, q in ipairs(list) do
+          if Statics.forgeMatches(fe.f.f, q, p) then
+            add(q, fp, ft)
           end
         end
       end
@@ -719,19 +867,33 @@ local function grantSources()
   end
   local out = {}
   for _, p in ipairs(perms()) do
-    if p.oracle:find(" have ", 1, true) or p.oracle:find(" has ", 1, true) then
+    local fl = Statics.forgeLines(p.obj.getName(), p.oracle)
+    if p.oracle:find(" have ", 1, true) or p.oracle:find(" has ", 1, true) or next(fl) ~= nil then
       local nm = tostring(p.obj.getName() or ""):lower()
+      local idx = 0
       for line in (p.oracle .. "\n"):gmatch("([^\n]*)\n") do
+        idx = idx + 1
         local l2 = line
         if nm ~= "" and l2:find(nm, 1, true) then
           l2 = l2:gsub(nm:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "~")
         end
+        local rec
         if l2:find(" have ", 1, true) or l2:find(" has ", 1, true) then
-          local rec = parseGrantLine(l2)
-          if rec then
-            rec.obj, rec.seat = p.obj, p.seat
-            table.insert(out, rec)
+          rec = parseGrantLine(l2)
+        end
+        -- Forge's reading of a line the reader above doesn't understand ("... get +1/+1 and have flying").
+        local fe = fl[idx]
+        if rec == nil and fe and fe.kind == "C" and fe.f.k then
+          rec = { forge = fe.f.f, scope = "all", kws = {}, lines = {} }
+          for k in (fe.f.k .. "/"):gmatch("([^/]*)/") do
+            if k ~= "" then
+              table.insert(rec.kws, k)
+            end
           end
+        end
+        if rec then
+          rec.obj, rec.seat = p.obj, p.seat
+          table.insert(out, rec)
         end
       end
     end
@@ -773,7 +935,13 @@ function Statics.grants(obj)
   local seenK = {}
   for _, g in ipairs(srcs) do
     local sideOk = g.scope == "all" or g.seat == loc.seat
-    if sideOk and (g.cond ~= "hellbent" or handEmpty(g.seat)) and subjectMatches(g.subj, q, { obj = g.obj }) then
+    local fits
+    if g.forge then
+      fits = Statics.forgeMatches(g.forge, q, { obj = g.obj, seat = g.seat })
+    else
+      fits = sideOk and (g.cond ~= "hellbent" or handEmpty(g.seat)) and subjectMatches(g.subj, q, { obj = g.obj })
+    end
+    if fits then
       for _, k in ipairs(g.kws) do
         if not seenK[k] then
           seenK[k] = true
