@@ -1180,6 +1180,16 @@ Events.on("spellCast", function(d)
   if d == nil or d.card == nil or d.controller == nil then
     return
   end
+  -- Sorcery speed: a spell that isn't an instant, cast on someone else's turn, needs flash.
+  local active = GameState.data and GameState.data.turn and GameState.data.turn.activeSeat
+  local tl = tostring(dataOf(d.card).typeLine or ""):lower()
+  if active and active ~= d.controller and tl ~= "" and not tl:find("instant", 1, true) and not tl:find("land", 1, true) then
+    local okF, flash = pcall(Statics.hasFlash, d.card, d.controller)
+    if okF and not flash then
+      broadcastToColor(d.card.getName() .. " isn't an instant and has no flash: normally it's cast only on your own turn.",
+        d.controller, { 1, 0.6, 0.2 })
+    end
+  end
   local okC, banned = pcall(Statics.cantCast, d.card, d.controller)
   if okC and banned then
     broadcastToAll(d.card.getName() .. ": " .. d.controller .. " can't cast this spell (" .. banned .. ") - take it back if so.",
@@ -1248,4 +1258,38 @@ function Statics.cantActivate(obj, seat, isMana)
     end
   end
   return nil
+end
+
+-- Can `caster` cast this spell at instant speed (flash, or "as though it had flash")?
+function Statics.hasFlash(card, caster)
+  local d = dataOf(card)
+  for _, k in ipairs(type(d.keywords) == "table" and d.keywords or {}) do
+    if tostring(k):lower() == "flash" then
+      return true
+    end
+  end
+  local o = tostring(d.oracle or ""):lower()
+  if o:sub(1, 5) == "flash" or o:find("\nflash", 1, true) or o:find("as though it had flash", 1, true) then
+    return true
+  end
+  -- The table's own reading: a permanent of the caster's that says "as though they had flash".
+  for _, p in ipairs(perms()) do
+    if p.seat == caster and (p.oracle:find("as though they had flash", 1, true) or p.oracle:find("as though it had flash", 1, true)) then
+      return true
+    end
+  end
+  -- Forge's CastWithFlash statics (on the battlefield, or the spell's own).
+  local q = asQ(card)
+  q.seat = caster
+  for _, s in ipairs(Statics.forgeOthers()) do
+    if s.kind == "FL" and whoFits(s.f.w, caster, s.src.seat) and Statics.forgeMatches(s.f.f, q, s.src) then
+      return true
+    end
+  end
+  for _, e in pairs(Statics.forgeLines(card.getName(), o)) do
+    if e.kind == "FL" and tostring(e.f.f):find("self", 1, true) then
+      return true
+    end
+  end
+  return false
 end
