@@ -664,7 +664,7 @@ def counts_in(prm):
 RETURN_KEYS = {"_api", "DB", "Defined", "Origin", "Destination", "SubAbility", "StackDescription", "SpellDescription",
                "GainControl", "ForgetOtherRemembered"}
 DELAY_KEYS = {"_api", "DB", "Mode", "Phase", "Execute", "SubAbility", "StackDescription", "SpellDescription",
-              "TriggerDescription", "RememberObjects", "ThisTurn", "AILogic"}
+              "TriggerDescription", "RememberObjects", "ThisTurn", "AILogic", "ValidPlayer", "Secondary"}
 
 
 def target_kinds(v):
@@ -703,6 +703,48 @@ def end_step_delay(q, svars):
             or q.get("Phase", "").lower() != "end of turn" or set(q) - DELAY_KEYS:
         return None
     return svars.get(q.get("Execute"))
+
+
+LATER_KEYS = {"_api", "DB", "Defined", "Origin", "Destination", "StackDescription", "SpellDescription", "AILogic",
+              "ValidCards", "SacValid"}
+
+
+def at_step(p, svars):
+    """'At the beginning of the next end step (end of combat), sacrifice / destroy / exile / return it':
+    (('AtStep', params), next SubAbility) or None."""
+    if p.get("_api") != "DelayedTrigger":
+        return None
+    st = {"end of turn": "end", "endcombat": "endcombat"}.get(p.get("Phase", "").lower())
+    if p.get("Mode") != "Phase" or st is None or set(p) - DELAY_KEYS:
+        raise Unmapped("delayed " + str(p.get("Mode")) + " " + str(p.get("Phase"))[:12])
+    ro = p.get("RememberObjects")
+    remembered = "self" if ro == "Self" else ("that" if ro in THAT_CARD else None)
+    ex = svars.get(p.get("Execute"))
+    if ex is None or set(ex) - LATER_KEYS:
+        raise Unmapped("delayed step " + str(ex and sorted(set(ex) - LATER_KEYS)[:1]))
+    d = ex.get("Defined", "")
+    if ex.get("ValidCards") in ("Card.Self",) or d == "Self" or (ex["_api"] == "Sacrifice" and not d and not ex.get("SacValid")):
+        of = "self"
+    elif d.startswith(("DelayTriggerRemembered", "Remembered")) and remembered:
+        of = remembered
+    else:
+        raise Unmapped("delayed of " + d[:20])
+    api = ex["_api"]
+    if api in ("Sacrifice", "SacrificeAll") and ex.get("SacValid") in (None, "Self"):
+        what = "sac"
+    elif api == "Destroy":
+        what = "destroy"
+    elif api == "ChangeZone" and ex.get("Origin") in (None, "Battlefield") and ex.get("Destination") in ("Exile", "Hand"):
+        what = "exile" if ex["Destination"] == "Exile" else "bounce"
+    else:
+        raise Unmapped("delayed " + api)
+    vp = p.get("ValidPlayer")
+    if vp not in (None, "You", "Player"):
+        raise Unmapped("delayed for " + vp[:16])
+    out = {"do": what, "of": of, "st": st}
+    if vp == "You":
+        out["mine"] = 1                         # "your next end step"
+    return ("AtStep", out), p.get("SubAbility")
 
 
 def flicker(p, svars):
@@ -746,7 +788,7 @@ def chain(first, svars, tokens, raw, token_db, left=False, self_trigger=False):
     (or the card that triggered it) leaving the battlefield, so its power and counters are gone."""
     steps, seen, p = [], set(), first
     while p is not None:
-        fl = flicker(p, svars)
+        fl = flicker(p, svars) or at_step(p, svars)
         if fl:
             steps.append(fl[0])
             if fl[1] is None:

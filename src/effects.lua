@@ -2277,6 +2277,8 @@ local function fxAction(st, it, notes)
     return n and { what = "forgeThat", who = "you", n = n, verb = "damage" }
   elseif api == "PayOrSac" then
     return { what = "forgePayOrSac", who = "you", n = 1, cost = p.cost }
+  elseif api == "AtStep" then
+    return { what = "forgeAtStep", who = "you", n = 1, how = p["do"], on = p.of, step = p.st, mine = p.mine ~= nil }
   elseif api == "Flicker" then
     local kinds = {}
     for k in tostring(p.k or ""):gmatch("[^/]+") do
@@ -2429,7 +2431,7 @@ local FX_GENERIC = {}
 for _, w in ipairs({ "draw", "gain", "lose", "mill", "discard", "mayDiscard", "scry", "counter", "counterOn",
   "counterAll", "token", "pump", "tap", "tapX", "tapTarget", "untap", "untapSelf", "untapAll", "removeTarget", "bounce",
   "bounceSelf", "graveReturn", "reanimate", "search", "look", "edict", "sacSelf", "counterSpell", "proliferate",
-  "damageAll", "forgeDamage", "forgeDamageAll", "forgeExileSelf", "forgePayOrSac", "forgeThat", "forgeFlicker",
+  "damageAll", "forgeDamage", "forgeDamageAll", "forgeExileSelf", "forgePayOrSac", "forgeThat", "forgeFlicker", "forgeAtStep",
   "blink", "copyCreature", "copySelf" }) do
   FX_GENERIC[w] = true
 end
@@ -2554,6 +2556,8 @@ local function describe(a, target, controller)
       .. (a.players == "opp" and "each opponent" or (a.players and "each player" or ""))
   elseif a.what == "forgeExileSelf" then
     return "it is exiled"
+  elseif a.what == "forgeAtStep" then
+    return "at the next " .. (a.step == "endcombat" and "end of combat" or "end step") .. ": " .. tostring(a.how) .. " it"
   elseif a.what == "forgeFlicker" then
     return "it is exiled and returns" .. (a.atEnd and " at the beginning of the next end step" or "")
   elseif a.what == "forgeThat" then
@@ -3561,6 +3565,16 @@ local function apply(it, plan, target)
           Effects.forgeThat(seat, a, it)
         elseif a.what == "forgeFlicker" then
           Effects.forgeFlicker(seat, a, it)
+        elseif a.what == "forgeAtStep" then
+          local obj = a.on == "that" and it.thatCard and getObjectFromGUID(it.thatCard)
+            or (a.on == "self" and it.source and getObjectFromGUID(it.source)) or nil
+          if obj and not obj.isDestroyed() and Effects.fieldSeat(obj) then
+            Effects.addDelayed({ seat = seat, anySeat = not a.mine, step = a.step, kind = "forgeEnd", guid = obj.getGUID(), how = a.how,
+              name = it.name })
+            printToAll("MTG > " .. it.name .. ": at the next " .. (a.step == "endcombat" and "end of combat" or "end step") .. ", "
+              .. obj.getName() .. " is " .. ({ sac = "sacrificed", destroy = "destroyed", exile = "exiled", bounce = "returned to its owner's hand" })[a.how]
+              .. ".", INFO)
+          end
         elseif a.what == "sacSelf" then
           local src = it.source and getObjectFromGUID(it.source)
           if src and not src.isDestroyed() then
@@ -6610,6 +6624,21 @@ Events.on("stepStarted", function(d)
           obj.setPosition(TableSetup.slot(r.owner, "exile", TableSetup.SURFACE_TOP + 2))
           Zones.refresh(obj)
           printToAll("MTG > " .. r.name .. ": " .. obj.getName() .. " is exiled (to " .. r.owner .. "'s exile).", GOOD)
+        end
+      elseif r.kind == "forgeEnd" then
+        local obj = getObjectFromGUID(r.guid)
+        if obj and not obj.isDestroyed() and Effects.fieldSeat(obj) then
+          printToAll("MTG > " .. r.name .. ": " .. obj.getName() .. ({ sac = " is sacrificed.", destroy = " is destroyed.",
+            exile = " is exiled.", bounce = " returns to its owner's hand." })[r.how], GOOD)
+          if r.how == "sac" then
+            Combat.sacrifice(obj)
+          elseif r.how == "bounce" then
+            Effects.returnToHand(obj)
+          elseif r.how == "destroy" and Effects.hasKeyword(obj, "indestructible") then
+            printToAll("MTG > " .. obj.getName() .. " is indestructible and stays.", INFO)
+          else
+            Combat.removeCard(obj, r.how == "exile" and "exile" or "graveyard")
+          end
         end
       elseif r.kind == "removeCard" then
         local obj = getObjectFromGUID(r.guid)
