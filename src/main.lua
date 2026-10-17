@@ -114,7 +114,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.71 (console strip moved left of the name; Start, Turn Options, Dice)"
+SCRIPT_VERSION = "1.72 (filter lands ask: plain {C} or a filtered pair)"
 
 function onLoad(saved)
   GameLog.setup()

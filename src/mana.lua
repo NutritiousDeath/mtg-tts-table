@@ -448,6 +448,45 @@ function ManaChips.onTap(obj, seat)
     ManaChips.offer(seat, obj.getName(), options)
     return
   end
+  -- Filter lands (Cascade Bluffs, Mystic Gate...): "{T}: Add {C}." or "{U/R}, {T}: Add {U}{U}, {U}{R}, or {R}{R}."
+  -- Ask which: plain {C}, or one of the filtered pairs (the {U/R} comes out of the mana pool).
+  do
+    local fa, fb, rest = text:match("{(%a)/(%a)}, {t}: add ([^%.\n]+)")
+    if fa then
+      fa, fb = fa:upper(), fb:upper()
+      local base = ManaChips.parseTap(text) or { { "C" } }
+      local choices, picks = {}, {}
+      for _, o2 in ipairs(base) do
+        table.insert(picks, { opt = o2 })
+        table.insert(choices, { label = label(o2), value = #picks })
+      end
+      for x, y in rest:gmatch("{(%a)}{(%a)}") do
+        table.insert(picks, { opt = { x:upper(), y:upper() }, filter = true })
+        table.insert(choices, { label = x:upper() .. y:upper() .. " (pay " .. fa .. "/" .. fb .. ")", value = #picks })
+      end
+      Effects.askChoice(seat, obj.getName() .. ": which mana?", "Plain {C}, or FILTER: pay {" .. fa .. "/" .. fb
+        .. "} from your mana pool and get two mana.", choices, function(i)
+        local pk = picks[i]
+        if pk == nil then
+          return
+        end
+        if pk.filter then
+          if ManaChips.get(seat, fa) > 0 then
+            ManaChips.add(seat, fa, -1)
+          elseif ManaChips.get(seat, fb) > 0 then
+            ManaChips.add(seat, fb, -1)
+          else
+            broadcastToColor(obj.getName() .. ": no {" .. fa .. "} or {" .. fb .. "} in your mana pool for the filter cost: pay it yourself.", seat, { 1, 0.6, 0.2 })
+          end
+        end
+        for _, k in ipairs(pk.opt) do
+          ManaChips.add(seat, k, 1)
+        end
+        printToAll("MTG > " .. obj.getName() .. ": " .. seat .. " adds " .. label(pk.opt) .. (pk.filter and (" (paid {" .. fa .. "/" .. fb .. "})") or "") .. ".", { 0.55, 0.9, 0.6 })
+      end)
+      return
+    end
+  end
   local options = ManaChips.parseTap(text)
   if options then
     -- "Spend this mana only to cast ..." (Cavern of Souls, Unclaimed Territory, Sliver Hive, Ancient Ziggurat).
