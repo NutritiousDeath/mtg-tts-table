@@ -726,7 +726,9 @@ function TableSetup.applyLighting()
   pcall(function()
     Lighting.light_intensity = 0.9
     Lighting.setLightColor({ r = 0.78, g = 0.84, b = 1.0 })
-    Lighting.ambient_type = 1
+    -- 2 = gradient: ambient light from the three colours below, NOT from the background picture (its warm
+    -- patches washed whole chapel walls sunset-orange)
+    Lighting.ambient_type = 2
     Lighting.setAmbientSkyColor({ r = 0.30, g = 0.28, b = 0.46 })
     Lighting.setAmbientEquatorColor({ r = 0.16, g = 0.18, b = 0.28 })
     Lighting.setAmbientGroundColor({ r = 0.05, g = 0.05, b = 0.08 })
