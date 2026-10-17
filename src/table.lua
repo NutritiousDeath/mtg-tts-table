@@ -497,6 +497,61 @@ function TableSetup.ensureFrame()
     collider = FRAME_BASE .. "collider.obj" .. FRAME_VERSION, type = 0, material = 1 })
 end
 
+-- The cathedral floor the table stands on: worn flagstones with glowing cracks, a two-step stone dais
+-- under the frame's towers, fading into darkness toward its crumbled edge (tools/make_floor.py; the
+-- texture was painted with Gemini). It catches everything a table flip throws. One locked custom
+-- model, kept between loads; replaced when its files change version.
+local FLOOR_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/floor/"
+local FLOOR_VERSION = "?v=1"
+local FLOOR_Y = -31
+
+function TableSetup.ensureFloor()
+  local state = GameState.data.table
+  local suffix = TableSetup.layout() == "twohg" and "_2hg" or ""
+  local mesh = FLOOR_BASE .. "floor" .. suffix .. ".obj" .. FLOOR_VERSION
+  local floor = state.floor and getObjectFromGUID(state.floor)
+  local co = floor and floor.getCustomObject()
+  if floor and co and co.mesh == mesh then
+    floor.setLock(true)
+    floor.interactable = false
+    return
+  end
+  if floor then
+    floor.destruct()
+  end
+  for _, obj in ipairs(getObjectsWithTag("TableFloor")) do
+    obj.destruct()
+  end
+  local obj = spawnObject({
+    type = "Custom_Model",
+    position = { 0, 0, 0 },
+    rotation = { 0, 0, 0 },
+    scale = { 1, 1, 1 },
+    sound = false,
+    callback_function = function(o)
+      o.setLock(true)
+      o.setPosition({ 0, 0, 0 })
+      o.setRotation({ 0, 0, 0 })
+      o.interactable = false
+      o.setName("Cathedral Floor")
+      o.addTag("TableFloor")
+      -- Darkness creeping in toward the edge, so the floor melts into the background.
+      o.setDecals({ {
+        name = "FloorFade",
+        url = FLOOR_BASE .. "vignette.png" .. FLOOR_VERSION,
+        position = { 0, FLOOR_Y + 0.05, 0 },
+        rotation = { 90, 0, 0 },
+        scale = { 320, 320, 1 },
+      } })
+      state.floor = o.getGUID()
+    end,
+  })
+  obj.setCustomObject({ mesh = mesh, diffuse = FLOOR_BASE .. "stone_floor.jpg" .. FLOOR_VERSION,
+    normal = FLOOR_BASE .. "stone_floor_n.png" .. FLOOR_VERSION,
+    collider = FLOOR_BASE .. "floor_col" .. suffix .. ".obj" .. FLOOR_VERSION,
+    convex = false, type = 0, material = 1 })
+end
+
 -- Moody lighting to match the dark background: a dimmer, cold key light
 -- and a blue-violet ambient glow.
 function TableSetup.applyLighting()
@@ -519,7 +574,7 @@ end
 -- it's applied again on every load.)
 function TableSetup.ignorePointer()
   local state = GameState.data.table or {}
-  local list = { state.surface, state.frame }
+  local list = { state.surface, state.frame, state.floor }
   for _, g in ipairs(state.labels or {}) do
     table.insert(list, g)
   end
@@ -529,7 +584,7 @@ function TableSetup.ignorePointer()
       pcall(function() o.interactable = false end)
     end
   end
-  for _, tag in ipairs({ "PlaySurface", "TableFrame", "MatLabel" }) do
+  for _, tag in ipairs({ "PlaySurface", "TableFrame", "TableFloor", "MatLabel" }) do
     for _, o in ipairs(getObjectsWithTag(tag)) do
       pcall(function() o.interactable = false end)
     end
@@ -560,6 +615,7 @@ function TableSetup.ensure()
     TableSetup.fitSurface()
   end
   TableSetup.ensureFrame()
+  pcall(TableSetup.ensureFloor)
   TableSetup.ignorePointer()
   TableSetup.applyLighting()
 
@@ -705,6 +761,7 @@ function TableSetup.setLayout(layout)
   GameState.data.table.layout = layout
   TableSetup.fitSurface()
   TableSetup.ensureFrame()
+  pcall(TableSetup.ensureFloor)
   applyHandZones()
   TableSetup.drawMats()
   if Zones then

@@ -131,7 +131,8 @@ end
 --   * every card, token, die, counter, tile and pile on the table is launched, spinning;
 --   * a moment later the stone table itself (surface and frame) rears up and tumbles;
 --   * the mat pictures vanish while it's all in the air;
---   * a few seconds later the table glides back, then EVERYTHING glides back to exactly where it was.
+--   * it all crashes down onto the cathedral floor (table.lua) and lies there a few seconds;
+--   * then the table glides back, then EVERYTHING glides back to exactly where it was.
 -- Kept safe: cards in hands, libraries and face-down cards stay put (nothing hidden gets revealed).
 -- While it runs, nothing can merge into a deck, fall into a hand, or count as a move (zones.lua checks
 -- Flip.chaosOn).
@@ -156,6 +157,9 @@ local FLIES = { Card = true, Deck = true, Dice = true, Tile = true, Token = true
 
 local runChaos   -- defined below
 
+-- Seconds everything lies scattered on the cathedral floor before it all glides home.
+local LAND = 8
+
 function Flip.chaos(color)
   if Flip.chaosOn then
     return
@@ -166,8 +170,8 @@ function Flip.chaos(color)
     print("MTG > Table flip hit a snag: " .. tostring(err))
   end
   -- Never leave the table stuck in flip mode.
-  Wait.time(function() Flip.chaosOn = false end, 15)
-  Wait.time(function() pcall(Flip.fixTable); pcall(function() Zones.drawIcons() end) end, 12)
+  Wait.time(function() Flip.chaosOn = false end, 20)
+  Wait.time(function() pcall(Flip.fixTable); pcall(function() Zones.drawIcons() end) end, 16)
 end
 
 runChaos = function(color)
@@ -185,7 +189,8 @@ runChaos = function(color)
   local list = {}
   for _, o in ipairs(getObjects()) do
     local ok, take = pcall(function()
-      if not FLIES[o.type] or skip[o.getGUID()] or o.held_by_color ~= nil or inHand[o.getGUID()] then
+      if not FLIES[o.type] or skip[o.getGUID()] or o.held_by_color ~= nil or inHand[o.getGUID()]
+          or o.hasTag("TableFloor") then
         return false
       end
       if o.type == "Card" and o.is_face_down then
@@ -242,7 +247,7 @@ runChaos = function(color)
         o.setRotationSmooth(e.rot, false, false)
       end)
     end
-  end, 3.0)
+  end, LAND - 0.5)
   Wait.time(function()
     for _, e in ipairs(list) do
       pcall(function()
@@ -273,7 +278,7 @@ runChaos = function(color)
         Flip.chaosOn = false
       end, 0.5)
     end, 2.2)
-  end, 3.5)
+  end, LAND)
 end
 
 -- Put the play surface and the stone frame back exactly in place (an older flip could leave them moved
