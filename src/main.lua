@@ -119,7 +119,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.88 (cathedral floor; TTS table forced off; !tableinfo lists anything under the table)"
+SCRIPT_VERSION = "1.89 (floor rebuilt as a floating stone island; no black square, no stray stones)"
 
 function onLoad(saved)
   GameLog.setup()

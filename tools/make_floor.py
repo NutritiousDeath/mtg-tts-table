@@ -3,9 +3,9 @@
 Input:  assets/floor/source_gemini.png  (flagstone texture painted by Gemini)
 Output: assets/floor/stone_floor.jpg     tileable diffuse, darkened to sit behind the table
         assets/floor/stone_floor_n.png   normal map
-        assets/floor/vignette.png        black fade decal laid over the floor's outer part
-        assets/floor/floor.obj / floor_2hg.obj         the visible model
-        assets/floor/floor_col.obj / floor_col_2hg.obj simple box collider (non-convex)
+        assets/floor/floor.obj / floor_2hg.obj   the model (also its own non-convex collider):
+            a floating slab of cathedral floor with a ragged edge and rocky underside, and a
+            two-step dais under the frame's towers
 
 Heights come from the frame model: the corner towers end at y = -27 (the dais top), the
 centre pedestal at y = -31 (the floor).
@@ -70,10 +70,15 @@ class Mesh:
     def __init__(self):
         self.v, self.vt, self.f = [], [], []
 
-    def quad(self, pts, uvs):
+    def face(self, pts, uvs, out):
+        """Add a face, wound so its front faces the direction `out` (right-hand rule, like the frame)."""
+        P = np.array(pts, dtype=float)
+        n = np.cross(P[1] - P[0], P[2] - P[0])
+        if np.dot(n, out) < 0:
+            pts, uvs = pts[::-1], uvs[::-1]
         base_v, base_t = len(self.v), len(self.vt)
-        self.v += pts
-        self.vt += uvs
+        self.v += [tuple(map(float, p)) for p in pts]
+        self.vt += [tuple(map(float, t)) for t in uvs]
         self.f.append([(base_v + i + 1, base_t + i + 1) for i in range(len(pts))])
 
     def write(self, path, header):
@@ -85,89 +90,90 @@ class Mesh:
                 fh.write("vt %.4f %.4f\n" % t)
             for face in self.f:
                 fh.write("f " + " ".join("%d/%d" % x for x in face) + "\n")
-                # Both sides: whichever way TTS mirrors the import, every face shows.
-                fh.write("f " + " ".join("%d/%d" % x for x in reversed(face)) + "\n")
 
 
 def top_uv(p):
     return (p[0] / TILE, p[2] / TILE)
 
 
-def box(m, x0, x1, z0, z1, y0, y1, top=True, uv=True):
-    """Axis box, faces wound outward (TTS: counter-clockwise seen from outside)."""
-    P = lambda x, y, z: (x, y, z)
-    def side_uv(a, y):
-        return (a / TILE, y / TILE)
-    if top:
-        pts = [P(x0, y1, z0), P(x0, y1, z1), P(x1, y1, z1), P(x1, y1, z0)]
-        m.quad(pts, [top_uv(p) for p in pts])
-    # sides
-    s = [
-        ([P(x0, y0, z0), P(x1, y0, z0), P(x1, y1, z0), P(x0, y1, z0)], 0),   # -z
-        ([P(x1, y0, z1), P(x0, y0, z1), P(x0, y1, z1), P(x1, y1, z1)], 0),   # +z
-        ([P(x0, y0, z1), P(x0, y0, z0), P(x0, y1, z0), P(x0, y1, z1)], 2),   # -x
-        ([P(x1, y0, z0), P(x1, y0, z1), P(x1, y1, z1), P(x1, y1, z0)], 2),   # +x
-    ]
-    for pts, axis in s:
-        m.quad(pts, [side_uv(p[axis], p[1]) for p in pts])
-    bottom = [P(x0, y0, z0), P(x1, y0, z0), P(x1, y0, z1), P(x0, y0, z1)]
-    m.quad(bottom, [top_uv(p) for p in bottom])
+def box(m, x0, x1, z0, z1, y0, y1):
+    c = np.array([(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2])
+    corners = {
+        "top": [(x0, y1, z0), (x0, y1, z1), (x1, y1, z1), (x1, y1, z0)],
+        "-z": [(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0)],
+        "+z": [(x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)],
+        "-x": [(x0, y0, z0), (x0, y0, z1), (x0, y1, z1), (x0, y1, z0)],
+        "+x": [(x1, y0, z0), (x1, y0, z1), (x1, y1, z1), (x1, y1, z0)],
+    }
+    for k, pts in corners.items():
+        if k == "top":
+            uvs = [top_uv(p) for p in pts]
+        else:
+            ax = 0 if "z" in k else 2
+            uvs = [(p[ax] / TILE, p[1] / TILE) for p in pts]
+        m.face(pts, uvs, np.mean(pts, axis=0) - c)
 
 
-def crumbled_floor(m, rng):
-    """The floor slab: a square that breaks up into an uneven stone edge."""
-    n = 64
+def outline(hx, hz, rng, n=72, jag=0.06):
     ring = []
     for i in range(n):
         t = i / n * 2 * np.pi
-        # rounded-square outline with ragged bites
         c, s = np.cos(t), np.sin(t)
-        q = 1 / max(abs(c), abs(s)) ** 0.85
-        rad = FLOOR_R * min(q, 1.25) * (0.86 + 0.14 * rng.random())
-        ring.append((c * rad, s * rad))
-    y1, y0 = FLOOR_Y, FLOOR_Y - 1.5
-    # top: fan from centre
-    centre = (0.0, y1, 0.0)
+        q = 1 / max(abs(c), abs(s)) ** 0.8          # rounded square
+        k = q * (1 - jag * rng.random())
+        ring.append((c * hx * k, s * hz * k))
+    return ring
+
+
+def island(m, hx, hz, rng):
+    """The floor: a floating slab of the cathedral with a ragged edge and a rocky underside."""
+    ring = outline(hx, hz, rng)
+    n = len(ring)
+    y1, y0 = FLOOR_Y, FLOOR_Y - 4
     for i in range(n):
         a, b = ring[i], ring[(i + 1) % n]
-        pts = [centre, (b[0], y1, b[1]), (a[0], y1, a[1])]
-        m.quad(pts, [top_uv(p) for p in pts])
-    # rim
+        pts = [(0, y1, 0), (a[0], y1, a[1]), (b[0], y1, b[1])]
+        m.face(pts, [top_uv(p) for p in pts], (0, 1, 0))
+    # Underside rings, tapering to a point: (scale, y)
+    layers = [(1.0, y1), (1.0, y0), (0.82, FLOOR_Y - 10), (0.5, FLOOR_Y - 20), (0.18, FLOOR_Y - 30)]
+    rings = []
+    for sc, y in layers:
+        j = 1 if sc == 1.0 else (1 - 0.08 * rng.random(n))
+        rings.append([(ring[i][0] * sc * (j if np.isscalar(j) else j[i]), y, ring[i][1] * sc * (j if np.isscalar(j) else j[i])) for i in range(n)])
+    for L in range(len(rings) - 1):
+        up, dn = rings[L], rings[L + 1]
+        for i in range(n):
+            k = (i + 1) % n
+            pts = [up[i], dn[i], dn[k], up[k]]
+            mid = np.mean(pts, axis=0)
+            out = np.array([mid[0], -abs(mid[0]) * 0 - (0 if L == 0 else 20), mid[2]])
+            uvs = [((p[0] + p[1]) / TILE, (p[2] - p[1]) / TILE) for p in pts]
+            m.face(pts, uvs, out)
+    tip = (0, FLOOR_Y - 42, 0)
+    last = rings[-1]
     for i in range(n):
-        a, b = ring[i], ring[(i + 1) % n]
-        pts = [(a[0], y0, a[1]), (a[0], y1, a[1]), (b[0], y1, b[1]), (b[0], y0, b[1])]
-        L = np.hypot(b[0] - a[0], b[1] - a[1])
-        m.quad(pts, [(0, y0 / TILE), (0, y1 / TILE), (L / TILE, y1 / TILE), (L / TILE, y0 / TILE)])
-    # a few broken stones lying off the edge
-    for _ in range(14):
-        t = rng.random() * 2 * np.pi
-        rad = FLOOR_R * (0.95 + 0.2 * rng.random())
-        cx, cz = np.cos(t) * rad, np.sin(t) * rad
-        sx, sz = 2 + rng.random() * 5, 2 + rng.random() * 4
-        box(m, cx - sx, cx + sx, cz - sz, cz + sz, y0, y1 - rng.random() * 0.8)
+        pts = [last[i], tip, last[(i + 1) % n]]
+        m.face(pts, [top_uv(p) for p in pts], (0, -1, 0))
+
+
+ISLAND = {"four": (100.0, 100.0), "twohg": (110.0, 100.0)}
 
 
 def model(layout):
     rng = np.random.default_rng(7)
     hx, hz = FRAME_HALF[layout]
-    vis, col = Mesh(), Mesh()
-    crumbled_floor(vis, rng)
+    m = Mesh()
+    island(m, *ISLAND[layout], rng)
     for top, margin in DAIS:
-        box(vis, -hx - margin, hx + margin, -hz - margin, hz + margin, FLOOR_Y, top)
-    # Collider: the floor as one big slab, the dais steps as boxes.
-    box(col, -FLOOR_R, FLOOR_R, -FLOOR_R, FLOOR_R, FLOOR_Y - 1.5, FLOOR_Y)
-    for top, margin in DAIS:
-        box(col, -hx - margin, hx + margin, -hz - margin, hz + margin, FLOOR_Y, top)
+        box(m, -hx - margin, hx + margin, -hz - margin, hz + margin, FLOOR_Y, top)
     suffix = "" if layout == "four" else "_2hg"
-    hdr = "# Cathedral floor and dais (tools/make_floor.py)\n"
-    vis.write(os.path.join(OUT, "floor%s.obj" % suffix), hdr)
-    col.write(os.path.join(OUT, "floor_col%s.obj" % suffix), hdr + "# collider\n")
+    # The same mesh is its own (non-convex) collider, so pieces land exactly where the stone is.
+    m.write(os.path.join(OUT, "floor%s.obj" % suffix), "# Cathedral floor island and dais (tools/make_floor.py)\n")
 
 
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     texture()
-    vignette()
     model("four")
     model("twohg")
     print("done")

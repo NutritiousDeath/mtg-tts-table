@@ -497,12 +497,12 @@ function TableSetup.ensureFrame()
     collider = FRAME_BASE .. "collider.obj" .. FRAME_VERSION, type = 0, material = 1 })
 end
 
--- The cathedral floor the table stands on: worn flagstones with glowing cracks, a two-step stone dais
--- under the frame's towers, fading into darkness toward its crumbled edge (tools/make_floor.py; the
--- texture was painted with Gemini). It catches everything a table flip throws. One locked custom
+-- The cathedral floor the table stands on: a floating slab of worn flagstones with glowing cracks, a
+-- ragged edge and a rocky underside, and a two-step stone dais under the frame's towers
+-- (tools/make_floor.py; the texture was painted with Gemini). It catches everything a table flip throws. One locked custom
 -- model, kept between loads; replaced when its files change version.
 local FLOOR_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/floor/"
-local FLOOR_VERSION = "?v=1"
+local FLOOR_VERSION = "?v=2"
 local FLOOR_Y = -31
 
 function TableSetup.ensureFloor()
@@ -535,20 +535,13 @@ function TableSetup.ensureFloor()
       o.interactable = false
       o.setName("Cathedral Floor")
       o.addTag("TableFloor")
-      -- Darkness creeping in toward the edge, so the floor melts into the background.
-      o.setDecals({ {
-        name = "FloorFade",
-        url = FLOOR_BASE .. "vignette.png" .. FLOOR_VERSION,
-        position = { 0, FLOOR_Y + 0.05, 0 },
-        rotation = { 90, 0, 0 },
-        scale = { 320, 320, 1 },
-      } })
+      o.setDecals({})
       state.floor = o.getGUID()
     end,
   })
   obj.setCustomObject({ mesh = mesh, diffuse = FLOOR_BASE .. "stone_floor.jpg" .. FLOOR_VERSION,
     normal = FLOOR_BASE .. "stone_floor_n.png" .. FLOOR_VERSION,
-    collider = FLOOR_BASE .. "floor_col" .. suffix .. ".obj" .. FLOOR_VERSION,
+    collider = mesh,
     convex = false, type = 0, material = 1 })
 end
 
