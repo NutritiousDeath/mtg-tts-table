@@ -545,6 +545,89 @@ function TableSetup.ensureFloor()
     convex = false, type = 0, material = 1 })
 end
 
+-- Spectral torches: an iron sconce on the inner corner of each of the frame's four towers, with cold
+-- blue-cyan fire, embers and a real flickering light (a Unity AssetBundle: tools/unity/MTGTorchBuilder.cs).
+local TORCH_URL = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/torch/mtg_torch.unity3d?v=1"
+local TORCH_Y = 7.5          -- cup height (the tower body runs 3.5 .. 10)
+local TOWER_INSET = 7.6      -- frame edge to the tower's inner corner
+local TORCH_OUT = 1.15       -- cup distance out from the corner, along each axis
+
+local function torchSpots()
+  local hx = TableSetup.layout() == "twohg" and 66.7 or 56.7
+  local hz = 56.7
+  local out = {}
+  for _, sx in ipairs({ 1, -1 }) do
+    for _, sz in ipairs({ 1, -1 }) do
+      local cx, cz = sx * (hx - TOWER_INSET), sz * (hz - TOWER_INSET)
+      table.insert(out, {
+        pos = { cx - sx * TORCH_OUT, TORCH_Y, cz - sz * TORCH_OUT },
+        -- the sconce's arm (its +Z) points into the tower corner
+        yaw = math.deg(math.atan2 and math.atan2(sx, sz) or math.atan(sx, sz)),
+      })
+    end
+  end
+  return out
+end
+
+function TableSetup.placeTorches()
+  local state = GameState.data.table or {}
+  local spots = torchSpots()
+  for i, g in ipairs(state.torches or {}) do
+    local o = getObjectFromGUID(g)
+    local sp = spots[i]
+    if o and sp then
+      o.setLock(true)
+      o.setPosition(sp.pos)
+      o.setRotation({ 0, sp.yaw, 0 })
+    end
+  end
+end
+
+function TableSetup.ensureTorches()
+  local state = GameState.data.table
+  state.torches = state.torches or {}
+  -- Keep the four we have if they're this version; otherwise start over.
+  local good = #state.torches == 4
+  for _, g in ipairs(state.torches) do
+    local o = getObjectFromGUID(g)
+    local co = o and o.getCustomObject()
+    good = good and co ~= nil and co.assetbundle == TORCH_URL
+  end
+  if good then
+    TableSetup.placeTorches()
+    return
+  end
+  for _, g in ipairs(state.torches) do
+    local o = getObjectFromGUID(g)
+    if o then
+      o.destruct()
+    end
+  end
+  for _, o in ipairs(getObjectsWithTag("TableTorch")) do
+    o.destruct()
+  end
+  state.torches = {}
+  for i, sp in ipairs(torchSpots()) do
+    local obj = spawnObject({
+      type = "Custom_AssetBundle",
+      position = sp.pos,
+      rotation = { 0, sp.yaw, 0 },
+      scale = { 1, 1, 1 },
+      sound = false,
+      callback_function = function(o)
+        o.setLock(true)
+        o.setPosition(sp.pos)
+        o.setRotation({ 0, sp.yaw, 0 })
+        o.interactable = false
+        o.setName("Spectral Torch")
+        o.addTag("TableTorch")
+        state.torches[i] = o.getGUID()
+      end,
+    })
+    obj.setCustomObject({ assetbundle = TORCH_URL, type = 0, material = 2 })
+  end
+end
+
 -- Moody lighting to match the dark background: a dimmer, cold key light
 -- and a blue-violet ambient glow.
 function TableSetup.applyLighting()
@@ -634,6 +717,7 @@ function TableSetup.ensure()
   end
   TableSetup.ensureFrame()
   pcall(TableSetup.ensureFloor)
+  pcall(TableSetup.ensureTorches)
   TableSetup.ignorePointer()
   TableSetup.applyLighting()
 
@@ -780,6 +864,7 @@ function TableSetup.setLayout(layout)
   TableSetup.fitSurface()
   TableSetup.ensureFrame()
   pcall(TableSetup.ensureFloor)
+  pcall(TableSetup.placeTorches)
   applyHandZones()
   TableSetup.drawMats()
   if Zones then

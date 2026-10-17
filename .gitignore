@@ -1,3 +1,6 @@
 # Forge checkout used by tools/forge_triggers.py (GPL card scripts, ~34,000 files): never commit it.
 forge/
 __pycache__/
+
+# Unity project for the torches (huge; only the exported bundles go in assets/)
+unity/

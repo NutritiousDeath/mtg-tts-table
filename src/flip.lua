@@ -323,7 +323,7 @@ function Flip.repair()
   pcall(Flip.fixTable)
   pcall(TableSetup.ensure)
   for _, f in ipairs({ "Trackers.ensureTableDisplay", "Actions.ensure", "Turns.ensureStrips", "ManaChips.ensure",
-    "Stack.ensure", "ImportCards.ensure", "Planechase.placeChest" }) do
+    "Stack.ensure", "ImportCards.ensure", "Planechase.placeChest", "TableSetup.placeTorches" }) do
     local mod, fn = f:match("^(%w+)%.(%w+)$")
     pcall(function() _G[mod][fn]() end)
   end
