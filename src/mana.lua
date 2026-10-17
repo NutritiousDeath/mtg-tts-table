@@ -448,41 +448,61 @@ function ManaChips.onTap(obj, seat)
     ManaChips.offer(seat, obj.getName(), options)
     return
   end
-  -- Filter lands (Cascade Bluffs, Mystic Gate...): "{T}: Add {C}." or "{U/R}, {T}: Add {U}{U}, {U}{R}, or {R}{R}."
-  -- Ask which: plain {C}, or one of the filtered pairs (the {U/R} comes out of the mana pool).
+  -- Filter lands (Cascade Bluffs, Fetid Heath...): "{T}: Add {C}." or "{W/B}, {T}: Add {W}{W}, {W}{B}, or {B}{B}."
+  -- First: plain or FILTER. Filter: which pair (WW / WB / BB), then the {W/B} cost comes out of the mana pool
+  -- (asks which color to pay with when both are there).
   do
     local fa, fb, rest = text:match("{(%a)/(%a)}, {t}: add ([^%.\n]+)")
     if fa then
       fa, fb = fa:upper(), fb:upper()
-      local base = ManaChips.parseTap(text) or { { "C" } }
-      local choices, picks = {}, {}
-      for _, o2 in ipairs(base) do
-        table.insert(picks, { opt = o2 })
-        table.insert(choices, { label = label(o2), value = #picks })
-      end
-      for x, y in rest:gmatch("{(%a)}{(%a)}") do
-        table.insert(picks, { opt = { x:upper(), y:upper() }, filter = true })
-        table.insert(choices, { label = x:upper() .. y:upper() .. " (pay " .. fa .. "/" .. fb .. ")", value = #picks })
-      end
-      Effects.askChoice(seat, obj.getName() .. ": which mana?", "Plain {C}, or FILTER: pay {" .. fa .. "/" .. fb
-        .. "} from your mana pool and get two mana.", choices, function(i)
-        local pk = picks[i]
-        if pk == nil then
-          return
-        end
-        if pk.filter then
-          if ManaChips.get(seat, fa) > 0 then
-            ManaChips.add(seat, fa, -1)
-          elseif ManaChips.get(seat, fb) > 0 then
-            ManaChips.add(seat, fb, -1)
-          else
-            broadcastToColor(obj.getName() .. ": no {" .. fa .. "} or {" .. fb .. "} in your mana pool for the filter cost: pay it yourself.", seat, { 1, 0.6, 0.2 })
-          end
-        end
-        for _, k in ipairs(pk.opt) do
+      local nm = obj.getName()
+      local function finish(opt, paid)
+        for _, k in ipairs(opt) do
           ManaChips.add(seat, k, 1)
         end
-        printToAll("MTG > " .. obj.getName() .. ": " .. seat .. " adds " .. label(pk.opt) .. (pk.filter and (" (paid {" .. fa .. "/" .. fb .. "})") or "") .. ".", { 0.55, 0.9, 0.6 })
+        printToAll("MTG > " .. nm .. ": " .. seat .. " adds " .. table.concat(opt, "") .. (paid and (" (paid {" .. paid .. "} from the pool)") or "") .. ".", { 0.55, 0.9, 0.6 })
+      end
+      local function filter()
+        local pairs2, ch = {}, {}
+        for x, y in rest:gmatch("{(%a)}{(%a)}") do
+          table.insert(pairs2, { x:upper(), y:upper() })
+          table.insert(ch, { label = x:upper() .. y:upper(), value = #pairs2 })
+        end
+        Effects.askChoice(seat, nm .. ": filter into which mana?", "You pay {" .. fa .. "/" .. fb .. "} and get two mana.", ch, function(i)
+          local opt = pairs2[i]
+          if opt == nil then
+            return
+          end
+          local haveA, haveB = ManaChips.get(seat, fa) > 0, ManaChips.get(seat, fb) > 0
+          if haveA and haveB then
+            Effects.askChoice(seat, nm .. ": pay the filter with?", "Both are in your mana pool: which one pays the {" .. fa .. "/" .. fb .. "}?",
+              { { label = fa, value = fa }, { label = fb, value = fb } }, function(k)
+                ManaChips.add(seat, k, -1)
+                finish(opt, k)
+              end)
+          elseif haveA or haveB then
+            local k = haveA and fa or fb
+            ManaChips.add(seat, k, -1)
+            finish(opt, k)
+          else
+            broadcastToColor(nm .. ": no {" .. fa .. "} or {" .. fb .. "} in your mana pool for the filter cost: pay it yourself.", seat, { 1, 0.6, 0.2 })
+            finish(opt, nil)
+          end
+        end)
+      end
+      local base = ManaChips.parseTap(text) or { { "C" } }
+      local ch = {}
+      for i, o2 in ipairs(base) do
+        table.insert(ch, { label = label(o2), value = i })
+      end
+      table.insert(ch, { label = "FILTER (pay " .. fa .. "/" .. fb .. ")", value = "filter" })
+      Effects.askChoice(seat, nm .. ": which mana?", "Plain mana, or FILTER: pay {" .. fa .. "/" .. fb .. "} to get two mana ("
+        .. fa .. fa .. ", " .. fa .. fb .. " or " .. fb .. fb .. ").", ch, function(v)
+        if v == "filter" then
+          filter()
+        elseif base[v] then
+          finish(base[v], nil)
+        end
       end)
       return
     end

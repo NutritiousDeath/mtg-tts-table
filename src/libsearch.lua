@@ -299,7 +299,8 @@ function LibSearch.run(color)
     end
     faces[key] = face and face:gsub("/large/", "/small/", 1) or ""
     faces[key .. "|name"] = e.name
-    bigs[key] = face or ""
+    -- The hover preview looks this up by SLOT number (1st shown card, 2nd...), not deck position.
+    bigs[tostring(i)] = face or ""
   end
   big[color] = bigs
   shown[color] = guids
