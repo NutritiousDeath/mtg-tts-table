@@ -1304,3 +1304,12 @@ function Statics.hasFlash(card, caster)
   return false
 end
 
+-- "Players can't gain life" / "Your opponents can't gain life": the permanent that says so, or nil.
+function Statics.cantGainLife(seat)
+  for _, s in ipairs(Statics.forgeOthers()) do
+    if s.kind == "NL" and whoFits(s.f.w, seat, s.src.seat) then
+      return s.name
+    end
+  end
+  return nil
+end

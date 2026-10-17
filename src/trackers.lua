@@ -209,6 +209,20 @@ function Trackers.changeLife(color, delta, byColor)
   if p == nil or delta == 0 then
     return
   end
+  -- "Players can't gain life" (Forge static): an effect's life gain doesn't happen. A player's own
+  -- +life click still goes through (they may be fixing a mistake), with a reminder.
+  if delta > 0 and Statics and Statics.cantGainLife then
+    local okL, src = pcall(Statics.cantGainLife, color)
+    if okL and src then
+      local manual = byColor ~= nil and TableSetup and TableSetup.seat and TableSetup.seat(byColor) ~= nil
+      if not manual then
+        printToAll("MTG > " .. color .. " can't gain life (" .. src .. "): no life gained" .. (byColor and (" from " .. tostring(byColor)) or "") .. ".",
+          { 1, 0.55, 0.3 })
+        return
+      end
+      broadcastToColor("Note: " .. color .. " can't gain life right now (" .. src .. ").", byColor, { 1, 0.6, 0.2 })
+    end
+  end
   local before = p.life
   -- 2HG: the team's shared life (kept the same on both teammates).
   for _, c in ipairs(sharing(color)) do
