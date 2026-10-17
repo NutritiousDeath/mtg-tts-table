@@ -1081,8 +1081,18 @@ end
 function Statics.panharmonicons(seat)
   local n = 0
   for _, p in ipairs(perms()) do
-    if p.seat == seat and p.oracle:find("triggers an additional time", 1, true) and p.oracle:find("artifact or creature", 1, true) then
-      n = n + 1
+    if p.seat == seat then
+      if p.oracle:find("triggers an additional time", 1, true) and p.oracle:find("artifact or creature", 1, true) then
+        n = n + 1
+      else
+        -- Forge's Panharmonicon static, for wording the line above doesn't catch.
+        for _, e in pairs(Statics.forgeLines(p.obj.getName(), p.oracle)) do
+          if e.kind == "PH" then
+            n = n + 1
+            break
+          end
+        end
+      end
     end
   end
   return n
@@ -1293,3 +1303,4 @@ function Statics.hasFlash(card, caster)
   end
   return false
 end
+
