@@ -3,7 +3,8 @@ Regenerate with tools/forge_triggers.py (it writes both data files). Mana abilit
 
 How the table uses them (effects.lua Effects.parseBest): each step becomes one plain sentence the
 rules-text reader already handles, or one of the table's own actions where it has no words (damage to
-a creature, exile itself, pay-or-sacrifice, "that creature"). Forge's reading is used only when the
+a creature, exile itself, pay-or-sacrifice, "that creature", flicker, delayed end-step actions,
+animate, gain control, regenerate). Forge's reading is used only when the
 card's text reads to nothing or to fewer actions; on a tie, or when the text reading uses one of the
 table's hand-written handlers (The One Ring, Castle Locthwain...), the text's reading stands.
 Paragraphs with "if", "unless" or "instead" are always read from the text.
@@ -11,28 +12,33 @@ Counts (X = creatures you control, its power, counters on it, cards in hand / gr
 domain) are worked out when the ability resolves and said in chat. A count that a step before it
 would change, or the power / counters of a card that has just left the battlefield, is left to the text.
 
-Before / after (abilities = triggered + activated; v1.81 also counts each mode of a modal ability):
-                         v1.80                      v1.81 (Phase 3b)
-  abilities mapped       8340 of 25517 (32.7%)      10275 of 26097 (39.4%)
-  effects carried out    11916 of 22248 (53.6%)     12353 of 22248 (55.5%)   (all Forge cards, table's Lua)
-  readings lost vs v1.80                            0
-  newly carried out                                 437 (X counts, damage to creatures, DamageAll variants,
-                                                    reanimate / return from graveyard, tapped / attacking /
-                                                    opponent tokens, sacrifice, pay-or-sacrifice, Dig, "that creature")
-  carried out more fully                            53 (e.g. Krydle: + mill; Dusk Mangler: + discard and life loss)
-  modal modes (bullet lines) read more fully        31 of 1944, none worse
-  Jared 22/25, Yuriko 20/29 -> 21/29 (Cunning Evasion), Beamtown 24/29 effects carried out
+Before / after (abilities = triggered + activated; from v1.81 each mode of a modal ability counts too):
+                         v1.80                   v1.81 (3b)                v1.82 (3c)
+  abilities mapped       8340 of 25517 (32.7%)   10275 of 26097 (39.4%)    10746 of 26097 (41.2%)
+  effects carried out    11916 of 22248 (53.6%)  12353 of 22248 (55.5%)    12633 of 22248 (56.8%)  (all Forge cards)
+  readings lost                                  0 vs v1.80                0 vs v1.81 (and 0 changed)
+  Jared 22/25, Yuriko 21/29, Beamtown 24/29 effects carried out (unchanged by 3c)
 
-Effects: 10275 of 26097 triggered/activated abilities and modes mapped (39.4%) on 8862 cards. Written: forge_effects_data.lua (766 KB)
+Phase 3c (v1.82), by item (effects carried out on all Forge cards, cumulative):
+  1 flicker now / at the next end step, searches for any card or "mana value N or less"   12354 (+1)
+  2 delayed sacrifice / destroy / exile / return at the next end step or end of combat   12361 (+7)
+  3 Animate: becomes an N/N creature (until end of turn or for good); keyword-only        12447 (+86)
+  4 CopyPermanent: token copy of itself or a target creature                              12450 (+3)
+  5 GainControl (for good / until end of turn, untap, haste), Regenerate (shield marker) 12633 (+183)
+Most flicker / delayed / copy abilities were already read from the text, so those items add little;
+the rest of their Forge scripts remember tokens or earlier targets ("Remembered", "Targeted"), which
+the table doesn't track - left to the text.
+
+Effects: 10746 of 26097 triggered/activated abilities and modes mapped (41.2%) on 9244 cards. Written: forge_effects_data.lua (799 KB)
 
 Mapped steps by ApiType:
     1798  Token
-    1754  Pump
+    1756  Pump
     1546  Draw
     1319  PutCounter
-     818  GainLife
+     819  GainLife
      721  DealDamage
-     482  ChangeZone
+     549  ChangeZone
      474  LoseLife
      318  Discard
      268  Destroy
@@ -41,27 +47,33 @@ Mapped steps by ApiType:
      194  Untap
      191  Mill
      188  Sacrifice
+     184  Regenerate
      172  Tap
      152  Surveil
+      97  Animate
       87  DamageAll
       65  Dig
       59  PutCounterAll
       56  Proliferate
       50  PayOrSac
+      39  AtStep
+      30  Flicker
+      29  CopyPermanent
+      24  GainControl
       19  Counter
       18  UntapAll
-       5  TapAll
+       6  TapAll
 
 Abilities not mapped, by the ApiType of their first step (count, then the most common reasons):
-    2560  ChangeZone           condition RememberChanged 391, zones Graveyard->Exile 167, zones Battlefield->Hand 142, zones Graveyard->Battlefield 132
+    2463  ChangeZone           condition RememberChanged 297, zones Graveyard->Exile 167, zones Battlefield->Hand 142, zones Graveyard->Battlefield 132
     1111  Pump                 pump nothing 191, pump keyword 163, target prop attacking 64, key Duration 56
-     948  PutCounter           counter on You 120, several targets 64, counter  44, api 43
+     948  PutCounter           counter on You 120, several targets 64, counter  44, defined Targeted 40
      651  DealDamage           defined TriggeredCardControl 37, amount Count$xPaid 35, damage target prop attacking 34, damage to You 33
      641  Token                key RememberTokens 62, token owner TriggeredCardCon 38, legendary token 37, key TokenPower 29
      623  Effect               api 601, condition UnlessCost 12, several targets 4, condition ConditionDefined 4
      538  Dig                  condition RememberChanged 254, dig how 126, amount X 41, dig to Library 6
-     498  Draw                 defined TriggeredCardControl 45, api 33, condition ConditionCheckSVar 29, condition Optional 18
-     451  Animate              api 428, condition ConditionPresent 11, several targets 7, condition Optional 2
+     498  Draw                 defined TriggeredCardControl 45, condition ConditionCheckSVar 29, api 28, condition Optional 18
+     354  Animate              animate P/T 151, animate nothing 56, key RemoveCardTypes 24, animate keyword 20
      353  Destroy              defined TriggeredTargetLKICo 27, target prop nonBlack 22, target prop nonBasic 22, target prop ControlledBy 21
      321  PumpAll              PumpAll Creature.StrictlyOther+YouCtrl 17, PumpAll Creature.attacking 16, PumpAll Creature 14, PumpAll Creature.OppCtrl 13
      295  Tap                  defined Targeted 65, Tap Enchanted 60, several targets 31, api 18
@@ -70,18 +82,17 @@ Abilities not mapped, by the ApiType of their first step (count, then the most c
      241  Charm                modal (modes mapped one by one) 241
      236  Discard              Discard mode Hand 48, Discard for tgto 26, condition Optional 24, key RememberDiscarded 22
      231  LoseLife             defined TriggeredCardControl 30, defined TriggeredDefendingPl 15, defined TriggeredActivator 15, amount Number$0 10
-     229  Regenerate           api 229
      219  ChangeZoneAll        api 172, condition RememberChanged 41, defined TriggeredCardOwner 3, defined TriggeredDefendingPl 1
      208  Mill                 key RememberMilled 57, condition Optional 33, Mill for each 24, api 9
      193  GainLife             amount TriggerCount$DamageAmount 26, defined TriggeredCardControl 21, amount Sacrificed$CardToughness 9, count prop YouCtrl 8
-     185  CopyPermanent        api 172, defined Targeted 4, defined Imprinted.ExiledWith 3, defined TriggeredSpellAbilit 2
-     163  DelayedTrigger       api 163
      159  PutCounterAll        counters on Creature.YouCtrl+StrictlyOther 13, counters on Creature.StrictlyOther+YouCtrl 7, counters on Creature.Dragon+YouCtrl+StrictlyOther 5, counters on Creature.YouCtrl+counters_GE1_P1P1 5
-     155  GainControl          api 143, several targets 4, condition ConditionCheckSVar 3, defined TriggeredTargetLKICo 2
+     156  CopyPermanent        copy of TriggeredCardLKI 24, key DefinedName 13, key Populate 11, copies 2 11
      148  CopySpellAbility     defined TriggeredSpellAbilit 100, api 44, defined TriggeredSourceSA 3, condition UnlessCost 1
      148  ImmediateTrigger     api 137, condition ConditionCheckSVar 8, condition UnlessCost 2, condition ConditionDefined 1
+     131  GainControl          control to someone else 28, control until LeavesPlay,L 13, target Opponent 11, control until Untap,Leaves 9
      131  ChooseCard           api 124, defined TriggeredDefendingPl 3, defined TriggeredAttackingPl 1, defined TriggeredCardControl 1
-     122  Untap                several targets 23, api 15, Untap Enchanted 14, defined Targeted 12
+     124  DelayedTrigger       delayed SpellCast None 16, delayed Phase Upkeep 13, delayed step ['CounterNum'] 13, delayed step ['Controller'] 13
+     122  Untap                several targets 23, api 14, Untap Enchanted 14, defined Targeted 12
      120  Mana                 api 99, defined TriggeredCardControl 19, defined TriggeredActivator 1, condition UnlessCost 1
      119  Attach               api 111, several targets 4, defined Targeted 2, condition Optional 1
      115  MakeCard             api 114, defined TriggeredCardControl 1
@@ -105,6 +116,7 @@ Abilities not mapped, by the ApiType of their first step (count, then the most c
       52  FlipCoin             api 52
       48  ChooseType           api 48
       46  ChooseSource         api 45, condition UnlessCost 1
+      45  Regenerate           regenerate Enchanted 15, target prop Black 3, target Zombie 2, target prop Artifact 2
       45  Branch               api 45
       43  UntapAll             api 6, UntapAll Creature.attacking 6, UntapAll Creature 3, UntapAll Permanent.enchanted+YouCtrl 2
       41  Connive              api 40, defined TriggeredSourceLKICo 1
@@ -122,10 +134,10 @@ Abilities not mapped, by the ApiType of their first step (count, then the most c
       33  Draft                api 33
       33  RevealHand           api 27, defined Targeted 4, condition UnlessCost 1, defined TriggeredDefendingPl 1
       31  Goad                 api 25, several targets 6
-      31  TapAll               TapAll Creature.StrictlyOther 3, TapAll Land 2, api 2, TapAll Creature 2
       31  NameCard             api 30, condition ConditionCheckSVar 1
       30  MultiplyCounter      api 27, several targets 2, defined TriggeredSourceLKICo 1
-      29  Scry                 condition RememberChanged 5, dig how 3, condition ConditionCheckSVar 3, condition Optional 2
+      30  TapAll               TapAll Creature.StrictlyOther 3, TapAll Land 2, TapAll Creature 2, TapAll Creature.nonBlue 1
+      29  Scry                 condition RememberChanged 4, dig how 3, condition ConditionCheckSVar 3, condition Optional 2
       29  SacrificeAll         api 20, defined TriggeredObjectLKICo 3, defined Targeted 3, defined Imprinted 1
       26  ManifestDread        api 25, condition ConditionCheckSVar 1
       26  Discover             api 26
@@ -136,7 +148,7 @@ Abilities not mapped, by the ApiType of their first step (count, then the most c
       23  SetLife              api 21, defined TriggeredDefender 1, defined TriggeredSourceContr 1
       22  RingTemptsYou        api 22
       22  RearrangeTopOfLibrary api 22
-      22  Surveil              api 3, condition ConditionCheckSVar 3, condition Optional 3, key RememberMoved 2
+      22  Surveil              condition ConditionCheckSVar 3, condition Optional 3, api 2, key RememberMoved 2
       21  Incubate             api 21
       21  TakeInitiative       api 21
       21  Empower              api 21

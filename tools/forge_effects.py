@@ -614,6 +614,37 @@ def step(p, tokens, raw, token_db, self_trigger=False):
         out = {"f": f.strip()}
     elif api == "Proliferate":
         out = {}
+    elif api == "GainControl":
+        lose = get("LoseControl")
+        if lose not in (None, "EOT", "EndOfTurn"):
+            raise Unmapped("control until " + lose[:12])
+        if get("NewController") is not None:
+            raise Unmapped("control to someone else")
+        if "ValidTgts" not in p:
+            raise Unmapped("control of " + str(p.get("Defined"))[:16])
+        k, ctrl, other = target_kinds(get("ValidTgts"))
+        out = {"k": k, "c": ctrl}
+        if other:
+            out["o"] = 1
+        if lose:
+            out["eot"] = 1
+        if get("Untap") == "True":
+            out["u"] = 1
+        kws = get("AddKWs")
+        if kws:
+            if kws.strip().lower() != "haste":
+                raise Unmapped("control keywords")
+            out["h"] = 1
+    elif api == "Regenerate":
+        if "ValidTgts" in p:
+            k, ctrl, other = target_kinds(get("ValidTgts"))
+            out = {"on": "tgt", "k": k, "c": ctrl}
+        elif get("Defined", "Self") == "Self":
+            out = {"on": "self"}
+        elif p["Defined"] in THAT_CARD:
+            out = {"on": "that"}
+        else:
+            raise Unmapped("regenerate " + p["Defined"][:16])
     elif api == "CopyPermanent":
         if get("NumCopies", "1") != "1":
             raise Unmapped("copies " + p["NumCopies"][:8])

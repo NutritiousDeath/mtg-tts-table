@@ -2289,6 +2289,13 @@ local function fxAction(st, it, notes)
     end
     return { what = "forgeAnimate", who = "you", n = 1, p = tonumber(p.p), t = tonumber(p.t), types = p.ty, kw = p.kw,
       on = p.on, kinds = kinds, scope = p.c or "all", other = p.o ~= nil, perm = p.perm ~= nil }
+  elseif api == "GainControl" or api == "Regenerate" then
+    local kinds = {}
+    for k in tostring(p.k or ""):gmatch("[^/]+") do
+      kinds[k] = true
+    end
+    return { what = api == "GainControl" and "forgeControl" or "forgeRegen", who = "you", n = 1, kinds = kinds,
+      scope = p.c or "all", other = p.o ~= nil, on = p.on or "tgt", eot = p.eot ~= nil, untap = p.u ~= nil, haste = p.h ~= nil }
   elseif api == "AtStep" then
     return { what = "forgeAtStep", who = "you", n = 1, how = p["do"], on = p.of, step = p.st, mine = p.mine ~= nil }
   elseif api == "Flicker" then
@@ -2454,7 +2461,7 @@ local FX_GENERIC = {}
 for _, w in ipairs({ "draw", "gain", "lose", "mill", "discard", "mayDiscard", "scry", "counter", "counterOn",
   "counterAll", "token", "pump", "tap", "tapX", "tapTarget", "untap", "untapSelf", "untapAll", "removeTarget", "bounce",
   "bounceSelf", "graveReturn", "reanimate", "search", "look", "edict", "sacSelf", "counterSpell", "proliferate",
-  "damageAll", "forgeDamage", "forgeDamageAll", "forgeExileSelf", "forgePayOrSac", "forgeThat", "forgeFlicker", "forgeAtStep", "forgeAnimate",
+  "damageAll", "forgeDamage", "forgeDamageAll", "forgeExileSelf", "forgePayOrSac", "forgeThat", "forgeFlicker", "forgeAtStep", "forgeAnimate", "forgeControl", "forgeRegen",
   "blink", "copyCreature", "copySelf" }) do
   FX_GENERIC[w] = true
 end
@@ -2579,6 +2586,10 @@ local function describe(a, target, controller)
       .. (a.players == "opp" and "each opponent" or (a.players and "each player" or ""))
   elseif a.what == "forgeExileSelf" then
     return "it is exiled"
+  elseif a.what == "forgeControl" then
+    return "gain control of a target permanent" .. (a.eot and " until end of turn" or "")
+  elseif a.what == "forgeRegen" then
+    return "regenerate it"
   elseif a.what == "forgeAnimate" then
     return "becomes a " .. tostring(a.p) .. "/" .. tostring(a.t) .. " creature" .. (a.perm and "" or " until end of turn")
   elseif a.what == "forgeAtStep" then
@@ -3592,6 +3603,10 @@ local function apply(it, plan, target)
           Effects.forgeFlicker(seat, a, it)
         elseif a.what == "forgeAnimate" then
           Effects.forgeAnimate(seat, a, it)
+        elseif a.what == "forgeControl" then
+          Effects.forgeControl(seat, a, it)
+        elseif a.what == "forgeRegen" then
+          Effects.forgeRegen(seat, a, it)
         elseif a.what == "forgeAtStep" then
           local obj = a.on == "that" and it.thatCard and getObjectFromGUID(it.thatCard)
             or (a.on == "self" and it.source and getObjectFromGUID(it.source)) or nil
@@ -6652,6 +6667,12 @@ Events.on("stepStarted", function(d)
           Zones.refresh(obj)
           printToAll("MTG > " .. r.name .. ": " .. obj.getName() .. " is exiled (to " .. r.owner .. "'s exile).", GOOD)
         end
+      elseif r.kind == "forgeControlBack" then
+        local obj = getObjectFromGUID(r.guid)
+        if obj and not obj.isDestroyed() and Effects.fieldSeat(obj) and Effects.fieldSeat(obj) ~= r.to then
+          Effects.moveToSeat(obj, r.to)
+          printToAll("MTG > " .. r.name .. ": " .. obj.getName() .. " goes back to " .. r.to .. ".", GOOD)
+        end
       elseif r.kind == "forgeUnanimate" then
         local obj = getObjectFromGUID(r.guid)
         if GameState.data.animated then
@@ -9041,4 +9062,85 @@ function Effects.forgeAnimate(seat, a, it)
       end
     end, { filter = function(obj, owner) return kindsFit(obj, owner, a, seat, it.source) end, label = "TARGET" })
   end
+end
+
+-- A permanent changes control: it moves onto that seat's battlefield (its owner stays the same).
+function Effects.moveToSeat(obj, seat)
+  local st = TableSetup.seat(seat)
+  if st == nil then
+    return
+  end
+  local land = cardTypes(obj).land and not cardTypes(obj).creature
+  obj.setLock(false)
+  obj.setRotationSmooth({ 0, st.yaw, 0 }, false, true)
+  obj.setPositionSmooth(TableSetup.slot(seat, land and "lands" or "battlefield", TableSetup.SURFACE_TOP + 2), false, true)
+  Wait.time(function()
+    if not obj.isDestroyed() then
+      Zones.refresh(obj)
+    end
+  end, 1.2)
+end
+
+local function forgePick(seat, a, it, label, go)
+  if a.on == "self" then
+    go(it.source and getObjectFromGUID(it.source))
+  elseif a.on == "that" then
+    go(it.thatCard and getObjectFromGUID(it.thatCard))
+  else
+    ask(seat, it.name .. ": choose the target", "Click " .. label .. " on it, or SKIP.", { { label = "SKIP", value = false } }, function(obj)
+      if obj then
+        go(obj)
+      else
+        printToAll("MTG > " .. it.name .. ": no target chosen.", INFO)
+      end
+    end, { filter = function(obj, owner) return kindsFit(obj, owner, a, seat, it.source) end, label = label })
+  end
+end
+
+-- "Gain control of target creature until end of turn. Untap it. It gains haste."
+function Effects.forgeControl(seat, a, it)
+  forgePick(seat, a, it, "TARGET", function(obj)
+    local from = obj and not obj.isDestroyed() and fieldSeat(obj)
+    if not from then
+      printToAll("MTG > " .. it.name .. ": it isn't on the battlefield any more - nothing happens.", INFO)
+      return
+    end
+    if from ~= seat then
+      if Effects.ownerOf and Effects.setOwner and Effects.ownerOf(obj) == nil then
+        Effects.setOwner(obj, from)
+      end
+      Effects.moveToSeat(obj, seat)
+    end
+    if a.untap then
+      Wait.time(function()
+        if not obj.isDestroyed() then
+          Effects.untapObj(obj)
+        end
+      end, 1.4)
+    end
+    if a.haste and Counters.addTempKeyword then
+      Counters.addTempKeyword(obj, "haste")
+    end
+    if a.eot and from ~= seat then
+      Effects.addDelayed({ seat = seat, anySeat = true, step = "cleanup", kind = "forgeControlBack", guid = obj.getGUID(), to = from,
+        name = it.name })
+    end
+    printToAll("MTG > " .. it.name .. ": " .. seat .. " gains control of " .. obj.getName() .. (a.eot and " until end of turn" or "")
+      .. (a.untap and ", untaps it" or "") .. (a.haste and ", it gains haste" or "") .. ".", GOOD)
+  end)
+end
+
+-- "Regenerate ~": a shield marker until end of turn, and the reminder of what it does.
+function Effects.forgeRegen(seat, a, it)
+  forgePick(seat, a, it, "REGENERATE", function(obj)
+    if obj == nil or obj.isDestroyed() or not fieldSeat(obj) then
+      printToAll("MTG > " .. it.name .. ": it isn't on the battlefield any more - nothing happens.", INFO)
+      return
+    end
+    if Counters.addTempKeyword then
+      Counters.addTempKeyword(obj, "regeneration shield")
+    end
+    printToAll("MTG > " .. obj.getName() .. " has a regeneration shield this turn: the next time it would be destroyed, instead"
+      .. " tap it, remove it from combat and remove all damage from it (do that by hand).", GOOD)
+  end)
 end

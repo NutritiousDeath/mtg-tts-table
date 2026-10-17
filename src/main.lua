@@ -118,7 +118,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.81 (Forge effects: X counts, damage to creatures, reanimate, token variants, sacrifice / pay-or-sacrifice, modes, look at top N)"
+SCRIPT_VERSION = "1.82 (Forge effects: flicker, end-step actions, animate, token copies, gain control, regenerate)"
 
 function onLoad(saved)
   GameLog.setup()
