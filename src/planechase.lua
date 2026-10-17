@@ -676,10 +676,21 @@ function Planechase.placeChest(o)
   end
   local spot = chestSpot()
   local p = o.getPosition()
-  if math.abs(p.x - spot.x) > 0.5 or math.abs(p.z - spot.z) > 0.5 then
+  local fell = false
+  pcall(function()
+    local b = o.getBounds()
+    fell = math.abs((b.center.y - b.size.y / 2) - TableSetup.SURFACE_TOP) > 0.3
+  end)
+  if fell or math.abs(p.x - spot.x) > 0.5 or math.abs(p.z - spot.z) > 0.5 then
     o.setLock(true)
-    o.setPosition({ spot.x, p.y, spot.z })
     o.setRotation({ 0, spot.yaw, 0 })
+    o.setPosition({ spot.x, p.y, spot.z })
+    -- Sit it on the table (it may have fallen or been knocked off).
+    pcall(function()
+      local b = o.getBounds()
+      local bottom = b.center.y - b.size.y / 2
+      o.setPosition({ spot.x, p.y + (TableSetup.SURFACE_TOP - bottom), spot.z })
+    end)
   end
 end
 

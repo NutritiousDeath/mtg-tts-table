@@ -1,6 +1,6 @@
 --[[
   flip.lua
-  The table flip: a rage quit. Use Tabletop Simulator's own Flip Table, type !flip, or click
+  The table flip: a rage quit. Type !flip, or click
   "Flip the table!" under TURN OPTIONS: the stone table and everything on it is launched into the
   air, the screen flashes red and shakes with a "<PLAYER> RAGE QUIT!" banner,
   and a few seconds later everything glides back to where it was. !unflip puts
@@ -126,8 +126,8 @@ function Flip.play(color, reverse)
   end, STEP, FRAMES)
 end
 
--- The real chaos, like Tabletop Simulator's own "Flip Table" (which TTS's own button now sets off too:
--- see the watcher below):
+-- The real chaos, like Tabletop Simulator's own "Flip Table" (TTS's button only works on its built-in
+-- tables; ours is a custom surface, so this does it by script):
 --   * every card, token, die, counter, tile and pile on the table is launched, spinning;
 --   * a moment later the stone table itself (surface and frame) rears up and tumbles;
 --   * the mat pictures vanish while it's all in the air;
@@ -312,60 +312,18 @@ function Flip.unflip(color)
   Flip.play(color or "Someone", true)
 end
 
--- Tabletop Simulator's own Flip Table: TTS's built-in table is parked out of sight under ours
--- (table.lua). When TTS flips it (it starts spinning or tips over), our flip runs: banner, the stone
--- table and everything on it flying, all of it gliding back. Then TTS's table is put back in hiding.
-local nativeBusy = false
-
-local function tilt(deg)
-  deg = deg % 360
-  return math.min(deg, 360 - deg)
+-- !fixtable: put the table and every table tile (trackers, action tiles, console strips, turn strips,
+-- mana tiles, the stack mat, importers) back where they belong, e.g. after something got knocked off.
+function Flip.repair()
+  pcall(Flip.fixTable)
+  pcall(TableSetup.ensure)
+  for _, f in ipairs({ "Trackers.ensureTableDisplay", "Actions.ensure", "Turns.ensureStrips", "ManaChips.ensure",
+    "Stack.ensure", "ImportCards.ensure", "Planechase.placeChest" }) do
+    local mod, fn = f:match("^(%w+)%.(%w+)$")
+    pcall(function() _G[mod][fn]() end)
+  end
+  print("MTG > Table tiles put back in place.")
 end
-
-local function checkNative()
-  if nativeBusy then
-    return
-  end
-  local t = Tables.getTableObject()
-  if t == nil then
-    return
-  end
-  local ok, flipped = pcall(function()
-    local r = t.getRotation()
-    local av = t.getAngularVelocity()
-    local spin = math.abs(av.x) + math.abs(av.y) + math.abs(av.z)
-    return tilt(r.x) > 12 or tilt(r.z) > 12 or spin > 1.5
-  end)
-  if not ok then
-    return
-  end
-  if flipped then
-    nativeBusy = true
-    pcall(Flip.fixTable)
-    Flip.play(nil, false)
-    Wait.time(function() Flip.chaos(nil) end, 0.3)
-    -- Put TTS's table back in hiding once it's done tumbling (or make a fresh one if it won't move).
-    Wait.time(function()
-      if not TableSetup.parkNative() then
-        pcall(function()
-          Tables.setTable(TableSetup.NATIVE_TABLE)
-          Wait.time(function() TableSetup.parkNative() end, 0.5)
-        end)
-      end
-    end, 6)
-    Wait.time(function() nativeBusy = false end, 9)
-    return
-  end
-  -- Parked but drifting (it isn't locked)? Put it back.
-  pcall(function()
-    local p = t.getPosition()
-    if math.abs(p.y - TableSetup.NATIVE_PARK[2]) > 5 then
-      TableSetup.parkNative()
-    end
-  end)
-end
-
-Wait.time(function() pcall(checkNative) end, 0.25, -1)
 
 function ui_flipTable(player)
   Flip.flip(player.color)
@@ -376,8 +334,8 @@ function Flip.chat(message, color)
   if m == "!flip" or m == "!tableflip" or m == "!flip table" then
     Flip.flip(color)
     return true
-  elseif m == "!tableinfo" then
-    print("MTG > " .. TableSetup.nativeInfo())
+  elseif m == "!fixtable" then
+    Flip.repair()
     return true
   elseif m == "!unflip" or m == "!tableunflip" then
     Flip.unflip(color)

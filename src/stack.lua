@@ -546,6 +546,11 @@ function Stack.ensure()
   local co = mat and mat.getCustomObject()
   if mat and co and co.image == url then
     mat.setLock(true)
+    -- Back in its spot (a table flip or a bump can leave it elsewhere).
+    pcall(function()
+      mat.setRotation({ 0, MAT_YAW, 0 })
+      mat.setPosition({ MAT.x, TableSetup.SURFACE_TOP + mat.getBoundsNormalized().size.y / 2 + 0.01, MAT.z })
+    end)
   else
     if mat then
       mat.destruct()

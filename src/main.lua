@@ -119,7 +119,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.85 (TTS Flip Table works: the whole table and everything on it goes flying)"
+SCRIPT_VERSION = "1.86 (TTS table removed again; !fixtable puts table tiles back)"
 
 function onLoad(saved)
   GameLog.setup()
