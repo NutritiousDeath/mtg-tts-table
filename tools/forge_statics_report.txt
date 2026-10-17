@@ -8,6 +8,12 @@ only where its own reader didn't understand that line, so what worked stays exac
                creatures with flying", "can block only creatures with flying", color / type / power limits)
   CantAttack   combat.lua warns, like defender
   ReduceCost / RaiseCost   chat line when a spell is cast (net generic change and sources; payment unchanged)
+  AddAbility / AddTrigger  granted abilities: the line's quoted text goes into Statics.grants lines (v1.84)
+  MustAttack   warning at declare attackers for a creature that must attack and isn't (v1.84)
+  CantBeCast / CantBeActivated   warning naming the source when such a spell / ability is used (v1.84)
+  CastWithFlash   no sorcery-speed warning (new in v1.84: non-instant cast on another player's turn)
+  Panharmonicon   counted in Statics.panharmonicons where the text check didn't (v1.84)
+  CantGainLife   an effect's life gain doesn't happen (a player's own +life click still works) (v1.84)
 Not used on purpose: Enchanted / Equipped statics (equip.lua does those), anything with a condition
 (IsPresent, CheckSVar, Condition...), X amounts, other zones (AffectedZone / EffectZone).
 
@@ -20,40 +26,53 @@ Cards the table now reads better (Lupa harness, every Forge card, probe creature
   Decks: Jared - Lieges unchanged (text reading kept); Yuriko - Changeling Outcast "can't be blocked" enforced;
   Beamtown - no change.
 
-Statics: 1187 of 6953 static abilities mapped (17.1%) on 1139 cards. Written: forge_statics_data.lua (88 KB)
+Phase 4b (v1.84) before / after:
+                               v1.83              v1.84
+  statics mapped               1187 of 6953       1456 of 6953 (20.9%)
+  continuous better            84                 97 (granted abilities: Slivers and the like)
+  new kinds read               -                  138 cards (MustAttack 76, CastWithFlash 25, CantGainLife 19,
+                                                  CantBeActivated 10, CantBeCast 8)
+  cards read better in total   532                680, 0 worse
+  Liege check still 7/7; Jared / Beamtown unchanged, Yuriko: Changeling Outcast (since v1.83).
+
+Statics: 1456 of 6953 static abilities mapped (20.9%) on 1401 cards. Written: forge_statics_data.lua (105 KB)
 
 Mapped, by mode:
-     731  Continuous
+     861  Continuous
      216  CantBlockBy
      109  ReduceCost
      106  CantBlock
+      76  MustAttack
+      25  CastWithFlash
+      19  CantGainLife
       19  RaiseCost
+      10  CantBeActivated
+       8  CantBeCast
        4  CantAttack
        2  CantAttack,CantBlock
+       1  Panharmonicon
 
 Not mapped, by mode (count, then the most common reasons):
-    4007  Continuous             affects Enchanted 552, affects Equipped 430, key AffectedZone 393, key AddAbility 338
+    3877  Continuous             affects Enchanted 701, affects Equipped 522, key AffectedZone 405, key IsPresent 335
      410  ReduceCost             amount X 125, key ValidTarget 48, key CheckSVar 47, key IsPresent 44
      147  AlternativeCost        mode 147
      124  CantBlockBy            prop EnchantedBy 21, key IsPresent 19, key CheckSVar 12, prop EquippedBy 11
      109  CantAttack             key UnlessDefender 44, key Target 21, key IsPresent 12, prop EnchantedBy 11
-      97  CantBeCast             mode 97
-      86  MustAttack             mode 86
+      89  CantBeCast             key NumLimitEachTurn 15, key CheckSVar 13, key Condition 9, key Origin 7
       74  RaiseCost              key Cost 35, key ValidTarget 14, key ValidSpell 6, key Relative 4
-      57  CastWithFlash          mode 57
       56  CantAttack,CantBlock   prop EnchantedBy 26, key IsPresent 12, key CheckSVar 10, prop powerLT 1
       43  MinMaxBlocker          mode 43
       40  OptionalCost           mode 40
-      38  Panharmonicon          mode 38
+      37  Panharmonicon          not an artifact or creature entering 24, key Origin 3, key ValidTarget 2, key ValidZone 2
+      32  CastWithFlash          key IsPresent 10, key CheckSVar 4, from Command 2, for Activated.Lo 2
       32  CantBlock              prop EnchantedBy 11, key IsPresent 8, key Condition 5, key CheckSVar 4
       31  CanAttackDefender      mode 31
-      30  CantBeActivated        mode 30
       28  OptionalAttackCost     mode 28
       27  CantTarget             mode 27
       26  CantAttackUnless       mode 26
       22  CantAttack,CantBlock,CantBeActivated mode 22
-      20  CantGainLife           mode 20
       20  CombatDamageToughness  mode 20
+      20  CantBeActivated        prop EnchantedBy 8, prop NamedCard 6, abilities Activated.Loyalt 1, abilities Activated.!ManaA 1
       15  UntapOtherPlayer       mode 15
       14  ManaConvert            mode 14
       14  AssignCombatDamageAsUnblocked mode 14
@@ -61,6 +80,7 @@ Not mapped, by mode (count, then the most common reasons):
       11  IgnoreLegendRule       mode 11
       11  IgnoreLandWalk         mode 11
       10  CantPutCounter         mode 10
+      10  MustAttack             prop EnchantedBy 4, key IsPresent 3, key MustAttack 1, key ValidPlayer 1
       10  TapPowerValue          mode 10
       10  CantPlayLand           mode 10
        9  DisableTriggers        mode 9
@@ -72,3 +92,4 @@ Not mapped, by mode (count, then the most common reasons):
        5  MustBlock              mode 5
        4  CanBlockIfShadow       mode 4
        4  AttackRequirement      mode 4
+       4  ActivateAbilityAsIfHaste mode 4
