@@ -119,7 +119,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "1.84 (Forge statics: granted abilities, must attack, can't cast / activate, flash timing, can't gain life)"
+SCRIPT_VERSION = "1.85 (TTS Flip Table works: the whole table and everything on it goes flying)"
 
 function onLoad(saved)
   GameLog.setup()

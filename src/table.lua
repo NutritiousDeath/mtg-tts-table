@@ -536,6 +536,53 @@ function TableSetup.ignorePointer()
   end
 end
 
+-- TTS's own table, kept hidden under ours so Tabletop Simulator's "Flip Table" works: TTS can only
+-- flip one of its built-in tables (on "no table" its flip does nothing). We use the plain Custom
+-- Square table, park it out of sight below our stone table, and watch it (flip.lua): the moment TTS
+-- flips it, our whole table and everything on it goes flying, then it all comes back.
+TableSetup.NATIVE_TABLE = "Table_Custom_Square"
+TableSetup.NATIVE_URL = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/table/surface.png?v=1"
+TableSetup.NATIVE_PARK = { 0, -60, 0 }   -- where the hidden TTS table waits
+
+-- Park TTS's table out of sight (it's only there to be flipped). Returns true if it moved.
+function TableSetup.parkNative()
+  local t = Tables.getTableObject()
+  if t == nil then
+    return false
+  end
+  local ok = pcall(function()
+    t.setVelocity({ 0, 0, 0 })
+    t.setAngularVelocity({ 0, 0, 0 })
+    t.setRotation({ 0, 0, 0 })
+    t.setPosition(TableSetup.NATIVE_PARK)
+  end)
+  return ok
+end
+
+function TableSetup.ensureNative()
+  if Tables.getTable() ~= TableSetup.NATIVE_TABLE then
+    Tables.setTable(TableSetup.NATIVE_TABLE)
+  end
+  pcall(function()
+    if Tables.getCustomURL() ~= TableSetup.NATIVE_URL then
+      Tables.setCustomURL(TableSetup.NATIVE_URL)
+    end
+  end)
+  -- The table object appears a moment after it's set.
+  Wait.time(function() TableSetup.parkNative() end, 0.5)
+end
+
+-- !tableinfo: where TTS's hidden table is and how big (for checking the flip setup).
+function TableSetup.nativeInfo()
+  local t = Tables.getTableObject()
+  if t == nil then
+    return "TTS table: none (" .. tostring(Tables.getTable()) .. ")"
+  end
+  local p, r, b = t.getPosition(), t.getRotation(), t.getBounds()
+  return string.format("TTS table: %s at (%.1f, %.1f, %.1f) rot (%.0f, %.0f, %.0f) size %.1f x %.1f x %.1f",
+    tostring(Tables.getTable()), p.x, p.y, p.z, r.x, r.y, r.z, b.size.x, b.size.y, b.size.z)
+end
+
 -- Make sure the table exists and matches the current layout. Safe to call
 -- every load: the surface is only created once.
 function TableSetup.ensure()
@@ -543,9 +590,7 @@ function TableSetup.ensure()
   d.table = d.table or { layout = "four" }
   local state = d.table
 
-  if Tables.getTable() ~= "Table_None" then
-    Tables.setTable("Table_None")
-  end
+  TableSetup.ensureNative()
 
   if not (state.surface and getObjectFromGUID(state.surface)) then
     spawnSurface(state)

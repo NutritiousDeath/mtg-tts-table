@@ -1,7 +1,7 @@
 --[[
   flip.lua
-  The table flip: a rage quit. Type !flip (or click "Flip the table!" under
-  TURN OPTIONS): the real cards and dice on the table are launched into the
+  The table flip: a rage quit. Use Tabletop Simulator's own Flip Table, type !flip, or click
+  "Flip the table!" under TURN OPTIONS: the stone table and everything on it is launched into the
   air, the screen flashes red and shakes with a "<PLAYER> RAGE QUIT!" banner,
   and a few seconds later everything glides back to where it was. !unflip puts
   it back, gently (screen only).
@@ -101,7 +101,7 @@ function Flip.play(color, reverse)
         UI.setAttribute("flipLayer", "offsetXY", sx .. " " .. sy)
       end
       if f == math.floor(FRAMES * 0.4) then
-        UI.setValue("flipText", string.upper(tostring(color)) .. " RAGE QUIT!")
+        UI.setValue("flipText", color and (string.upper(tostring(color)) .. " RAGE QUIT!") or "TABLE FLIP!")
       end
       if f == math.floor(FRAMES * 0.62) then
         UI.setValue("flipSub", "\"" .. INSULTS[math.random(#INSULTS)] .. "\"")
@@ -126,39 +126,18 @@ function Flip.play(color, reverse)
   end, STEP, FRAMES)
 end
 
--- (v1.79: the table no longer tips: moving it by script made everything fall through the floor.)
--- The real chaos, like Tabletop Simulator's own "Flip Table" (which only works on TTS's built-in
--- tables; ours is a custom surface, so this does it by script):
---   * the play surface and stone frame tip up off the flipper's edge, pivoting on the far edge;
---   * every loose card, token, die, counter and pile on the table is launched, spinning;
---   * the mat pictures and outlines vanish while the table is up;
---   * a few seconds later the table drops back and EVERYTHING glides back to exactly where it was.
--- Kept safe: cards in hands, libraries and face-down cards stay put (nothing hidden gets revealed),
--- and locked pieces (life tiles, trackers) don't move. While it runs, nothing can merge into a deck,
--- fall into a hand, or count as a move (zones.lua checks Flip.chaosOn).
+-- The real chaos, like Tabletop Simulator's own "Flip Table" (which TTS's own button now sets off too:
+-- see the watcher below):
+--   * every card, token, die, counter, tile and pile on the table is launched, spinning;
+--   * a moment later the stone table itself (surface and frame) rears up and tumbles;
+--   * the mat pictures vanish while it's all in the air;
+--   * a few seconds later the table glides back, then EVERYTHING glides back to exactly where it was.
+-- Kept safe: cards in hands, libraries and face-down cards stay put (nothing hidden gets revealed).
+-- While it runs, nothing can merge into a deck, fall into a hand, or count as a move (zones.lua checks
+-- Flip.chaosOn).
 Flip.chaosOn = false
 
-local TIP_MAX = 115        -- degrees the table tips up
-local TIP_UP = 0.8         -- seconds to tip up
-local HOLD = 1.6           -- seconds it stays up
-local TIP_DOWN = 0.9       -- seconds to drop back
-local TICK = 0.03
-
--- Rotate vector v about unit axis a by angle t (radians).
-local function rodrigues(v, a, t)
-  local c, sn = math.cos(t), math.sin(t)
-  local cx = a.y * v.z - a.z * v.y
-  local cy = a.z * v.x - a.x * v.z
-  local cz = a.x * v.y - a.y * v.x
-  local dot = a.x * v.x + a.y * v.y + a.z * v.z
-  return {
-    x = v.x * c + cx * sn + a.x * dot * (1 - c),
-    y = v.y * c + cy * sn + a.y * dot * (1 - c),
-    z = v.z * c + cz * sn + a.z * dot * (1 - c),
-  }
-end
-
--- The table pieces that tip: surface and frame, with where they rest.
+-- The table pieces that fly: surface and frame, with where they rest.
 local function tablePieces()
   local out = {}
   local st = GameState.data and GameState.data.table or {}
@@ -171,65 +150,9 @@ local function tablePieces()
   return out
 end
 
--- Tip setup for the flipper's seat: the pivot on the far edge and the axis to turn about (snapped
--- to the table's own x or z axis so the frame's Euler angles stay simple).
-local function tipFor(color)
-  local s = color and TableSetup.isActive(color) and TableSetup.seat(color)
-  local n = s and s.inward or { x = 0, z = 1 }
-  local w, d = TableSetup.surfaceSize()
-  local axis, euler, half
-  if math.abs(n.x) > math.abs(n.z) then
-    local sx = n.x > 0 and 1 or -1
-    n = { x = sx, z = 0 }
-    half = w / 2
-  else
-    local sz = n.z > 0 and 1 or -1
-    n = { x = 0, z = sz }
-    half = d / 2
-  end
-  -- axis = up x n: turning by +angle lifts the flipper's (near) edge.
-  axis = { x = n.z, y = 0, z = -n.x }
-  if axis.x ~= 0 then
-    euler = function(deg) return { axis.x * deg, 0, 0 } end
-  else
-    euler = function(deg) return { 0, 0, axis.z * deg } end
-  end
-  local pivot = { x = n.x * half, y = TableSetup.SURFACE_TOP, z = n.z * half }
-  return pivot, axis, euler
-end
-
-local function placeTable(pieces, pivot, axis, euler, deg)
-  local t = math.rad(deg)
-  for _, e in ipairs(pieces) do
-    local o = e.obj
-    if not o.isDestroyed() then
-      local v = { x = e.pos.x - pivot.x, y = e.pos.y - pivot.y, z = e.pos.z - pivot.z }
-      local r = rodrigues(v, axis, t)
-      o.setPosition({ pivot.x + r.x, pivot.y + r.y, pivot.z + r.z })
-      local eu = euler(deg)
-      o.setRotation({ e.rot.x + eu[1], e.rot.y, e.rot.z + eu[3] })
-    end
-  end
-end
-
--- Animate the tip from one angle to another over `secs`, then call done.
-local function tween(pieces, pivot, axis, euler, from, to, secs, done)
-  local n = math.max(1, math.floor(secs / TICK))
-  local i = 0
-  Wait.time(function()
-    i = i + 1
-    local p = i / n
-    local e = (to > from) and (1 - (1 - p) * (1 - p)) or (p * p)   -- ease out going up, ease in coming down
-    placeTable(pieces, pivot, axis, euler, from + (to - from) * e)
-    if i >= n and done then
-      done()
-    end
-  end, TICK, n)
-end
-
 -- Only real game pieces fly: never zones, hand zones, the table, or scripted helpers.
 local FLIES = { Card = true, Deck = true, Dice = true, Tile = true, Token = true, Chip = true, Figurine = true,
-  Generic = true, Coin = true }
+  Generic = true, Coin = true, Block = true }
 
 local runChaos   -- defined below
 
@@ -244,6 +167,7 @@ function Flip.chaos(color)
   end
   -- Never leave the table stuck in flip mode.
   Wait.time(function() Flip.chaosOn = false end, 15)
+  Wait.time(function() pcall(Flip.fixTable); pcall(function() Zones.drawIcons() end) end, 12)
 end
 
 runChaos = function(color)
@@ -261,8 +185,7 @@ runChaos = function(color)
   local list = {}
   for _, o in ipairs(getObjects()) do
     local ok, take = pcall(function()
-      if not FLIES[o.type] or skip[o.getGUID()] or o.getLock() or o.held_by_color ~= nil
-          or inHand[o.getGUID()] or o.interactable == false then
+      if not FLIES[o.type] or skip[o.getGUID()] or o.held_by_color ~= nil or inHand[o.getGUID()] then
         return false
       end
       if o.type == "Card" and o.is_face_down then
@@ -277,24 +200,49 @@ runChaos = function(color)
       return true
     end)
     if ok and take then
-      table.insert(list, { obj = o, pos = o.getPosition(), rot = o.getRotation() })
+      table.insert(list, { obj = o, pos = o.getPosition(), rot = o.getRotation(), locked = o.getLock() })
     end
   end
   Flip.chaosOn = true
   print("MTG > Table flip: " .. #list .. " piece" .. (#list == 1 and "" or "s") .. " go flying.")
-  -- The table itself stays put (moving it by script left the cards falling through the floor).
-  -- Everything loose is launched up and away from the flipper, spinning.
+  -- Everything is launched up and away from the flipper, spinning: the pieces first, and a moment
+  -- later the stone table itself rears up and tumbles. The mat pictures vanish while it's up.
   local s = color and TableSetup.isActive(color) and TableSetup.seat(color)
   local push = s and s.inward or { x = 0, z = 0 }
   for _, e in ipairs(list) do
     local p = e.pos
     pcall(function()
+      e.obj.setLock(false)
       e.obj.setVelocity({ p.x * 0.25 + push.x * 12 + math.random(-8, 8), math.random(25, 40),
         p.z * 0.25 + push.z * 12 + math.random(-8, 8) })
       e.obj.setAngularVelocity({ math.random(-25, 25), math.random(-25, 25), math.random(-25, 25) })
     end)
   end
+  pcall(function() Global.setDecals({}) end)
+  Wait.time(function()
+    for i, e in ipairs(pieces) do
+      pcall(function()
+        e.obj.setLock(false)
+        e.obj.setVelocity({ push.x * 10, 18 + i * 3, push.z * 10 })
+        local spin = (push.x ~= 0 or push.z ~= 0) and { push.z * 4, 0, -push.x * 4 } or { 3, 1, -2 }
+        e.obj.setAngularVelocity(spin)
+      end)
+    end
+  end, 0.15)
   -- A few seconds later: everything glides home, locked on the way so nothing bumps anything.
+  Wait.time(function()
+    -- The table glides home first.
+    for _, e in ipairs(pieces) do
+      pcall(function()
+        local o = e.obj
+        o.setVelocity({ 0, 0, 0 })
+        o.setAngularVelocity({ 0, 0, 0 })
+        o.setLock(true)
+        o.setPositionSmooth(e.pos, false, false)
+        o.setRotationSmooth(e.rot, false, false)
+      end)
+    end
+  end, 3.0)
   Wait.time(function()
     for _, e in ipairs(list) do
       pcall(function()
@@ -309,13 +257,15 @@ runChaos = function(color)
       end)
     end
     Wait.time(function()
+      pcall(Flip.fixTable)
+      pcall(function() Zones.drawIcons() end)
       for _, e in ipairs(list) do
         pcall(function()
           local o = e.obj
           if not o.isDestroyed() then
             o.setPosition(e.pos)
             o.setRotation(e.rot)
-            o.setLock(false)
+            o.setLock(e.locked == true)
           end
         end)
       end
@@ -362,6 +312,61 @@ function Flip.unflip(color)
   Flip.play(color or "Someone", true)
 end
 
+-- Tabletop Simulator's own Flip Table: TTS's built-in table is parked out of sight under ours
+-- (table.lua). When TTS flips it (it starts spinning or tips over), our flip runs: banner, the stone
+-- table and everything on it flying, all of it gliding back. Then TTS's table is put back in hiding.
+local nativeBusy = false
+
+local function tilt(deg)
+  deg = deg % 360
+  return math.min(deg, 360 - deg)
+end
+
+local function checkNative()
+  if nativeBusy then
+    return
+  end
+  local t = Tables.getTableObject()
+  if t == nil then
+    return
+  end
+  local ok, flipped = pcall(function()
+    local r = t.getRotation()
+    local av = t.getAngularVelocity()
+    local spin = math.abs(av.x) + math.abs(av.y) + math.abs(av.z)
+    return tilt(r.x) > 12 or tilt(r.z) > 12 or spin > 1.5
+  end)
+  if not ok then
+    return
+  end
+  if flipped then
+    nativeBusy = true
+    pcall(Flip.fixTable)
+    Flip.play(nil, false)
+    Wait.time(function() Flip.chaos(nil) end, 0.3)
+    -- Put TTS's table back in hiding once it's done tumbling (or make a fresh one if it won't move).
+    Wait.time(function()
+      if not TableSetup.parkNative() then
+        pcall(function()
+          Tables.setTable(TableSetup.NATIVE_TABLE)
+          Wait.time(function() TableSetup.parkNative() end, 0.5)
+        end)
+      end
+    end, 6)
+    Wait.time(function() nativeBusy = false end, 9)
+    return
+  end
+  -- Parked but drifting (it isn't locked)? Put it back.
+  pcall(function()
+    local p = t.getPosition()
+    if math.abs(p.y - TableSetup.NATIVE_PARK[2]) > 5 then
+      TableSetup.parkNative()
+    end
+  end)
+end
+
+Wait.time(function() pcall(checkNative) end, 0.25, -1)
+
 function ui_flipTable(player)
   Flip.flip(player.color)
 end
@@ -370,6 +375,9 @@ function Flip.chat(message, color)
   local m = tostring(message):lower()
   if m == "!flip" or m == "!tableflip" or m == "!flip table" then
     Flip.flip(color)
+    return true
+  elseif m == "!tableinfo" then
+    print("MTG > " .. TableSetup.nativeInfo())
     return true
   elseif m == "!unflip" or m == "!tableunflip" then
     Flip.unflip(color)
