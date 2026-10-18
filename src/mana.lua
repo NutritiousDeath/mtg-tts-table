@@ -381,6 +381,12 @@ function ManaChips.isSacMana(obj)
   return text:find("{t}, sacrifice [^:]*: add") ~= nil
 end
 
+-- The right-click label: the card itself goes (Treasure), or another permanent pays (The Golden Throne).
+function ManaChips.sacManaLabel(obj)
+  local what = oracleOf(obj):match("{t}, sacrifice an? (%a+): add")
+  return what and ("Tap for mana (sacrifice a " .. what .. ")") or "Sacrifice for mana"
+end
+
 local function sacAfterMana(obj, seat)
   Wait.time(function()
     if obj and not obj.isDestroyed() then
@@ -448,7 +454,46 @@ end
 function ManaChips.onTap(obj, seat)
   pcall(landAuraBonus, obj, seat)
   local text = oracleOf(obj)
-  if text:find("{t}, sacrifice [^:]*: add") then
+  -- The Golden Throne: "{T}, Sacrifice a creature: Add three mana in any combination of colors." The
+  -- sacrifice is another creature (picked), then each mana's color.
+  do
+    local sacWhat, many = text:match("{t}, sacrifice an? (%a+): add (%a+) mana in any combination of colors")
+    if sacWhat then
+      local n = ({ one = 1, two = 2, three = 3, four = 4, five = 5 })[many] or 1
+      local nm = obj.getName()
+      local cols = { { label = "W", value = "W" }, { label = "U", value = "U" }, { label = "B", value = "B" },
+        { label = "R", value = "R" }, { label = "G", value = "G" } }
+      local got = {}
+      local function pickColor(i)
+        if i > n then
+          printToAll("MTG > " .. nm .. ": " .. seat .. " adds " .. table.concat(got, "") .. ".", { 0.55, 0.9, 0.6 })
+          return
+        end
+        Effects.askChoice(seat, nm .. ": mana " .. i .. " of " .. n, "Pick the color of this mana.", cols, function(k)
+          if k then
+            ManaChips.add(seat, k, 1)
+            table.insert(got, k)
+          end
+          pickColor(i + 1)
+        end)
+      end
+      Effects.askChoice(seat, nm .. ": sacrifice a " .. sacWhat, "Click SACRIFICE on the " .. sacWhat .. " to sacrifice (the cost), or SKIP.",
+        { { label = "SKIP", value = false } }, function(o)
+          if not o or o.isDestroyed() then
+            return
+          end
+          printToAll("MTG > " .. seat .. " sacrifices " .. o.getName() .. " (" .. nm .. ").", { 0.75, 0.8, 0.9 })
+          Combat.removeCard(o, "graveyard")
+          pickColor(1)
+        end, { filter = function(o, owner)
+          return owner == seat and o ~= obj and Effects.cardTypes(o)[sacWhat] == true
+        end, label = "SACRIFICE" })
+      return
+    end
+  end
+  -- "{T}, Sacrifice this artifact: Add ..." (Treasure, Lotus Petal): the card itself goes.
+  local sacPart = text:match("{t}, sacrifice ([^:]*): add")
+  if sacPart and (sacPart == "~" or sacPart:find("^this") or sacPart:find("^it$")) then
     sacAfterMana(obj, seat)
   end
   -- Bloom Tender: one mana of each color among your permanents.

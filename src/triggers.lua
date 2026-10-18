@@ -440,8 +440,13 @@ local function parseTrigger(p)
   end
   local castType = between(p, "whenever you cast a", " spell")
   castType = castType and castType:gsub("^n? ", "") or nil
+  -- "Whenever you cast another Vampire spell" (Edgar Markov's eminence): the spell isn't this card.
+  local another = false
+  if castType and castType:find("^nother ") then
+    castType, another = castType:sub(8), true
+  end
   if castType and #castType < 30 and castType ~= "" then
-    return { kind = "cast", who = "you", spellType = castType }
+    return { kind = "cast", who = "you", spellType = castType, other = another or nil }
   end
   if plainFind(p, "whenever you cast a spell") then
     return { kind = "cast", who = "you" }
@@ -1796,7 +1801,15 @@ local function spellMatches(card, spellType, source)
     return n >= 2
   end
   local first = spellType:match("^(%a+)")
-  return first ~= nil and t[first] == true
+  if first == nil then
+    return false
+  end
+  if t[first] == true then
+    return true
+  end
+  -- A creature type ("vampire", "dragon"): from the type line.
+  local tl = tostring((cardData(card) or {}).typeLine or ""):lower()
+  return tl:find(first, 1, true) ~= nil and tl:find("creature", 1, true) ~= nil
 end
 
 -- A Forge spell/card filter (tools/forge_triggers.py spell_filter): "alt/alt", each
@@ -2014,10 +2027,24 @@ Events.on("spellCast", function(d)
         name = d.card.getName(), face = faceOf(d.card) })
     end
   end
-  for _, p in ipairs(permanents()) do
+  -- Eminence (Edgar Markov, The Ur-Dragon...): "if ~ is in the command zone or on the battlefield" works
+  -- from the command zone too.
+  local sources = permanents()
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" and obj.held_by_color == nil then
+      local okl, loc = pcall(function() return Zones.regionAt(obj.getPosition()) end)
+      if okl and loc and loc.seat and (loc.region == "command1" or loc.region == "command2" or loc.region == "command") then
+        local cd = cardData(obj)
+        if tostring(cd and cd.oracle or ""):lower():find("command zone or on the battlefield", 1, true) then
+          table.insert(sources, { obj = obj, controller = loc.seat })
+        end
+      end
+    end
+  end
+  for _, p in ipairs(sources) do
     for _, a in ipairs(abilitiesOf(p.obj)) do
       local t = a.trig
-      if t.kind == "cast" then
+      if t.kind == "cast" and not (t.other and p.obj == d.card) then
         local mine = p.controller == d.controller
         local firstOk = true
         if t.nth and seatNo ~= t.nth then

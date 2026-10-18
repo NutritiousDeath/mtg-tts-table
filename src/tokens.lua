@@ -379,6 +379,21 @@ local function score(r, spec)
   if same then
     s = s + 3
   end
+  -- The plain token over look-alikes: "Treasure" must not come out as "Sculpture Treasure" (a 1/1
+  -- artifact creature). An exact name wins; extra name words and an unasked-for creature type lose.
+  local want = table.concat(spec.words, " ")
+  local nm = tostring(r.name):lower()
+  if nm == want then
+    s = s + 5
+  end
+  local extra = 0
+  for _ in nm:gmatch("%S+") do
+    extra = extra + 1
+  end
+  s = s - math.max(0, extra - #spec.words)
+  if not spec.pt and not want:find("creature", 1, true) and tostring(r.typeLine):lower():find("creature", 1, true) then
+    s = s - 4
+  end
   return s
 end
 

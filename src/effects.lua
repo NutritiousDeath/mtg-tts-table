@@ -488,6 +488,13 @@ function Effects.parse(text, sourceName)
       if i then
         local rest = t:sub(j + 1)
         local w = rest:match("^([%a%-]+) creature you control")
+        -- "put a +1/+1 counter on each Vampire you control" (Edgar Markov): a creature type.
+        local bare = rest:match("^([%a%-]+) you control")
+        if w == nil and bare and not ({ other = true, creature = true, permanent = true, artifact = true,
+            land = true, enchantment = true, planeswalker = true })[bare] then
+          w = bare:gsub("s$", "")
+          rest = "creature you control"
+        end
         local other = false
         if w == "other" then
           other, w = true, nil
@@ -2477,7 +2484,13 @@ function Effects.parseBest(text, name, it)
     return plan, why
   end
   if plan ~= nil and (#plan.actions >= #fp.actions or #(plan.conds or {}) > 0) then
-    return plan, why
+    -- A condition that's always true where the trigger can happen (eminence: "if ~ is in the command
+    -- zone or on the battlefield") with nothing parsed for the rest: Forge's reading is better.
+    local onlyWhere = #plan.actions == 0 and #(plan.conds or {}) == 1
+      and tostring(plan.conds[1].cond):find("command zone or on the battlefield", 1, true) ~= nil
+    if not onlyWhere then
+      return plan, why
+    end
   end
   for _, a in ipairs(plan and plan.actions or {}) do
     if not FX_GENERIC[a.what] then
@@ -5042,12 +5055,7 @@ function Effects.jeska(seat, a, it)
     end
     nxt()
   end
-  local commander = false
-  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
-    if o.type == "Card" and Combat and Combat.isCommander and Combat.isCommander(o) and Effects.fieldSeat(o) == seat then
-      commander = true
-    end
-  end
+  local commander = Effects.controlsCommander(seat)
   local choices = { { label = "RED MANA", value = "mana" }, { label = "EXILE 3", value = "exile" } }
   if commander then
     table.insert(choices, { label = "BOTH", value = "both" })
@@ -5352,6 +5360,17 @@ local function dataColors(d)
       n = n + 1
     end
   end
+  -- No color list stored (some imports): read the mana cost instead ("{1}{U}{R}", hybrid "{W/U}").
+  if n == 0 and d.manaCost and d.manaCost ~= "" then
+    for sym in tostring(d.manaCost):gmatch("{([^}]+)}") do
+      for c in sym:upper():gmatch("[WUBRG]") do
+        if not set[c] then
+          set[c] = true
+          n = n + 1
+        end
+      end
+    end
+  end
   return set, n
 end
 
@@ -5494,7 +5513,10 @@ function Effects.jaredDeck(seat, a, it)
     end
     step()
   elseif w == "nivReborn" then
-    Effects.nivReborn(seat, it)
+    local okN, errN = pcall(Effects.nivReborn, seat, it)
+    if not okN then
+      printToAll("MTG > " .. it.name .. ": couldn't finish it (" .. tostring(errN) .. "). Resolve it by hand.", INFO)
+    end
   elseif w == "tapTarget" then
     ask(seat, it.name .. ": tap a creature?", "Click TAP on the creature to tap" .. (a.may and ", or SKIP." or "."),
       { { label = "SKIP", value = false } }, function(obj)
@@ -6942,12 +6964,7 @@ function Effects.resolve(it)
     -- Akroma's Will / commander "Will" cards: "If you control a commander as you cast this spell, you may choose both".
     local willBoth = false
     if lowRaw:find("if you control a commander as you cast this spell, you may choose both", 1, true) then
-      for _, o in ipairs(getObjectsWithTag("MTGCard")) do
-        if o.type == "Card" and not o.isDestroyed() and Combat and Combat.isCommander and Combat.isCommander(o)
-            and Effects.fieldSeat(o) == it.controller then
-          willBoth = true
-        end
-      end
+      willBoth = Effects.controlsCommander(it.controller)
       if willBoth then
         printToAll("MTG > " .. it.name .. ": " .. it.controller .. " controls a commander: they may choose both modes.", INFO)
       end
@@ -7524,6 +7541,26 @@ local function fieldSeat(obj)
   return nil
 end
 Effects.fieldSeat = fieldSeat
+
+-- "If you control a commander" (Akroma's Will, Jeska's Will...): any commander on this seat's battlefield,
+-- known by the card it was imported as or, failing that, by its name in the seat's commander list (a
+-- commander card can come back as a new object).
+function Effects.controlsCommander(seat)
+  local names = {}
+  pcall(function()
+    for _, n in ipairs(GameState.player(seat).commanderNames or {}) do
+      names[n] = true
+    end
+  end)
+  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+    if o.type == "Card" and not o.isDestroyed() and fieldSeat(o) == seat then
+      if (Combat and Combat.isCommander and Combat.isCommander(o)) or names[o.getName()] then
+        return true
+      end
+    end
+  end
+  return false
+end
 
 -- How many permanents of a kind a seat (or its opponents) control: "Treasures
 -- you control", "artifacts your opponents control". Tokens count by name.
@@ -8376,6 +8413,10 @@ end
 -- true / false for the conditions it knows, nil for the rest (asked as YES / NO).
 function Effects.condValue(cond, seat, name)
   do
+    -- Eminence: the trigger only happens from the command zone or the battlefield, so it holds.
+    if cond:find("is in the command zone or on the battlefield", 1, true) then
+      return true
+    end
     local n = cond:match("^you gained (%d+) or more life this turn$")
     if n then
       return Trackers.lifeThisTurn(seat).gained >= tonumber(n)

@@ -314,9 +314,39 @@ function Trackers.flagLoss(color, reason)
   Trackers.render(color)
 end
 
+-- The Golden Throne ("Arcane Life-support — If you would lose the game, instead exile The Golden Throne and
+-- your life total becomes 1."): this seat's Throne on the battlefield, if any.
+local function lifeSupport(color)
+  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+    if o.type == "Card" and not o.isDestroyed() then
+      local okl, loc = pcall(function() return Zones.regionAt(o.getPosition()) end)
+      if okl and loc and loc.seat == color and (loc.region == "battlefield" or loc.region == "lands") then
+        local d = CardData.get(o)
+        if tostring(d and d.oracle or ""):lower():find("if you would lose the game, instead exile", 1, true) then
+          return o
+        end
+      end
+    end
+  end
+  return nil
+end
+
 function Trackers.confirmLoss(color, byColor)
   local p = player(color)
   if p == nil or p.lossFlag == nil then
+    return
+  end
+  local throne = lifeSupport(color)
+  if throne then
+    local nm = throne.getName()
+    if Combat and Combat.removeCard then
+      Combat.removeCard(throne, "exile")
+    end
+    p.life = 1
+    p.lossFlag, p.lossForced, p.lossDismissed = nil, nil, nil
+    broadcastToAll(color .. " would lose the game (" .. tostring(byColor and "confirmed by " .. byColor or "loss") .. "), but "
+      .. nm .. " is exiled instead and their life total becomes 1!", { 1, 0.85, 0.3 })
+    Trackers.render(color)
     return
   end
   p.eliminated = true

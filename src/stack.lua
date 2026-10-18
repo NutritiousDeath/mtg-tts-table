@@ -1158,7 +1158,7 @@ function Stack.addCardMenu(obj, full)
   end
   -- Treasure, Lotus Petal: a mana ability (no stack).
   if ManaChips and ManaChips.isSacMana and ManaChips.isSacMana(obj) then
-    obj.addContextMenuItem("Sacrifice for mana", function(playerColor)
+    obj.addContextMenuItem(ManaChips.sacManaLabel and ManaChips.sacManaLabel(obj) or "Sacrifice for mana", function(playerColor)
       local seat = seatOf(obj) or playerColor
       ManaChips.sacForMana(obj, seat)
     end)

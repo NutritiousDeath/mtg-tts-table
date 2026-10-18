@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.03 (fire sounds play in full; fireplace crackle louder)"
+SCRIPT_VERSION = "2.04 (Edgar eminence, Golden Throne, Akroma's Will both, attack tax CHANGE, dead blockers keep the block, Treasure tokens, Niv-Mizzet)"
 
 function onLoad(saved)
   GameLog.setup()

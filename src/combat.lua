@@ -894,6 +894,11 @@ local function lockBlocks()
           attackerController = turn().activeSeat })
       end
     end
+    if #bl == 0 and c.keepBlocked and c.keepBlocked[ag] then
+      c.blocked[ag] = true
+      table.insert(parts, (a and a.getName() or "?") .. " was blocked (its blocker is gone): no damage to the player"
+        .. ((a and hasKeyword(a, "Trample")) and " except through trample" or ""))
+    end
     if #bl > 0 then
       c.blocked[ag] = true
       local names = {}
@@ -1834,8 +1839,9 @@ function Combat.onNext(color)
         local okT, cost, lines, taxed = pcall(Combat.attackTax, c)
         if okT and cost ~= "" then
           Effects.askChoice(color, "Attack tax: " .. cost, "Attacking costs " .. cost .. ":\n" .. table.concat(lines, "\n")
-            .. "\nPAY it (from your mana pool), or DROP the taxed attackers.",
-            { { label = "PAY " .. cost, value = "pay" }, { label = "DROP THEM", value = "drop" }, { label = "BACK", value = false } },
+            .. "\nPAY it (from your mana pool), DROP the taxed attackers, or CHANGE your attackers (take some off,"
+            .. " point them at another player) and click NEXT STEP again.",
+            { { label = "PAY " .. cost, value = "pay" }, { label = "DROP THEM", value = "drop" }, { label = "CHANGE", value = false } },
             function(v)
               if v == "pay" then
                 local _, covered = ManaChips.pay(color, cost, "attack tax")
@@ -1851,8 +1857,11 @@ function Combat.onNext(color)
                   redraw(obj(g))
                 end
                 printToAll("MTG > " .. color .. " doesn't pay the attack tax: those attackers stay home.", INFO)
-                c.taxOk = true
-                Turns.next(color)
+                -- Stay in the attack step: pick other attackers (or none) and click NEXT STEP again.
+                broadcastToColor("Taxed attackers dropped. Still in ATTACK: pick other attackers if you like, then NEXT STEP.",
+                  color, INFO)
+              else
+                broadcastToColor("Change your attackers, then click NEXT STEP again (the tax is worked out again).", color, INFO)
               end
             end)
           return true
@@ -2000,6 +2009,10 @@ Events.on("cardMoved", function(d)
       if a then
         unblock(guid)
         redraw(obj(a))
+        -- The attacker it blocked stays blocked (rule 509.1h / 506.4): no damage to the player unless
+        -- it has trample.
+        c.keepBlocked = c.keepBlocked or {}
+        c.keepBlocked[a] = true
       end
       c.gone[guid] = true
       redraw(d.card)
