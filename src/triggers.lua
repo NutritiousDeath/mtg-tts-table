@@ -1268,7 +1268,7 @@ function Triggers.orderXml()
         .. 'rectAlignment="MiddleCenter" offsetXY="10 0">-</Text></Panel>'):format(c, i, c, i, c, i, c, i))
     end
     table.insert(parts, ([[
-<Panel id="trigOrder_%s" visibility="%s" active="false" rectAlignment="MiddleCenter" offsetXY="0 60" width="600" height="200"
+<Panel id="trigOrder_%s" visibility="%s" active="false" rectAlignment="MiddleLeft" offsetXY="20 60" width="600" height="200"
        color="#0B0F17F5" outline="#5AF0FF" outlineSize="2 2" allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="14 14 12 12" spacing="6" childForceExpandHeight="false">
     <Text fontSize="17" fontStyle="Bold" color="#5AF0FF" alignment="MiddleLeft" preferredHeight="24">ORDER YOUR TRIGGERS</Text>

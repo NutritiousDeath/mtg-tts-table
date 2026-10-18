@@ -496,6 +496,11 @@ function ManaChips.onTap(obj, seat)
   if sacPart and (sacPart == "~" or sacPart:find("^this") or sacPart:find("^it$")) then
     sacAfterMana(obj, seat)
   end
+  -- "...: Add {R} or {G}. You gain 2 life." (Kibo's Banana): the life comes with the mana.
+  local life = text:match(": add [^%.]*%.%s*you gain (%d+) life")
+  if life and Trackers and Trackers.changeLife then
+    Trackers.changeLife(seat, tonumber(life), seat)
+  end
   -- Bloom Tender: one mana of each color among your permanents.
   if text:find("for each color among permanents you control, add one mana of that color", 1, true) then
     local cols = ManaChips.colorsAmong(seat)

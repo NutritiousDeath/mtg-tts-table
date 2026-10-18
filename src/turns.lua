@@ -531,6 +531,20 @@ local function promptNext()
   local t = turn()
   local p = t.pending
   hideAllPrompts()
+  -- YIELD: players who yielded pass on their own (while something is on the stack).
+  local yielded = GameState.data.yield or {}
+  local skipped = {}
+  while p.queue[p.at] and yielded[p.queue[p.at]] and (p.kind == "ask" or not (Stack and Stack.isEmpty and Stack.isEmpty())) do
+    table.insert(skipped, p.queue[p.at])
+    p.at = p.at + 1
+  end
+  if #skipped > 0 then
+    printToAll("MTG > " .. table.concat(skipped, ", ") .. " yielded: no response.", INFO)
+  end
+  if p.at > #p.queue then
+    Turns.commitPending(p.kind)
+    return
+  end
   local who = p.queue[p.at]
   if p.kind == "ask" then
     UI.setValue("respondText_" .. who, tostring(p.text) .. "\nAny responses?")
@@ -581,6 +595,19 @@ local function commit(kind)
     end
   end
   advance()
+end
+
+function Turns.commitPending(kind)
+  commit(kind)
+end
+
+-- A player just clicked YIELD: if they're the one being asked right now, that's a pass.
+function Turns.yieldNow(color)
+  local t = turn()
+  local p = t.pending
+  if p and p.queue[p.at] == color then
+    Turns.respond(color, false)
+  end
 end
 
 local function requestMove(kind)
@@ -828,8 +855,8 @@ function Turns.respondXml()
   local parts = {}
   for _, c in ipairs(TableSetup.activeSeats()) do
     table.insert(parts, ([[
-<Panel id="respond_%s" visibility="%s" active="false" rectAlignment="MiddleCenter" offsetXY="0 140" width="460" height="236"
-       color="#0B0F17F5" outline="#5AF0FF" outlineSize="2 2">
+<Panel id="respond_%s" visibility="%s" active="false" rectAlignment="UpperCenter" offsetXY="0 -20" width="460" height="236"
+       color="#0B0F17F5" outline="#5AF0FF" outlineSize="2 2" allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="16 16 14 14" spacing="10" childForceExpandHeight="false">
     <Text fontSize="20" fontStyle="Bold" color="#5AF0FF" preferredHeight="26">RESPONSES?</Text>
     <Text id="respondText_%s" fontSize="15" color="#E6F1FF" preferredHeight="70">-</Text>
@@ -840,8 +867,8 @@ function Turns.respondXml()
     </HorizontalLayout>
   </VerticalLayout>
 </Panel>
-<Panel id="undoRespond_%s" visibility="%s" active="false" rectAlignment="MiddleCenter" offsetXY="0 140" width="460" height="120"
-       color="#0B0F17F0" outline="#FFB347" outlineSize="2 2">
+<Panel id="undoRespond_%s" visibility="%s" active="false" rectAlignment="UpperCenter" offsetXY="0 -20" width="460" height="120"
+       color="#0B0F17F0" outline="#FFB347" outlineSize="2 2" allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="14 14 10 10" spacing="8" childForceExpandHeight="false">
     <Text fontSize="15" color="#E6F1FF" preferredHeight="40">You clicked I HAVE A RESPONSE.
 Misclick? Take it back (only until something happens).</Text>

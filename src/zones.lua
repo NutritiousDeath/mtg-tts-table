@@ -249,7 +249,14 @@ function Zones.onPickUp(color, obj)
   if owner then
     where[obj.getGUID()] = { seat = owner, region = "hand" }
   else
-    where[obj.getGUID()] = Zones.regionAt(obj.getPosition())
+    -- TTS may already have taken it out of the hand list when it's picked up:
+    -- a card we know is in a hand, lifted from outside every area, still comes from the hand
+    -- (so playing a land counts as "played" for Horn of Greed and the land count).
+    local was = where[obj.getGUID()]
+    local here = Zones.regionAt(obj.getPosition())
+    if not (was and was.region == "hand" and here.region == "table") then
+      where[obj.getGUID()] = here
+    end
   end
 end
 
@@ -276,6 +283,7 @@ function Zones.onEnterZone(zone, obj)
   end
   local ok, color = pcall(function() return zone.getValue() end)
   if ok and color and TableSetup.isActive(color) then
+    handCache.at = -100   -- the hands changed: read them again next time
     moveTo(obj, obj.getName(), obj.getGUID(), { seat = color, region = "hand" })
   end
 end

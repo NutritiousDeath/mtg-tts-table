@@ -95,6 +95,11 @@ function Effects.parse(text, sourceName)
     i = j + 1
   end
   text = table.concat(kept, "\n")
+  -- A token "with '<its own ability>'" (Kibo's Banana: "{T}, Sacrifice this artifact: Add {R} or {G}...")
+  -- goes before the cost is split off: the colon inside the quotes isn't this ability's cost.
+  text = text:gsub("\226\128\156", '"'):gsub("\226\128\157", '"')
+  text = text:gsub('([Tt]okens?) named ([%a\' ]-) with "[^"]*"', "%1 named %2")
+  text = text:gsub('([Tt]okens?) with "[^"]*"', "%1")
   local t = " " .. effectPart(tostring(text or ""):lower()) .. " "
   -- The card's own name (and "this creature" etc.) as "~".
   local function swap(n)
@@ -503,8 +508,23 @@ function Effects.parse(text, sourceName)
           if rest:find("^other ") then
             other = true
           end
+          -- "each creature you control that's an Ape or a Monkey" (Kibo, Uktabi Prince).
+          local words
+          local thats = rest:match("^o?t?h?e?r? ?creatures? you control that's ([%a ,%-]+)")
+          if thats then
+            words = {}
+            for piece in thats:gsub(" or ", ","):gsub(" and ", ","):gmatch("[^,]+") do
+              local wd = piece:gsub("^%s*an? ", ""):gsub("^%s+", ""):gsub("%s+$", "")
+              if wd ~= "" then
+                table.insert(words, wd)
+              end
+            end
+            if #words == 0 then
+              words = nil
+            end
+          end
           return { optional = t:find("you may put", 1, true) ~= nil, notes = {}, conds = {},
-            actions = { { what = "counterAll", who = "you", n = 1, mode = "add", word = w, other = other } } }
+            actions = { { what = "counterAll", who = "you", n = 1, mode = "add", word = w, words = words, other = other } } }
         end
       end
     end
@@ -532,8 +552,10 @@ function Effects.parse(text, sourceName)
       end
     end
     -- Sly Requisitioner: each player creates a Treasure token.
+    -- Kibo, Uktabi Prince: each player creates a colorless artifact token named Banana.
     do
-      local w = t:match("^%s*each player creates an? (%a+) token%.?%s*$")
+      local w = t:match("^%s*each player creates an? [%a ]- ?token named (%a+)%.?%s*$")
+        or t:match("^%s*each player creates an? (%a+) token%.?%s*$")
       if w then
         return { optional = false, notes = {}, conds = {}, actions = { { what = "eachPlayerToken", who = "you", n = 1, word = w } } }
       end
@@ -2684,7 +2706,8 @@ local function describe(a, target, controller)
     return "add one mana of any color (you pick)"
   elseif a.what == "counterAll" then
     return a.mode == "double" and "double the +1/+1 counters on each creature you control"
-      or ("a +1/+1 counter on each " .. (a.other and "other " or "") .. (a.word and (a.word .. " ") or "") .. "creature you control")
+      or ("a +1/+1 counter on each " .. (a.other and "other " or "") .. (a.word and (a.word .. " ") or "") .. "creature you control"
+        .. (a.words and (" that's a " .. table.concat(a.words, " or ")) or ""))
   elseif a.what == "scute" then
     return "an Insect token, or a copy of itself with six or more lands"
   elseif a.what == "eachPlayerToken" then
@@ -4478,6 +4501,17 @@ function Effects.counterAll(seat, a, it)
         pcall(function() d = JSON.decode(obj.getGMNotes()) or {} end)
         local tl = " " .. tostring(d.typeLine or ""):lower():gsub("[^%a]", " ") .. " "
         ok = tl:find(" " .. a.word .. " ", 1, true) ~= nil
+      end
+      if a.words then
+        local d = {}
+        pcall(function() d = JSON.decode(obj.getGMNotes()) or {} end)
+        local tl = " " .. tostring(d.typeLine or ""):lower():gsub("[^%a]", " ") .. " "
+        ok = false
+        for _, wd in ipairs(a.words) do
+          if tl:find(" " .. wd .. " ", 1, true) then
+            ok = true
+          end
+        end
       end
       if ok then
         local amt = a.n
@@ -6824,7 +6858,7 @@ function Effects.xml()
         :format(c, i, c, i, c, i))
     end
     table.insert(parts, ([[
-<Panel id="effAsk_%s" visibility="%s" active="false" rectAlignment="MiddleCenter" offsetXY="0 -60" width="640" height="236"
+<Panel id="effAsk_%s" visibility="%s" active="false" rectAlignment="LowerLeft" offsetXY="20 240" width="600" height="236"
        color="#0B0F17F5" outline="#5AF0FF" outlineSize="2 2" allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="14 14 12 12" spacing="8" childForceExpandHeight="false">
     <Text id="effTitle_%s" fontSize="17" fontStyle="Bold" color="#5AF0FF" alignment="MiddleLeft" preferredHeight="24">-</Text>

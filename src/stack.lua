@@ -164,10 +164,12 @@ function Stack.render()
   end
   UI.setAttribute("stackPanel", "height", 130 + shown * 31)
   -- The stack emptied: yields and RESOLVE ALL are over.
-  if #list == 0 then
+  -- Only when it goes from something to empty: a YIELD clicked on an empty stack waits for the next item.
+  if #list == 0 and (Stack.lastCount or 0) > 0 then
     GameState.data.yield = nil
     Stack.autoResolve = nil
   end
+  Stack.lastCount = #list
   if Turns and Turns.render then
     Turns.render()
   end
@@ -645,6 +647,9 @@ function ui_stackYield(player)
   GameState.data.yield = GameState.data.yield or {}
   GameState.data.yield[c] = not GameState.data.yield[c] or nil
   broadcastToAll(c .. (GameState.data.yield[c] and " yields: no responses until the stack is empty." or " stops yielding."), INFO)
+  if GameState.data.yield[c] and Turns and Turns.yieldNow then
+    Turns.yieldNow(c)
+  end
 end
 
 -- RESOLVE ALL: resolve the top item, then the next, until the stack is empty or someone responds.

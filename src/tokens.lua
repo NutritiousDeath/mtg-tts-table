@@ -118,11 +118,18 @@ local function fromData(e)
   return { name = e.n, typeLine = e.t, entry = e, colorsSet = set, pt = (e.p and e.u) and (e.p .. "/" .. e.u) or nil }
 end
 
+-- Tokens Scryfall doesn't have, with the table's own picture (tools/make_banana_token.py).
+local ASSET_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/tokens/"
+local EXTRA_TOKENS = {
+  { n = "Banana", t = "Token Artifact", c = "", o = "{T}, Sacrifice this artifact: Add {R} or {G}. You gain 2 life.",
+    i = "banana", img = ASSET_BASE .. "banana.png?v=1" },
+}
+
 local function buildTpl(r)
   local e = r.entry
   local id = tostring(e.i)
   local host = Importer.RELAY_HOST
-  local face = "https://" .. host .. "/large/front/" .. id:sub(1, 1) .. "/" .. id:sub(2, 2) .. "/" .. id .. ".jpg"
+  local face = e.img or ("https://" .. host .. "/large/front/" .. id:sub(1, 1) .. "/" .. id:sub(2, 2) .. "/" .. id .. ".jpg")
   local types = {}
   local main = tostring(e.t)
   local dash = main:find(" — ", 1, true)
@@ -159,7 +166,7 @@ local function buildTpl(r)
       end
     end
   end
-  local data = { v = 1, name = e.n, scryfallId = e.i, manaCost = "", cmc = 0, typeLine = e.t, types = types,
+  local data = { v = 1, name = e.n, scryfallId = (not e.img) and e.i or nil, manaCost = "", cmc = 0, typeLine = e.t, types = types,
     oracle = e.o or "", keywords = kws, colors = colors, colorIdentity = colors, isCommander = false }
   local desc = { e.t }
   if e.o and e.o ~= "" then
@@ -189,6 +196,9 @@ local function allData()
   if dataList == nil then
     dataList = {}
     for _, e in ipairs(TOKEN_DATA or {}) do
+      table.insert(dataList, fromData(e))
+    end
+    for _, e in ipairs(EXTRA_TOKENS) do
       table.insert(dataList, fromData(e))
     end
   end

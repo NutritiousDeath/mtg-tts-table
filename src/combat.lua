@@ -432,25 +432,30 @@ function Combat.decorate(card)
   end
   local guid = card.getGUID()
   local seat = controller(card)
-  local label, bg, tip, fg, edge
+  local label, bg, tip, fg, edge, big
   if c.attackers and c.attackers[guid] then
     local n = #(c.blockOrder[guid] or {})
-    label = "ATK > " .. tostring(targetLabel(c.attackers[guid])):sub(1, 12)
+    -- Two lines, big and solid: who it's attacking must be readable from across the table.
+    label = "ATTACKING\n" .. string.upper(tostring(targetLabel(c.attackers[guid])):sub(1, 14))
     if step ~= "attackers" and n > 0 then
       label = label .. "\nBLOCKED x" .. n
     end
-    bg = { 0.45, 0.04, 0.1, 0.78 }
+    bg = { 0.32, 0.02, 0.06, 0.96 }
+    fg = { 1, 0.93, 0.6 }
+    big = true
     edge = { 1, 0.2, 0.3 }
     tip = (step == "attackers" and not c.declared)
       and "Attacking. Click: next target. Right-click: don't attack."
       or "Attacking " .. targetLabel(c.attackers[guid])
   elseif c.blocks and c.blocks[guid] then
     local a = obj(c.blocks[guid])
-    label = "BLK > " .. short(a and a.getName()):sub(1, 12)
+    label = "BLOCKING\n" .. string.upper(short(a and a.getName()):sub(1, 14))
     if c.extra and c.extra[guid] and #c.extra[guid] > 0 then
       label = label .. " +" .. #c.extra[guid]
     end
-    bg = { 0.04, 0.22, 0.45, 0.78 }
+    bg = { 0.03, 0.14, 0.32, 0.96 }
+    fg = { 0.85, 0.95, 1 }
+    big = true
     edge = { 0.3, 0.65, 1 }
     tip = step == "blockers" and "Blocking. Click: next attacker. Right-click: not blocking." or "Blocking"
   elseif step == "attackers" and not c.declared and seat == turn().activeSeat
@@ -471,7 +476,8 @@ function Combat.decorate(card)
     return
   end
   local nLines = select(2, label:gsub("\n", "\n")) + 1
-  local h = 50 + 135 * nLines
+  local fs = big and 150 or 110
+  local h = 60 + (fs + 30) * nLines
   card.createButton({
     click_function = "combat_cardClick",
     function_owner = Global,
@@ -480,9 +486,9 @@ function Combat.decorate(card)
     -- Along the bottom edge (grows upward), left of the power/toughness box.
     position = { -0.2, 0.3, 1.36 - (h / 1000) },
     rotation = { 0, 0, 0 },
-    width = 760,
+    width = big and 900 or 760,
     height = h,
-    font_size = 110,
+    font_size = fs,
     font_color = fg or { 1, 1, 1 },
     color = bg,
   })
