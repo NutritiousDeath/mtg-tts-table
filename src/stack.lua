@@ -501,7 +501,17 @@ function Stack.onDrop(color, obj)
     if tl:find("Land", 1, true) and not tl:find("//", 1, true) and not obj.is_face_down then
       return
     end
-    Stack.pushCard(obj, from.seat or color, from)
+    -- The player who dragged it out of their hand cast it. (The table's record of whose hand it was in has
+    -- been seen naming the wrong seat, which made someone else draw for a spell; in a real game the
+    -- dropping player wins, and the mismatch is reported so it can be tracked down.)
+    local controller = from.seat or color
+    if not GameState.solo() and TableSetup.isActive(color) and from.seat and from.seat ~= color then
+      printToAll("MTG > Note: " .. color .. " cast " .. obj.getName() .. " but the table had it in " .. from.seat
+        .. "'s " .. tostring(from.region) .. "; it counts as " .. color .. "'s spell. (Tell Claude if this shows up.)",
+        { 1, 0.75, 0.3 })
+      controller = color
+    end
+    Stack.pushCard(obj, controller, from)
   end, 0.25)
 end
 
