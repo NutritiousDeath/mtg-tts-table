@@ -199,6 +199,15 @@ function TableSetup.isTeamGame()
   return TEAMS[TableSetup.layout()] ~= nil
 end
 
+-- Are a and b opponents? Different players, and in 2HG not on the same team (a teammate isn't an opponent).
+function TableSetup.isOpponent(a, b)
+  if a == nil or b == nil or a == b then
+    return a ~= b
+  end
+  local ta = TableSetup.teamOf(a)
+  return ta == nil or ta ~= TableSetup.teamOf(b)
+end
+
 -- The other player on a seat's team (2HG), or nil.
 function TableSetup.teammate(color)
   local team = TableSetup.teamOf(color)

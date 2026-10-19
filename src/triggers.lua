@@ -1428,13 +1428,14 @@ Events.on("stepStarted", function(d)
       local t = a.trig
       if t.kind == "step" and (t.step == d.step or (t.step == "main" and (d.step == "main1" or d.step == "main2"))) then
         local mine = p.controller == d.seat
+        local oppOf = d.seat
         local hostOk = false
         if t.who == "host" and Equip then
           -- "At the beginning of the upkeep of enchanted creature's controller" (Curses, Auras).
           local host = Equip.hostOf(p.obj)
           hostOk = host ~= nil and not host.isDestroyed() and Zones.regionAt(host.getPosition()).seat == d.seat
         end
-        if t.who == "each" or (t.who == "you" and mine) or (t.who == "opp" and not mine) or hostOk then
+        if t.who == "each" or (t.who == "you" and mine) or (t.who == "opp" and TableSetup.isOpponent(p.controller, oppOf)) or hostOk then
           table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
         end
       end
@@ -1468,7 +1469,7 @@ Events.on("cardMoved", function(d)
       local stepId = tt.stepIndex and Turns.STEPS[tt.stepIndex] and Turns.STEPS[tt.stepIndex].id
       gd.drawStep = gd.drawStep or {}
       local first = false
-      if stepId == "draw" and tt.activeSeat == d.to.seat then
+      if stepId == "draw" and Turns.isActiveSeat(d.to.seat) then
         local key = tostring(tt.taken) .. "|" .. d.to.seat
         gd.drawStep[key] = (gd.drawStep[key] or 0) + 1
         first = gd.drawStep[key] == 1
@@ -1502,11 +1503,12 @@ Events.on("cardMoved", function(d)
         local t = a.trig
         if t.kind == "draw" then
           local mine = p.controller == d.to.seat
+          local oppOf = d.to.seat
           local nthOk = true
           if t.nth then
             nthOk = (GameState.data.drawLog and GameState.data.drawLog.by[d.to.seat] or 0) == t.nth
           end
-          if nthOk and (t.who == "each" or (t.who == "you" and mine) or (t.who == "opp" and not mine)) then
+          if nthOk and (t.who == "each" or (t.who == "you" and mine) or (t.who == "opp" and TableSetup.isOpponent(p.controller, oppOf))) then
             table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
           end
         end
@@ -1570,7 +1572,7 @@ Events.on("cardMoved", function(d)
                 return (tonumber(st.power) or 0) >= (t.powerMin or -99) and (tonumber(st.toughness) or 0) >= (t.toughMin or -99)
               end)())
               and not (t.mine and cardController ~= p.controller)
-              and not (t.theirs and cardController == p.controller) then
+              and not (t.theirs and not TableSetup.isOpponent(cardController, p.controller)) then
             table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
           end
         end
@@ -1729,7 +1731,8 @@ function Triggers.onLife(seat, delta)
       local t = a.trig
       if t.kind == "life" and t.dir == dir then
         local mine = p.controller == seat
-        if (t.who == "you" and mine) or (t.who == "opp" and not mine) then
+        local oppOf = seat
+        if (t.who == "you" and mine) or (t.who == "opp" and TableSetup.isOpponent(p.controller, oppOf)) then
           table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, amount = math.abs(delta) })
         end
       end
@@ -1866,7 +1869,7 @@ end
 Triggers.spellSpecMatches = spellSpecMatches
 
 local function whoMatches(t, seat, controller)
-  return t.who == nil or t.who == "each" or (t.who == "you" and seat == controller) or (t.who == "opp" and seat ~= controller)
+  return t.who == nil or t.who == "each" or (t.who == "you" and seat == controller) or (t.who == "opp" and TableSetup.isOpponent(seat, controller))
 end
 
 -- One event about a card (sacrificed, discarded, cycled, tapped, untapped): the
@@ -1892,7 +1895,7 @@ local function cardEvent(kind, card, seat)
       for _, a in ipairs(abilitiesOf(p.obj)) do
         local t = a.trig
         if t.kind == kind and not t.self and not t.equipped and matchesSubject(card, t)
-            and not (t.mine and seat ~= p.controller) and not (t.theirs and seat == p.controller)
+            and not (t.mine and seat ~= p.controller) and not (t.theirs and not TableSetup.isOpponent(seat, p.controller))
             and not (t.nontoken and isToken(card)) and not (t.tokenOnly and not isToken(card))
             and whoMatches(t, seat, p.controller) and (t.spell == nil or spellSpecMatches(card, t.spell)) then
           table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, thatCard = card.getGUID() })
@@ -1955,7 +1958,7 @@ function Triggers.onDamage(list, combat)
             okS = src ~= nil and Equip ~= nil and Equip.hostOf(p.obj) == src
           else
             okS = (src == nil and t.subjects == nil) or (src ~= nil and not src.isDestroyed() and matchesSubject(src, t))
-            okS = okS and not (t.mine and h.controller ~= p.controller) and not (t.theirs and h.controller == p.controller)
+            okS = okS and not (t.mine and h.controller ~= p.controller) and not (t.theirs and not TableSetup.isOpponent(h.controller, p.controller))
           end
           if okT and okS then
             n, last = n + 1, h
@@ -2046,13 +2049,14 @@ Events.on("spellCast", function(d)
       local t = a.trig
       if t.kind == "cast" and not (t.other and p.obj == d.card) then
         local mine = p.controller == d.controller
+        local oppOf = d.controller
         local firstOk = true
         if t.nth and seatNo ~= t.nth then
           firstOk = false
         end
         if t.oppTurn then
           local active = GameState.data.turn and GameState.data.turn.activeSeat
-          if active == p.controller then
+          if active and Turns.isActiveSeat(p.controller) then
             firstOk = false
           end
         end
@@ -2074,7 +2078,7 @@ Events.on("spellCast", function(d)
             firstOk = false
           end
         end
-        if firstOk and (t.who == "each" or (t.who == "you" and mine) or (t.who == "opp" and not mine)) and spellMatches(d.card, t.spellType, p.obj)
+        if firstOk and (t.who == "each" or (t.who == "you" and mine) or (t.who == "opp" and TableSetup.isOpponent(p.controller, oppOf))) and spellMatches(d.card, t.spellType, p.obj)
             and (t.spell == nil or spellSpecMatches(d.card, t.spell)) and not (t.mvMax and (tonumber((cardData(d.card) or {}).cmc) or 0) > t.mvMax) then
           -- "That spell" (Gandalf copies it) is the spell that was cast.
           local that = tostring(a.text):lower():find("that spell", 1, true) and d.card.getGUID() or nil

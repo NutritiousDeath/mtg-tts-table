@@ -357,9 +357,12 @@ local function targets(active)
     end
   end
   for _, seat in ipairs(othersInOrder(active)) do
-    table.insert(list, seat)
-    for _, pw in ipairs(walkers[seat] or {}) do
-      table.insert(list, "pw:" .. pw.getGUID())
+    -- 2HG: the other team only (a teammate isn't an opponent).
+    if TableSetup.isOpponent(seat, active) then
+      table.insert(list, seat)
+      for _, pw in ipairs(walkers[seat] or {}) do
+        table.insert(list, "pw:" .. pw.getGUID())
+      end
     end
   end
   return list
@@ -388,13 +391,19 @@ end
 -- Buttons on the cards
 ---------------------------------------------------------------------------
 
+-- The same player, or (2HG) teammates: a team defends together (either player may block any attacker
+-- coming at the team).
+function Combat.sameSide(a, b)
+  return a ~= nil and b ~= nil and (a == b or not TableSetup.isOpponent(a, b))
+end
+
 local function isDefender(seat)
   local c = GameState.data.combat
   if c == nil then
     return false
   end
   for _, g in ipairs(c.order or {}) do
-    if targetSeat(c.attackers[g]) == seat then
+    if Combat.sameSide(targetSeat(c.attackers[g]), seat) then
       return true
     end
   end
@@ -458,13 +467,13 @@ function Combat.decorate(card)
     big = true
     edge = { 0.3, 0.65, 1 }
     tip = step == "blockers" and "Blocking. Click: next attacker. Right-click: not blocking." or "Blocking"
-  elseif step == "attackers" and not c.declared and seat == turn().activeSeat
+  elseif step == "attackers" and not c.declared and Turns.isActiveSeat(seat)
       and isCreature(card) and not isTapped(card) then
     label = "ATTACK?"
     bg = { 0.08, 0.1, 0.14, 0.7 }
     fg = { 1, 0.75, 0.78 }
     tip = "Click to attack (click again for the next target)."
-  elseif step == "blockers" and seat ~= turn().activeSeat and isDefender(seat)
+  elseif step == "blockers" and not Turns.isActiveSeat(seat) and isDefender(seat)
       and isCreature(card) and not isTapped(card) then
     label = "BLOCK?"
     bg = { 0.08, 0.1, 0.14, 0.7 }
@@ -528,10 +537,10 @@ function Combat.attackClick(card, color, alt)
   local c = state()
   local t = turn()
   if GameState.solo() then
-    color = t.activeSeat   -- solo test: you act for the active player
+    color = controller(card) or t.activeSeat   -- solo test: you act for the active player (or team)
   end
-  if color ~= t.activeSeat then
-    broadcastToColor("Only " .. tostring(t.activeSeat) .. " attacks this turn.", color, WARN)
+  if not Turns.isActiveSeat(color) then
+    broadcastToColor("Only " .. table.concat(Turns.activeTeam(), " + ") .. " attack this turn.", color, WARN)
     return
   end
   if c.declared then
@@ -800,7 +809,7 @@ function Combat.blockClick(card, color, alt)
     broadcastToColor("That isn't your creature.", color, WARN)
     return
   end
-  if color == turn().activeSeat then
+  if Turns.isActiveSeat(color) then
     broadcastToColor("Your creatures are attacking this turn, not blocking.", color, WARN)
     return
   end
@@ -817,7 +826,7 @@ function Combat.blockClick(card, color, alt)
   -- Attackers this player may block: those attacking them or their walkers.
   local list = {}
   for _, g in ipairs(c.order) do
-    if live(g) and targetSeat(c.attackers[g]) == color then
+    if live(g) and Combat.sameSide(targetSeat(c.attackers[g]), color) then
       table.insert(list, g)
     end
   end
@@ -897,7 +906,7 @@ local function lockBlocks()
       if b then
         table.insert(bl, b)
         table.insert(blockList, { obj = b, controller = controller(b), attacker = a,
-          attackerController = turn().activeSeat })
+          attackerController = controller(a) or turn().activeSeat })
       end
     end
     if #bl == 0 and c.keepBlocked and c.keepBlocked[ag] then
@@ -946,7 +955,7 @@ local function lockBlocks()
     for _, ag in ipairs(c.order) do
       local a = live(ag)
       if a and not c.blocked[ag] then
-        table.insert(unblocked, { obj = a, controller = turn().activeSeat })
+        table.insert(unblocked, { obj = a, controller = controller(a) or turn().activeSeat })
       end
     end
     if #unblocked > 0 then
@@ -1577,7 +1586,7 @@ function ui_combat(player, arg)
   local idx, action = tostring(arg):match("^(%d+)_(%a+)$")
   idx = tonumber(idx)
   if action == "confirm" or action == "skip" then
-    if color ~= turn().activeSeat and not GameState.solo() then
+    if not Turns.isActiveSeat(color) and not GameState.solo() then
       broadcastToColor("The active player (" .. tostring(turn().activeSeat) .. ") confirms combat damage.", color, WARN)
       return
     end
@@ -1686,7 +1695,7 @@ function Combat.alsoBlock(card, color)
     have[g] = true
   end
   for _, g in ipairs(c.order) do
-    if live(g) and not have[g] and targetSeat(c.attackers[g]) == color then
+    if live(g) and not have[g] and Combat.sameSide(targetSeat(c.attackers[g]), color) then
       c.extra[guid] = c.extra[guid] or {}
       table.insert(c.extra[guid], g)
       c.blockOrder[g] = c.blockOrder[g] or {}
@@ -1782,7 +1791,7 @@ local function waitingBlockers()
   end
   c.blockDone = c.blockDone or {}
   for _, seat in ipairs(othersInOrder(turn().activeSeat)) do
-    if isDefender(seat) and not c.blockDone[seat] then
+    if not Turns.isActiveSeat(seat) and isDefender(seat) and not c.blockDone[seat] then
       table.insert(out, seat)
     end
   end
@@ -1793,7 +1802,7 @@ local function showBlockDone()
   local c = GameState.data.combat
   local inBlock = stepId() == "blockers" and c ~= nil
   for _, seat in ipairs(TableSetup.activeSeats()) do
-    local on = inBlock and seat ~= turn().activeSeat and isDefender(seat) and not (c.blockDone or {})[seat]
+    local on = inBlock and not Turns.isActiveSeat(seat) and isDefender(seat) and not (c.blockDone or {})[seat]
     UI.setAttribute("blockDone_" .. seat, "active", on and "true" or "false")
   end
 end
@@ -2134,7 +2143,7 @@ function Combat.ninjutsu(card, color, opt)
   end
   local t = turn()
   local seat = GameState.solo() and t.activeSeat or color
-  if seat ~= t.activeSeat then
+  if not Turns.isActiveSeat(seat) then
     broadcastToColor(opt.kind:upper() .. ": only the attacking player can do that.", color, WARN)
     return
   end

@@ -143,7 +143,7 @@ local function renderStrip(color)
   B({ label = "", width = math.floor(th * U), height = math.floor(STRIP_D * U), color = line }, -hw, 0)
   B({ label = "", width = math.floor(th * U), height = math.floor(STRIP_D * U), color = line }, hw, 0)
   -- Title.
-  local title = running and ("TURN " .. t.number .. " · " .. string.upper(t.activeSeat)) or "NO GAME RUNNING"
+  local title = running and ("TURN " .. t.number .. " · " .. string.upper(table.concat(Turns.activeTeam(), " + "))) or "NO GAME RUNNING"
   local pendingTo, waitingOn
   if Turns.pendingLabel then
     pendingTo, waitingOn = Turns.pendingLabel()
@@ -232,6 +232,55 @@ local function nextPlayer(after)
   return after
 end
 
+-- Two-Headed Giant: a team takes its turn together (CR 810.4). The seats taking the current turn
+-- (the active player and, in 2HG, their teammate still in the game).
+function Turns.activeTeam()
+  local t = turn()
+  local a = t.activeSeat
+  if a == nil then
+    return {}
+  end
+  if not (TableSetup.isTeamGame and TableSetup.isTeamGame()) then
+    return { a }
+  end
+  local out = {}
+  for _, c in ipairs(TableSetup.teamSeats(a)) do
+    local p = GameState.player(c)
+    if c == a or (p and not p.eliminated) then
+      table.insert(out, c)
+    end
+  end
+  return out
+end
+
+-- Is this seat taking the current turn (the active player, or their 2HG teammate)?
+function Turns.isActiveSeat(c)
+  local t = turn()
+  if c == nil or t.activeSeat == nil then
+    return false
+  end
+  if c == t.activeSeat then
+    return true
+  end
+  local team = TableSetup.teamOf and TableSetup.teamOf(c)
+  return team ~= nil and team == TableSetup.teamOf(t.activeSeat)
+end
+
+-- The next seat to take a turn: in 2HG the next player not on this team (the turn goes team to team).
+local function nextTurnPlayer(after)
+  local c = nextPlayer(after)
+  if TableSetup.isTeamGame and TableSetup.isTeamGame() and after then
+    local team = TableSetup.teamOf(after)
+    for _ = 1, #players() do
+      if TableSetup.teamOf(c) ~= team then
+        break
+      end
+      c = nextPlayer(c)
+    end
+  end
+  return c
+end
+
 -- Start a seat's turn at the untap step.
 -- Start a seat's turn at the untap step. The turn NUMBER counts trips
 -- around the table (turn 1 = everyone's first turn): it only goes up when
@@ -247,12 +296,15 @@ function Turns.beginTurn(seat, number, newRound)
   t.taken = (t.taken or 0) + 1   -- turns taken in the game, by anyone
   -- When each seat's latest turn began: summoning sickness lasts until then (combat.lua isSick).
   GameState.data.turnStartOf = GameState.data.turnStartOf or {}
-  GameState.data.turnStartOf[seat] = t.taken
+  local team = Turns.activeTeam()
+  for _, c in ipairs(team) do
+    GameState.data.turnStartOf[c] = t.taken
+  end
   t.stepIndex = 1
   t.pending = nil
   t.autoThrough = nil
   t.resume = nil
-  broadcastToAll("Turn " .. t.number .. ": " .. seat, { 0.55, 0.9, 0.6 })
+  broadcastToAll("Turn " .. t.number .. ": " .. table.concat(team, " + "), { 0.55, 0.9, 0.6 })
   enterStep()
 end
 
@@ -270,13 +322,14 @@ local function nextTurn()
   local anchor = t.startingSeat
   local ap = anchor and GameState.player(anchor)
   if ap == nil or ap.eliminated then
-    anchor = nextPlayer(anchor)
+    anchor = nextTurnPlayer(anchor)
   end
   -- Eater of Days: seats with turns to skip are passed over (each skip used up).
   local cur, newRound = t.activeSeat, false
   for _ = 1, 12 do
-    local seat = nextPlayer(cur)
-    if seat == anchor then
+    local seat = nextTurnPlayer(cur)
+    if seat == anchor or (TableSetup.isTeamGame and TableSetup.isTeamGame() and anchor
+        and TableSetup.teamOf(seat) == TableSetup.teamOf(anchor)) then
       newRound = true
     end
     local sk = t.skipTurns and t.skipTurns[seat] or 0
@@ -289,7 +342,7 @@ local function nextTurn()
       return
     end
   end
-  Turns.beginTurn(nextPlayer(t.activeSeat), nil, false)
+  Turns.beginTurn(nextTurnPlayer(t.activeSeat), nil, false)
 end
 
 -- "You skip your next N turns."
@@ -349,8 +402,11 @@ enterStep = function()
   Turns.render()
   Events.emit("stepStarted", { seat = seat, step = step.id, turn = t.number })
 
+  local team = Turns.activeTeam()
   if step.id == "untap" then
-    Actions.untapAll(seat, true)
+    for _, c in ipairs(team) do
+      Actions.untapAll(c, true)
+    end
     if Actions.othersUntap then
       pcall(Actions.othersUntap, seat)
     end
@@ -359,11 +415,16 @@ enterStep = function()
   elseif step.id == "draw" then
     -- Two players: whoever goes first skips their first draw (the game's
     -- very first turn).
-    local skip = (t.taken or 1) == 1 and #players() == 2 and seat == t.startingSeat
+    -- Two-Headed Giant: the team that goes first skips its first draw too (CR 103.8b).
+    local isTeam = TableSetup.isTeamGame and TableSetup.isTeamGame()
+    local skip = (t.taken or 1) == 1 and (#players() == 2 or isTeam) and seat == t.startingSeat
     if skip then
-      broadcastToAll(seat .. " skips the first draw (two-player rule).", INFO)
+      broadcastToAll(table.concat(team, " + ") .. (isTeam and " skip the first draw (Two-Headed Giant rule)."
+        or " skips the first draw (two-player rule)."), INFO)
     else
-      Actions.draw(seat, 1, "draw step")
+      for _, c in ipairs(team) do
+        Actions.draw(c, 1, "draw step")
+      end
     end
     -- Nothing else normally happens in the draw step: move on to Main 1.
     autoAdvance(1)
@@ -372,7 +433,15 @@ enterStep = function()
     autoAdvance(1)
   elseif step.id == "cleanup" then
     -- Discard down to 7 first (if needed), then the turn passes.
-    Actions.cleanupDiscard(seat, function() autoAdvance(0.6) end)
+    -- Each player of the team discards down to 7, one after the other.
+    local function discardFrom(i)
+      if i > #team then
+        autoAdvance(0.6)
+        return
+      end
+      Actions.cleanupDiscard(team[i], function() discardFrom(i + 1) end)
+    end
+    discardFrom(1)
   end
 end
 
@@ -395,8 +464,8 @@ local function isActive(color)
     broadcastToColor("No game running. Use Start Game first.", color, WARN)
     return false
   end
-  if color ~= t.activeSeat and not GameState.solo() then
-    broadcastToColor("It's " .. tostring(t.activeSeat) .. "'s turn.", color, WARN)
+  if not Turns.isActiveSeat(color) and not GameState.solo() then
+    broadcastToColor("It's " .. table.concat(Turns.activeTeam(), " + ") .. "'s turn.", color, WARN)
     return false
   end
   -- The turn lost track of its step (seen once, cause unknown): put it back
@@ -640,7 +709,10 @@ local function requestMove(kind)
     if c == t.activeSeat then
       break
     end
-    table.insert(queue, c)
+    -- 2HG: the teammate takes the turn too; only the other team is asked.
+    if not Turns.isActiveSeat(c) then
+      table.insert(queue, c)
+    end
   end
   if #queue == 0 then
     commit(kind)

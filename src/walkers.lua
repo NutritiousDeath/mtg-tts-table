@@ -314,7 +314,7 @@ function Walkers.activate(obj, i, color, force)
     local problem
     if seat ~= color then
       problem = "That's " .. tostring(seat) .. "'s planeswalker."
-    elseif GameState.data.started and t.activeSeat ~= color then
+    elseif GameState.data.started and not Turns.isActiveSeat(color) then
       problem = "Loyalty abilities are used on your own turn."
     elseif GameState.data.started and t.stepIndex
         and Turns.STEPS[t.stepIndex].id ~= "main1" and Turns.STEPS[t.stepIndex].id ~= "main2" then

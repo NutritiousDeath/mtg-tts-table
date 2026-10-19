@@ -1960,7 +1960,7 @@ local function fxFieldCount(seat, words, ctrl, skipGuid)
   for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
     if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) and obj.held_by_color == nil then
       local owner = Effects.fieldSeat(obj)
-      if owner and (ctrl == "all" or (ctrl == "you" and owner == seat) or (ctrl == "opp" and owner ~= seat))
+      if owner and (ctrl == "all" or (ctrl == "you" and owner == seat) or (ctrl == "opp" and TableSetup.isOpponent(owner, seat)))
           and obj.getGUID() ~= skipGuid then
         local ty = Effects.cardTypes(obj)
         local tl
@@ -2917,7 +2917,7 @@ local function apply(it, plan, target)
     elseif a.who == "opponents" then
       seats = {}
       for _, c in ipairs(players()) do
-        if c ~= controller then
+        if TableSetup.isOpponent(c, controller) then
           table.insert(seats, c)
         end
       end
@@ -3023,7 +3023,7 @@ local function apply(it, plan, target)
                     if o.type == "Card" and not o.isDestroyed() and not Faces.unknown(o) then
                       local owner = Effects.fieldSeat(o)
                       local ty = Effects.cardTypes(o)
-                      if owner and (not a.theirs or owner ~= seat) and (not a.mine or owner == seat)
+                      if owner and (not a.theirs or TableSetup.isOpponent(owner, seat)) and (not a.mine or owner == seat)
                           and (a.type == "permanent" or (a.type == "nonland" and not ty.land) or ty[a.type]) then
                         Effects.returnToHand(o)
                         n = n + 1
@@ -4398,7 +4398,7 @@ function Effects.edict(seat, a, it)
   local victims = {}
   local function others()
     for _, c in ipairs(players()) do
-      if c ~= seat then
+      if TableSetup.isOpponent(c, seat) then
         table.insert(victims, c)
       end
     end
@@ -4772,7 +4772,7 @@ function Effects.palantir(seat, it)
   end
   local opps = {}
   for _, c in ipairs(players()) do
-    if c ~= seat then
+    if TableSetup.isOpponent(c, seat) then
       table.insert(opps, c)
     end
   end
@@ -5047,7 +5047,7 @@ function Effects.jeska(seat, a, it)
   local function mana()
     local opps = {}
     for _, c in ipairs(players()) do
-      if c ~= seat then
+      if TableSetup.isOpponent(c, seat) then
         table.insert(opps, c)
       end
     end
@@ -5174,7 +5174,7 @@ function Effects.revealCopy(seat, a, it)
   local spellTypes = Effects.cardTypes(spell)
   local opps = {}
   for _, c in ipairs(players()) do
-    if c ~= seat then
+    if TableSetup.isOpponent(c, seat) then
       table.insert(opps, c)
     end
   end
@@ -5782,7 +5782,7 @@ function Effects.tapX(seat, a, it)
   local function scopeOk(owner)
     if a.scope == "mine" and owner ~= seat then
       return false
-    elseif a.scope == "opponents" and owner == seat then
+    elseif a.scope == "opponents" and not TableSetup.isOpponent(owner, seat) then
       return false
     end
     return true
@@ -6315,7 +6315,7 @@ function Effects.yurikoReveal(seat, name)
   broadcastToAll(name .. ": " .. seat .. " reveals " .. cname .. " (mana value " .. mv .. ") and puts it into their hand.", { 1, 0.85, 0.3 })
   if mv > 0 then
     for _, c in ipairs(players()) do
-      if c ~= seat then
+      if TableSetup.isOpponent(c, seat) then
         Trackers.changeLife(c, -mv, name)
       end
     end
@@ -7607,7 +7607,7 @@ function Effects.countPermanents(seat, word, scope, tappedOnly)
   for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
     if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) and obj.held_by_color == nil then
       local owner = fieldSeat(obj)
-      if owner and ((scope == "mine" and owner == seat) or (scope == "opponents" and owner ~= seat) or scope == "all") then
+      if owner and ((scope == "mine" and owner == seat) or (scope == "opponents" and TableSetup.isOpponent(owner, seat)) or scope == "all") then
         local name = tostring(obj.getName()):lower()
         local hit = cardTypes(obj)[word] or name:find(word, 1, true) ~= nil
         if not hit then
@@ -7751,7 +7751,7 @@ function Effects.pickBounce(seat, a, sourceName, sourceGuid)
     if a.other and sourceGuid and obj.getGUID() == sourceGuid then
       return false
     end
-    if a.theirs and owner == seat then
+    if a.theirs and not TableSetup.isOpponent(owner, seat) then
       return false
     end
     local t = cardTypes(obj)
@@ -8059,7 +8059,7 @@ Effects.hasKeyword = hasKeyword
 local function fits(obj, owner, a, seat, sourceGuid)
   if a.scope == "mine" and owner ~= seat then
     return false
-  elseif a.scope == "opponents" and owner == seat then
+  elseif a.scope == "opponents" and not TableSetup.isOpponent(owner, seat) then
     return false
   end
   if a.enteredThisTurn then
@@ -8909,7 +8909,7 @@ function Effects.damageCreature(obj, n, src, sourceName, controller)
 end
 
 local function damageFits(obj, owner, a, seat, skip)
-  if (a.scope == "you" and owner ~= seat) or (a.scope == "opp" and owner == seat) or skip[obj.getGUID()] then
+  if (a.scope == "you" and owner ~= seat) or (a.scope == "opp" and not TableSetup.isOpponent(owner, seat)) or skip[obj.getGUID()] then
     return false
   end
   local ty = cardTypes(obj)
@@ -8974,7 +8974,7 @@ function Effects.forgeDamageAll(seat, a, it)
   end
   if a.players then
     for _, c in ipairs(players()) do
-      if a.players == "each" or c ~= seat then
+      if a.players == "each" or TableSetup.isOpponent(c, seat) then
         Trackers.changeLife(c, -a.n, it.name)
         if Triggers and Triggers.onDamage then
           pcall(Triggers.onDamage, { { obj = src, controller = seat, seat = c, amount = a.n } }, false)
@@ -9028,7 +9028,7 @@ end
 
 -- Does a permanent fit a Forge target ("creature/nonland", control, another)?
 local function kindsFit(obj, owner, a, seat, src)
-  if (a.scope == "you" and owner ~= seat) or (a.scope == "opp" and owner == seat) then
+  if (a.scope == "you" and owner ~= seat) or (a.scope == "opp" and not TableSetup.isOpponent(owner, seat)) then
     return false
   end
   if a.other and src and obj.getGUID() == src then

@@ -256,7 +256,7 @@ Events.on("cardMoved", function(d)
   end
   lp.n[seat] = (lp.n[seat] or 0) + 1
   local played, allowed = lp.n[seat], Actions.landsAllowed(seat)
-  if t.activeSeat and t.activeSeat ~= seat then
+  if t.activeSeat and not Turns.isActiveSeat(seat) then
     broadcastToAll(seat .. " played a land (" .. d.card.getName() .. ") on " .. t.activeSeat .. "'s turn: only with an effect that allows it.", WARN)
   elseif played > allowed then
     broadcastToAll(seat .. " played land " .. played .. " this turn but may only play " .. allowed .. ". Check it.", WARN)

@@ -1193,7 +1193,7 @@ Events.on("spellCast", function(d)
   -- Sorcery speed: a spell that isn't an instant, cast on someone else's turn, needs flash.
   local active = GameState.data and GameState.data.turn and GameState.data.turn.activeSeat
   local tl = tostring(dataOf(d.card).typeLine or ""):lower()
-  if active and active ~= d.controller and tl ~= "" and not tl:find("instant", 1, true) and not tl:find("land", 1, true) then
+  if active and not Turns.isActiveSeat(d.controller) and tl ~= "" and not tl:find("instant", 1, true) and not tl:find("land", 1, true) then
     local okF, flash = pcall(Statics.hasFlash, d.card, d.controller)
     if okF and not flash then
       broadcastToColor(d.card.getName() .. " isn't an instant and has no flash: normally it's cast only on your own turn.",

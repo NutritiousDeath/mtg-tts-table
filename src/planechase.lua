@@ -525,7 +525,7 @@ function Planechase.onRolled(die, color)
   if GameState.data.started and not GameState.solo() and t then
     local problem
     local step = Turns and Turns.STEPS and Turns.STEPS[t.stepIndex or 1]
-    if color ~= t.activeSeat then
+    if not Turns.isActiveSeat(color) then
       problem = "Only the active player (" .. tostring(t.activeSeat) .. ") rolls the planar die, on their turn."
     elseif step and step.id ~= "main1" and step.id ~= "main2" then
       problem = "Roll the planar die in a main phase, when the stack is empty."

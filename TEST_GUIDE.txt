@@ -1,6 +1,6 @@
 MTG COMMANDER TABLE (TTS) - TEST GUIDE
-Version being tested: 1.67
-After loading, chat should say:  MTG > Scripts loaded: version 1.67 (...)
+Version being tested: 2.07
+After loading, chat should say:  MTG > Scripts loaded: version 2.07 (...)
 
 HOW TO USE THIS
 - One person can test alone: type  !solo on  in chat. You can then act for every seat.
@@ -12,6 +12,32 @@ HOW TO USE THIS
 - When you report a bug, copy the chat lines from just before and after it. That's the most useful thing you can send.
 
 
+
+=====================================================================
+NEW IN 2.07 - TWO-HEADED GIANT part 2 + 3 (team turns, team combat, opponents)
+=====================================================================
+Set up: no game running, type  !layout 2hg , import four decks, Start Game. (!solo on lets one person act for every seat.)
+Teams: White + Red vs Green + Blue.
+
+[ ] G1. First turn.  EXPECT: chat "Turn 1: White + Red". BOTH White and Red untap; the turn strip says WHITE + RED.
+        The first team skips its first draw (chat says so). Green + Blue draw normally on their first turn.
+[ ] G2. Red (the teammate) clicks NEXT STEP.  EXPECT: it works (not "It's White's turn"). Only Green and Blue get the
+        "Any responses?" pop-up - Red is never asked.
+[ ] G3. END TURN.  EXPECT: White AND Red each discard down to 7 if needed, then "Turn 1: Green + Blue"; both untap,
+        both draw. After them it goes back to White + Red as turn 2.
+[ ] G4. Red plays a land on the White + Red turn.  EXPECT: no "played a land on White's turn" warning. Red can use
+        planeswalker loyalty abilities and cast sorceries on the team's turn too.
+[ ] G5. Attack step: ATTACK? shows on BOTH White's and Red's untapped creatures. Clicking cycles through GREEN, BLUE
+        (and their planeswalkers) only - never the teammate.
+[ ] G6. Block step: Green AND Blue both see BLOCK? and can block ANY attacker coming at their team (a creature
+        attacking Blue can be blocked by Green). Both get a BLOCKS DONE button.
+[ ] G7. Damage.  EXPECT: combat damage comes off the defending TEAM's shared life; commander damage still counts to
+        the player it was assigned to.
+[ ] G8. "Each opponent" cards (Blood Artist dying trigger, Gray Merchant...).  EXPECT: only Green and Blue lose life
+        (the team loses 2 for "each opponent loses 1"), never the teammate.
+[ ] G9. "Whenever an opponent ..." triggers (e.g. an opponent casts a spell / draws).  EXPECT: the teammate doing it
+        does NOT trigger them; the other team does.
+[ ] G10. Type  !layout 4  (no game running), start a normal game.  EXPECT: one player per turn again, as before.
 
 =====================================================================
 NEW IN 1.67 - TWO-HEADED GIANT TABLE (part 1 of 3: layout, teams, shared life)
