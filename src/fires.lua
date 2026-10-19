@@ -244,26 +244,41 @@ function Fires.set(color, mode)
       end, mode and 0.35 or 0)
     end)
   end
+  -- Spread over a few frames, and only the two fireplaces play the roar / woosh burst (sparks, flash):
+  -- switching every fire at once made a 4-player game hitch.
+  local nHearth = 0
+  for _, sp in ipairs(hearthSpots()) do
+    if not sp.pit then
+      nHearth = nHearth + 1
+    end
+  end
   for n, o in ipairs(fireObjects()) do
     local idx = INDEX[shared[((n - 1) % #shared) + 1]] or idx
+    local burst = mode and n <= nHearth
+    local stagger = (n - 1) * 0.12
     whenLoaded(o, function(obj)
-      if mode then
-        local t = (mode == "roar" and ROAR or WOOSH) + idx + (n == 1 and 0 or SILENT)
-        obj.AssetBundle.playTriggerEffect(t)
-        -- Switching an object's effect stops the sound it's playing, so the fire carrying the sound (the
-        -- first fireplace) changes colour only once its roar / woosh has finished; the rest change at once.
-        local delay = 0.35
-        if n == 1 then
-          delay = (mode == "roar") and 3.0 or 1.25
+      Wait.time(function()
+        if obj.isDestroyed() then
+          return
         end
-        Wait.time(function()
-          if not obj.isDestroyed() then
-            pcall(function() obj.AssetBundle.playLoopingEffect(idx) end)
+        if burst then
+          local t = (mode == "roar" and ROAR or WOOSH) + idx + (n == 1 and 0 or SILENT)
+          pcall(function() obj.AssetBundle.playTriggerEffect(t) end)
+          -- Switching an object's effect stops the sound it's playing, so the fire carrying the sound (the
+          -- first fireplace) changes colour only once its roar / woosh has finished.
+          local delay = 0.35
+          if n == 1 then
+            delay = (mode == "roar") and 3.0 or 1.25
           end
-        end, delay)
-      else
-        obj.AssetBundle.playLoopingEffect(idx)
-      end
+          Wait.time(function()
+            if not obj.isDestroyed() then
+              pcall(function() obj.AssetBundle.playLoopingEffect(idx) end)
+            end
+          end, delay)
+        else
+          pcall(function() obj.AssetBundle.playLoopingEffect(idx) end)
+        end
+      end, stagger)
     end)
   end
 end

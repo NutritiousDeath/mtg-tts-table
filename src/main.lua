@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.08 (2HG: fire pits in the four corners, fires in both teammates' colours; 4p pits moved off the wall)"
+SCRIPT_VERSION = "2.09 (smoother fire colour changes, Force of Will alternative cost from the hand)"
 
 function onLoad(saved)
   GameLog.setup()

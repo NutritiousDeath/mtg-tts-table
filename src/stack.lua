@@ -1130,7 +1130,114 @@ function Stack.cycle(obj, playerColor)
   end
 end
 
+-- An alternative cost, cast from the hand: "If it's not your turn, you may exile a green card from your hand
+-- rather than pay this spell's mana cost" (Force of Vigor), "You may pay 1 life and exile a blue card from your
+-- hand rather than pay this spell's mana cost" (Force of Will). Returns { text, life, exile (color word),
+-- notMyTurn, rest } or nil. rest = parts of the cost the table doesn't pay for you.
+local COLOR_WORDS = { white = "W", blue = "U", black = "B", red = "R", green = "G" }
+function Stack.altCostOf(obj)
+  local low = oracleOf(obj):lower():gsub("%b()", "")
+  local pre, cost = low:match("([^%.\n]*)you may ([^%.\n]-) rather than pay this spell's mana cost")
+  if not cost then
+    return nil
+  end
+  local alt = { text = cost, notMyTurn = pre:find("not your turn", 1, true) ~= nil, rest = {} }
+  for part in (cost:gsub(" and ", ","):gsub(", ", ",") .. ","):gmatch("([^,]+),") do
+    local life = part:match("^pay (%d+) life$")
+    local col = part:match("^exile an? (%a+) card from your hand$")
+    if life then
+      alt.life = tonumber(life)
+    elseif col and COLOR_WORDS[col] then
+      alt.exile = col
+    elseif part:match("%S") then
+      table.insert(alt.rest, part)
+    end
+  end
+  return alt
+end
+
+local function cardColors(o)
+  local set = {}
+  pcall(function()
+    local d = JSON.decode(o.getGMNotes())
+    for _, c in ipairs(type(d) == "table" and d.colors or {}) do
+      set[tostring(c)] = true
+    end
+  end)
+  return set
+end
+
+-- Cast it for the alternative cost: pay the life, pick the card to exile from the hand, then it goes on
+-- the stack without its mana cost coming out of the pool.
+function Stack.castAlt(obj, playerColor)
+  local alt = Stack.altCostOf(obj)
+  if alt == nil or obj.isDestroyed() then
+    return
+  end
+  local seat = (Zones.handOwner and Zones.handOwner(obj)) or playerColor
+  if not TableSetup.isActive(seat) or (seat ~= playerColor and not GameState.solo()) then
+    broadcastToColor("That card is in " .. tostring(seat) .. "'s hand.", playerColor, WARN)
+    return
+  end
+  local name = obj.getName()
+  if alt.notMyTurn and Turns and Turns.isActiveSeat and Turns.isActiveSeat(seat) then
+    broadcastToColor(name .. ": the alternative cost is only for when it's NOT your turn.", seat, WARN)
+    return
+  end
+  local function go()
+    if obj.isDestroyed() then
+      return
+    end
+    if alt.life and alt.life > 0 then
+      Trackers.changeLife(seat, -alt.life, seat)
+    end
+    if #alt.rest > 0 then
+      broadcastToColor(name .. ": also pay this part of the cost yourself: " .. table.concat(alt.rest, ", ") .. ".", seat, INFO)
+    end
+    printToAll("MTG > " .. seat .. " casts " .. name .. " for its alternative cost (" .. alt.text .. ").", INFO)
+    GameState.data.freeCast = GameState.data.freeCast or {}
+    GameState.data.freeCast[obj.getGUID()] = true
+    Stack.pushCard(obj, seat, { seat = seat, region = "hand" })
+  end
+  if not alt.exile then
+    go()
+    return
+  end
+  local key = COLOR_WORDS[alt.exile]
+  local choices = {}
+  local ok, hand = pcall(function() return Player[seat].getHandObjects() end)
+  for _, o in ipairs(ok and hand or {}) do
+    if o ~= obj and o.type == "Card" and cardColors(o)[key] and #choices < 6 then
+      table.insert(choices, { label = o.getName():sub(1, 22), value = o.getGUID() })
+    end
+  end
+  if #choices == 0 then
+    broadcastToColor(name .. ": you have no other " .. alt.exile .. " card in your hand to exile.", seat, WARN)
+    return
+  end
+  table.insert(choices, { label = "CANCEL", value = false })
+  Effects.askChoice(seat, name .. ": alternative cost", "Pick the " .. alt.exile .. " card to exile from your hand"
+    .. (alt.life and (" (you also pay " .. alt.life .. " life)") or "") .. ".", choices, function(g)
+      local o = g and getObjectFromGUID(g)
+      if not o or o.isDestroyed() then
+        return
+      end
+      local s = TableSetup.seat(seat)
+      o.setRotation({ 0, s.yaw, 0 })
+      o.setPosition(TableSetup.slot(seat, "exile", TableSetup.SURFACE_TOP + 2))
+      Wait.time(function() Zones.refresh(o) end, 0.6)
+      printToAll("MTG > " .. seat .. " exiles " .. o.getName() .. " from their hand (" .. name .. ").", INFO)
+      go()
+    end)
+end
+
 function Stack.addCardMenu(obj, full)
+  -- An alternative cost (Force of Will), from the hand.
+  if not full and Zones.handOwner and Zones.handOwner(obj) and Stack.altCostOf(obj) then
+    obj.addContextMenuItem("Cast: alternative cost", function(playerColor)
+      Stack.castAlt(obj, playerColor)
+    end)
+  end
   -- Cycling, from the hand.
   local cy = Stack.cyclingOf(obj)
   if cy then
