@@ -1,7 +1,8 @@
 --[[
   fires.lua
   The turn fires: two gothic fireplaces on the floor (at the corners the deck importers point to, or
-  the two ends of the 2HG table) and the four tower torches all burn in one colour that follows the game:
+  the two ends of the 2HG table), two fire pits low on the floor in the other two corners (four-seat
+  layout) and the four tower torches all burn in one colour that follows the game:
     * before the game and through mulligans: purple;
     * when the last player keeps: a ROAR (big flare, sparks, a light flash and the roar sound) and every
       fire turns the starting player's colour;
@@ -44,6 +45,9 @@ local function hearthSpots()
   return {
     { x = -r, z = -r, mesh = "hearth_corner.obj" },
     { x = r, z = r, mesh = "hearth_corner.obj" },
+    -- The other two corners: a fire pit low on the floor (tools/make_firepit.py), so they aren't dark.
+    { x = r, z = -r, mesh = "firepit.obj", pit = true },
+    { x = -r, z = r, mesh = "firepit.obj", pit = true },
   }
 end
 
@@ -58,6 +62,9 @@ local function spotFrame(sp)
   local dx, dz = -sp.x / len, -sp.z / len            -- toward the table
   local yaw = math.deg(atan2(dx, dz))
   local fire = { sp.x + dx * 1.5, FLOOR_Y + 32.05, sp.z + dz * 1.5 }
+  if sp.pit then
+    fire = { sp.x, FLOOR_Y + 0.45, sp.z }   -- on the pit's ash bed
+  end
   return yaw, fire
 end
 
@@ -114,7 +121,7 @@ function Fires.ensure()
       if m then
         m.destruct()
       end
-      spawnLocked("Custom_Model", { sp.x, FLOOR_Y, sp.z }, yaw, "Gothic Fireplace", "TableHearth",
+      spawnLocked("Custom_Model", { sp.x, FLOOR_Y, sp.z }, yaw, sp.pit and "Fire Pit" or "Gothic Fireplace", "TableHearth",
         { mesh = mesh, diffuse = STONE_URL, collider = mesh, convex = false, type = 0, material = 3 },
         function(o) st.hearths[i] = o.getGUID() end)
     end
@@ -124,12 +131,22 @@ function Fires.ensure()
       if f then
         f.destruct()
       end
-      spawnLocked("Custom_AssetBundle", fire, yaw, "Hearth Fire", "HearthFire",
+      spawnLocked("Custom_AssetBundle", fire, yaw, sp.pit and "Pit Fire" or "Hearth Fire", "HearthFire",
         { assetbundle = HEARTH_FIRE_URL, type = 0 },
         function(o)
           st.hearthFires[i] = o.getGUID()
           Wait.time(function() Fires.refresh() end, 1)
         end)
+    end
+  end
+  -- Fireplaces / pits the current layout doesn't use (the 2HG table has no fire pits).
+  for _, list in ipairs({ st.hearths, st.hearthFires }) do
+    for i = #list, #spots + 1, -1 do
+      local o = getObjectFromGUID(list[i])
+      if o then
+        o.destruct()
+      end
+      list[i] = nil
     end
   end
   -- Strays from an older layout / version.

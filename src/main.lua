@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.05 (Banana token, Kibo, readable attack labels, 4p yield, Horn of Greed land plays, pop-ups moved)"
+SCRIPT_VERSION = "2.06 (fire pits in the two dark corners)"
 
 function onLoad(saved)
   GameLog.setup()
