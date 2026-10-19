@@ -36,18 +36,26 @@ end
 --   2HG: the middle of the two short ends.
 local function hearthSpots()
   if TableSetup.layout() == "twohg" then
+    -- The four corners have no fireplace: a fire pit low on the floor in each (tools/make_firepit.py),
+    -- clear of the corner walls (the 2HG room's corner walls sit 165 out from the middle).
     return {
       { x = -146, z = 0, mesh = "hearth_edge.obj" },
       { x = 146, z = 0, mesh = "hearth_edge.obj" },
+      { x = 103, z = 95, mesh = "firepit.obj", pit = true },
+      { x = -103, z = 95, mesh = "firepit.obj", pit = true },
+      { x = 103, z = -95, mesh = "firepit.obj", pit = true },
+      { x = -103, z = -95, mesh = "firepit.obj", pit = true },
     }
   end
   local r = 152 / math.sqrt(2)
+  -- The other two corners: a fire pit low on the floor (tools/make_firepit.py), so they aren't dark.
+  -- Further in than the fireplaces: the pit is free-standing, clear of the corner wall and its window.
+  local rp = 138 / math.sqrt(2)
   return {
     { x = -r, z = -r, mesh = "hearth_corner.obj" },
     { x = r, z = r, mesh = "hearth_corner.obj" },
-    -- The other two corners: a fire pit low on the floor (tools/make_firepit.py), so they aren't dark.
-    { x = r, z = -r, mesh = "firepit.obj", pit = true },
-    { x = -r, z = r, mesh = "firepit.obj", pit = true },
+    { x = rp, z = -rp, mesh = "firepit.obj", pit = true },
+    { x = -rp, z = rp, mesh = "firepit.obj", pit = true },
   }
 end
 
@@ -201,8 +209,29 @@ end
 
 -- Turn every fire to a colour (Purple, White, Red, Green, Blue), with a "roar" or "woosh" first.
 -- The stained glass follows too: the window behind the active player glows (purple: the corner windows).
+-- The colours the fires share out: in 2HG, on a team's turn, both teammates' colours (the fires
+-- alternate between them); otherwise just the one colour.
+local function shareColors(color)
+  local d = GameState.data
+  local t = d.turn or {}
+  if d.started and color == t.activeSeat and Turns and Turns.activeTeam
+      and TableSetup.isTeamGame and TableSetup.isTeamGame() then
+    local out = {}
+    for _, c in ipairs(Turns.activeTeam()) do
+      if INDEX[c] then
+        table.insert(out, c)
+      end
+    end
+    if #out > 0 then
+      return out
+    end
+  end
+  return { color }
+end
+
 function Fires.set(color, mode)
   local idx = INDEX[color] or 0
+  local shared = shareColors(color)
   GameState.data.fireColor = color
   local st = state()
   local glass = st.glass and getObjectFromGUID(st.glass)
@@ -216,6 +245,7 @@ function Fires.set(color, mode)
     end)
   end
   for n, o in ipairs(fireObjects()) do
+    local idx = INDEX[shared[((n - 1) % #shared) + 1]] or idx
     whenLoaded(o, function(obj)
       if mode then
         local t = (mode == "roar" and ROAR or WOOSH) + idx + (n == 1 and 0 or SILENT)

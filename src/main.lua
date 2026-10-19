@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.07 (Two-Headed Giant: shared team turns, team combat, teammates aren't opponents)"
+SCRIPT_VERSION = "2.08 (2HG: fire pits in the four corners, fires in both teammates' colours; 4p pits moved off the wall)"
 
 function onLoad(saved)
   GameLog.setup()
