@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.10 (a spell counts as the casting player's, not whoever the table thought held it; fire lag, Force of Will)"
+SCRIPT_VERSION = "2.11 (a spell counts as the casting player's, not whoever the table thought held it; fire lag, Force of Will)"
 
 function onLoad(saved)
   GameLog.setup()

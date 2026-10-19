@@ -1146,20 +1146,39 @@ end
 -- notMyTurn, rest } or nil. rest = parts of the cost the table doesn't pay for you.
 local COLOR_WORDS = { white = "W", blue = "U", black = "B", red = "R", green = "G" }
 function Stack.altCostOf(obj)
-  local low = oracleOf(obj):lower():gsub("%b()", "")
-  local pre, cost = low:match("([^%.\n]*)you may ([^%.\n]-) rather than pay this spell's mana cost")
-  if not cost then
+  local low = string.lower(tostring(oracleOf(obj) or ""))
+  local key = "rather than pay this spell's mana cost"
+  local e = string.find(low, key, 1, true)
+  if not e then
     return nil
   end
-  local alt = { text = cost, notMyTurn = pre:find("not your turn", 1, true) ~= nil, rest = {} }
-  for part in (cost:gsub(" and ", ","):gsub(", ", ",") .. ","):gmatch("([^,]+),") do
-    local life = part:match("^pay (%d+) life$")
-    local col = part:match("^exile an? (%a+) card from your hand$")
+  -- The sentence it's in: back to the last period or line break.
+  local head = string.sub(low, 1, e - 1)
+  local st = 1
+  for i = #head, 1, -1 do
+    local ch = string.sub(head, i, i)
+    if ch == "." or ch == "\n" then
+      st = i + 1
+      break
+    end
+  end
+  local sentence = string.sub(head, st)
+  local ym = string.find(sentence, "you may ", 1, true)
+  if not ym then
+    return nil
+  end
+  local pre = string.sub(sentence, 1, ym - 1)
+  local cost = string.gsub(string.sub(sentence, ym + 8), "%s+$", "")
+  local alt = { text = cost, notMyTurn = string.find(pre, "not your turn", 1, true) ~= nil, rest = {} }
+  local list = string.gsub(string.gsub(cost, " and ", ","), ", ", ",")
+  for part in string.gmatch(list .. ",", "([^,]+),") do
+    local life = string.match(part, "^%s*pay (%d+) life%s*$")
+    local col = string.match(part, "^%s*exile an? (%a+) card from your hand%s*$")
     if life then
       alt.life = tonumber(life)
     elseif col and COLOR_WORDS[col] then
       alt.exile = col
-    elseif part:match("%S") then
+    elseif string.find(part, "%S") then
       table.insert(alt.rest, part)
     end
   end
@@ -1243,7 +1262,8 @@ end
 
 function Stack.addCardMenu(obj, full)
   -- An alternative cost (Force of Will), from the hand.
-  if not full and Zones.handOwner and Zones.handOwner(obj) and Stack.altCostOf(obj) then
+  local okAlt, hasAlt = pcall(function() return Zones.handOwner(obj) ~= nil and Stack.altCostOf(obj) ~= nil end)
+  if not full and okAlt and hasAlt then
     obj.addContextMenuItem("Cast: alternative cost", function(playerColor)
       Stack.castAlt(obj, playerColor)
     end)
