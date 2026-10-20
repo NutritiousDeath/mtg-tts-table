@@ -1,5 +1,5 @@
 """3D table frame (table.lua): a gothic stone rim around the flat 100 x 100
-play surface, spired pillars at the corners, and a pedestal going down into
+play surface, corner towers topped with flat platforms for the braziers, and a pedestal going down into
 the mist. Writes assets/table/frame.obj and assets/table/stone.png (a
 tileable dark stone texture with faint cyan cracks). Units are TTS units;
 the play surface's top is at y = 1.0 and the model sits around it.
@@ -144,7 +144,8 @@ def build_frame(HX, HZ, name):
                     px, pz = cx + ox * 2.6, cz + oz * 2.6
                     box(px - 0.4, px + 0.4, lip + 8.8, lip + 10.0, pz - 0.4, pz + 0.4, bottom=False)
                     pyramid(px, pz, 0.4, lip + 10.0, lip + 13.0)
-            pyramid(cx, cz, 2.2, lip + 12.0, lip + 22.0)
+            # No spire on top any more: the tower ends in a flat top where an iron brazier stands
+            # (table.lua torches: assets/torch/mtg_brazier.unity3d).
     # --- Under the table: a thick slab, then a pedestal flaring down into the mist.
     box(-HX, HX, bot - 1.5, bot, -HZ, HZ)
     frustum(0, 0, 30, 14, bot - 1.5, bot - 6)

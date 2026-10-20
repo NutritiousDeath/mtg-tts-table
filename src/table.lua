@@ -467,7 +467,7 @@ end
 -- towers and stone legs (tools/make_table_model.py). One locked custom model,
 -- kept between loads; replaced when its files change version.
 local FRAME_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/table/"
-local FRAME_VERSION = "?v=3"
+local FRAME_VERSION = "?v=4"
 
 function TableSetup.ensureFrame()
   local state = GameState.data.table
@@ -646,12 +646,13 @@ function TableSetup.ensureGlass()
   obj.setCustomObject({ assetbundle = url, type = 0 })
 end
 
--- Spectral torches: an iron sconce on the inner corner of each of the frame's four towers, with cold
--- blue-cyan fire, embers and a real flickering light (a Unity AssetBundle: tools/unity/MTGTorchBuilder.cs).
-local TORCH_URL = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/torch/mtg_torch.unity3d?v=3"
-local TORCH_Y = 7.5          -- cup height (the tower body runs 3.5 .. 10)
-local TOWER_INSET = 7.6      -- frame edge to the tower's inner corner
-local TORCH_OUT = 0.85       -- cup distance out from the corner, along each axis (the arm runs into the stone)
+-- Braziers: an iron brazier with coals and a colour-changing fire on top of each of the frame's four
+-- towers (a Unity AssetBundle: tools/unity/MTGTorchBuilder.cs, no sound). They replaced the old wall
+-- sconces and the towers' spires. Still called "torches" in the code (fires.lua lights them).
+local TORCH_URL = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/torch/mtg_brazier.unity3d?v=1"
+local TOWER_TOP = 13.6       -- the flat top of each tower (tools/make_table_model.py: lip + 12)
+local BRAZIER_UP = 1.7       -- the bundle's origin is the coal bed, 1.7 above its feet
+local TOWER_HALF = 4.2       -- frame edge to the tower's centre
 
 local function torchSpots()
   local hx = TableSetup.layout() == "twohg" and 66.7 or 56.7
@@ -659,10 +660,9 @@ local function torchSpots()
   local out = {}
   for _, sx in ipairs({ 1, -1 }) do
     for _, sz in ipairs({ 1, -1 }) do
-      local cx, cz = sx * (hx - TOWER_INSET), sz * (hz - TOWER_INSET)
+      local cx, cz = sx * (hx - TOWER_HALF), sz * (hz - TOWER_HALF)
       table.insert(out, {
-        pos = { cx - sx * TORCH_OUT, TORCH_Y, cz - sz * TORCH_OUT },
-        -- the sconce's arm (its +Z) points into the tower corner
+        pos = { cx, TOWER_TOP + BRAZIER_UP, cz },
         yaw = math.deg(math.atan2 and math.atan2(sx, sz) or math.atan(sx, sz)),
       })
     end
@@ -720,7 +720,7 @@ function TableSetup.ensureTorches()
         o.setPosition(sp.pos)
         o.setRotation({ 0, sp.yaw, 0 })
         o.interactable = false
-        o.setName("Spectral Torch")
+        o.setName("Brazier")
         o.addTag("TableTorch")
         state.torches[i] = o.getGUID()
         if Fires then
