@@ -19,7 +19,7 @@ Fires = {}
 
 local BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/"
 local HEARTH_VERSION = "?v=4"
-local HEARTH_FIRE_URL = BASE .. "torch/mtg_hearth.unity3d?v=7"
+local HEARTH_FIRE_URL = BASE .. "torch/mtg_hearth.unity3d?v=8"
 local STONE_URL = BASE .. "table/stone.png?v=3"
 local FLOOR_Y = -31
 
