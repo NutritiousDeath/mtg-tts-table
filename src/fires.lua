@@ -19,7 +19,10 @@ Fires = {}
 
 local BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/"
 local HEARTH_VERSION = "?v=4"
-local HEARTH_FIRE_URL = BASE .. "torch/mtg_hearth.unity3d?v=10"
+local HEARTH_FIRE_URL = BASE .. "torch/mtg_hearth.unity3d?v=11"
+-- The roar / woosh sounds on their own invisible object (trigger 0 roar, 1 woosh), so every fire can
+-- change colour the moment the wave reaches it without cutting the sound off.
+local SFX_URL = BASE .. "torch/mtg_sfx.unity3d?v=1"
 local STONE_URL = BASE .. "table/stone.png?v=3"
 local FLOOR_Y = -31
 
@@ -177,6 +180,19 @@ function Fires.ensure()
       end
     end
   end
+  -- The sound object, hidden under the table's pedestal.
+  local sfx = st.sfx and getObjectFromGUID(st.sfx)
+  local sco = sfx and sfx.getCustomObject()
+  if not (sfx and sco and sco.assetbundle == SFX_URL) then
+    if sfx then
+      sfx.destruct()
+    end
+    for _, o in ipairs(getObjectsWithTag("FireSfx")) do
+      o.destruct()
+    end
+    spawnLocked("Custom_AssetBundle", { 0, FLOOR_Y + 1, 0 }, 0, "Fire Sounds", "FireSfx",
+      { assetbundle = SFX_URL, type = 0 }, function(o) st.sfx = o.getGUID() end)
+  end
   Fires.place()
   Wait.time(function() Fires.refresh() end, 2)
 end
@@ -229,11 +245,46 @@ local function shareColors(color)
   return { color }
 end
 
+-- Turn every fire to a colour (Purple, White, Red, Green, Blue), with a "roar" or "woosh".
+-- With a roar / woosh the colour sweeps round the room like a wave, timed to the sound: it starts at the
+-- fires nearest the new player's seat and runs both ways round, meeting on the far side. The stained glass
+-- changes as the wave passes the middle. Without one (a reload) everything changes quietly at once.
+local WAVE = { woosh = 0.9, roar = 1.4 }
+
 function Fires.set(color, mode)
   local idx = INDEX[color] or 0
   local shared = shareColors(color)
   GameState.data.fireColor = color
   local st = state()
+  local wave = mode and WAVE[mode] or nil
+  -- The sound, from its own object.
+  if mode then
+    local sfx = st.sfx and getObjectFromGUID(st.sfx)
+    if sfx then
+      whenLoaded(sfx, function(obj)
+        pcall(function() obj.AssetBundle.playTriggerEffect(mode == "roar" and 0 or 1) end)
+      end)
+    end
+  end
+  -- Where the wave starts: the seat's direction from the middle of the table (none for purple).
+  local s = TableSetup.seat(color)
+  local ox, oz = s and s.outward.x or nil, s and s.outward.z or nil
+  local function delayFor(obj, n)
+    if not wave then
+      return (n - 1) * 0.05
+    end
+    if ox == nil then
+      return (n - 1) * 0.06
+    end
+    local p = obj.getPosition()
+    local len = math.sqrt(p.x * p.x + p.z * p.z)
+    if len < 0.01 then
+      return 0
+    end
+    local dot = (p.x * ox + p.z * oz) / len
+    dot = math.max(-1, math.min(1, dot))
+    return math.acos(dot) / math.pi * wave
+  end
   local glass = st.glass and getObjectFromGUID(st.glass)
   if glass then
     whenLoaded(glass, function(obj)
@@ -241,11 +292,10 @@ function Fires.set(color, mode)
         if not obj.isDestroyed() then
           pcall(function() obj.AssetBundle.playLoopingEffect(idx) end)
         end
-      end, mode and 0.35 or 0)
+      end, wave and wave * 0.5 or 0)
     end)
   end
-  -- Spread over a few frames, and only the two fireplaces play the roar / woosh burst (sparks, flash):
-  -- switching every fire at once made a 4-player game hitch.
+  -- Only the two fireplaces play the burst (sparks, flash), silently: the sound is on its own object.
   local nHearth = 0
   for _, sp in ipairs(hearthSpots()) do
     if not sp.pit then
@@ -255,30 +305,18 @@ function Fires.set(color, mode)
   for n, o in ipairs(fireObjects()) do
     local idx = INDEX[shared[((n - 1) % #shared) + 1]] or idx
     local burst = mode and n <= nHearth
-    local stagger = (n - 1) * 0.12
+    local delay = delayFor(o, n)
     whenLoaded(o, function(obj)
       Wait.time(function()
         if obj.isDestroyed() then
           return
         end
+        -- Colour first, then the burst (switching the colour after would cut the burst short).
+        pcall(function() obj.AssetBundle.playLoopingEffect(idx) end)
         if burst then
-          local t = (mode == "roar" and ROAR or WOOSH) + idx + (n == 1 and 0 or SILENT)
-          pcall(function() obj.AssetBundle.playTriggerEffect(t) end)
-          -- Switching an object's effect stops the sound it's playing, so the fire carrying the sound (the
-          -- first fireplace) changes colour only once its roar / woosh has finished.
-          local delay = 0.35
-          if n == 1 then
-            delay = (mode == "roar") and 3.0 or 1.25
-          end
-          Wait.time(function()
-            if not obj.isDestroyed() then
-              pcall(function() obj.AssetBundle.playLoopingEffect(idx) end)
-            end
-          end, delay)
-        else
-          pcall(function() obj.AssetBundle.playLoopingEffect(idx) end)
+          pcall(function() obj.AssetBundle.playTriggerEffect((mode == "roar" and ROAR or WOOSH) + idx + SILENT) end)
         end
-      end, stagger)
+      end, delay)
     end)
   end
 end

@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.15 (2HG: \"your upkeep / end step\" triggers for both teammates; finality counters)"
+SCRIPT_VERSION = "2.17 (turn colours sweep round the room in a wave with the woosh; hand zones moved back)"
 
 function onLoad(saved)
   GameLog.setup()

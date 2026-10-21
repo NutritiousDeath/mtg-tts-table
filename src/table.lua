@@ -298,7 +298,9 @@ local function handTarget(color)
   local s = TableSetup.seat(color)
   if s then
     return {
-      position = { x = s.center.x - s.outward.x * 1.5, y = TableSetup.SURFACE_TOP + 3, z = s.center.z - s.outward.z * 1.5 },
+      -- Out past the table edge, over the stone rim (the zone is 5 deep: 2.5 .. 7.5 beyond the edge), so a
+      -- land dropped at the near edge of the LANDS mat stays on the table instead of falling into the hand.
+      position = { x = s.center.x + s.outward.x * 5, y = TableSetup.SURFACE_TOP + 3, z = s.center.z + s.outward.z * 5 },
       rotation = { x = 0, y = s.angle, z = 0 },
       scale = { x = 30, y = 6, z = 5 },
     }
@@ -766,7 +768,7 @@ function TableSetup.ignorePointer()
       pcall(function() o.interactable = false end)
     end
   end
-  for _, tag in ipairs({ "PlaySurface", "TableFrame", "TableFloor", "TableHearth", "HearthFire", "TableTorch", "TableRoom", "TableGlass", "MatLabel" }) do
+  for _, tag in ipairs({ "PlaySurface", "TableFrame", "TableFloor", "TableHearth", "HearthFire", "FireSfx", "TableTorch", "TableRoom", "TableGlass", "MatLabel" }) do
     for _, o in ipairs(getObjectsWithTag(tag)) do
       pcall(function() o.interactable = false end)
     end
