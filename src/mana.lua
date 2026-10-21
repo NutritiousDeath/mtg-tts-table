@@ -74,9 +74,36 @@ function ManaChips.emptyAll()
   for _, color in ipairs(TableSetup.activeSeats()) do
     local p = pool(color)
     if next(p) ~= nil then
-      any = true
-      GameState.data.mana[color] = {}
+      -- Horizon Stone / Kruphix (unspent mana becomes colorless), Omnath (keeps green), Upwelling (keeps all).
+      local k = { keep = {}, from = {} }
+      if Statics and Statics.manaKeep then
+        local ok, r = pcall(Statics.manaKeep, color)
+        if ok and r then
+          k = r
+        end
+      end
+      local new = {}
+      if k.all then
+        for key, n in pairs(p) do
+          new[key] = n
+        end
+      else
+        for key, n in pairs(p) do
+          if k.keep[key] then
+            new[key] = (new[key] or 0) + n
+          elseif k.colorless then
+            new.C = (new.C or 0) + n
+          end
+        end
+      end
+      local kept = next(new) ~= nil
+      GameState.data.mana[color] = new
       renderTile(color)
+      if kept then
+        printToAll("MTG > " .. color .. "'s mana stays (" .. table.concat(k.from, ", ") .. "): " .. ManaChips.summary(color) .. ".", { 0.55, 0.9, 0.6 })
+      else
+        any = true
+      end
     end
   end
   return any

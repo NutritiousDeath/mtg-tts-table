@@ -39,6 +39,30 @@ end
 local NUMBERS = { a = 1, an = 1, one = 1, two = 2, three = 3, four = 4, five = 5, six = 6, seven = 7,
   eight = 8, nine = 9, ten = 10 }
 
+-- Plain-search stand-ins for lazy patterns: TTS's pattern matcher gives up ("pattern too complex") when a
+-- "(.-)" has to stretch over a long sentence.
+-- The text between the first `pre` and the nearest of the `posts` after it, like pre .. "(.-)" .. post.
+local function between(s, pre, posts)
+  local from = 1
+  while true do
+    local a = s:find(pre, from, true)
+    if not a then
+      return nil
+    end
+    local best
+    for _, post in ipairs(posts) do
+      local b = s:find(post, a + #pre, true)
+      if b and (best == nil or b < best) then
+        best = b
+      end
+    end
+    if best then
+      return s:sub(a + #pre, best - 1)
+    end
+    from = a + 1
+  end
+end
+
 local function num(word)
   return tonumber(word) or NUMBERS[word or ""]
 end
@@ -218,7 +242,23 @@ function Effects.parse(text, sourceName)
     end
     -- Lost in Space: "Target artifact or creature's owner puts it on their choice of the top or bottom of their library."
     do
-      local kinds = tt:match("target ([%a%s,]-)'s owner puts it on their choice of the top or bottom of their library")
+      local kinds
+      local key = tt:find("'s owner puts it on their choice of the top or bottom of their library", 1, true)
+      if key then
+        local from = 1
+        while true do
+          local a = tt:find("target ", from, true)
+          if not a or a + 7 > key then
+            break
+          end
+          local mid = tt:sub(a + 7, key - 1)
+          if not mid:find("[^%a%s,]") then
+            kinds = mid
+            break
+          end
+          from = a + 1
+        end
+      end
       if kinds then
         local list = { { what = "tuckTarget", who = "you", n = 1, kinds = kinds } }
         if tt:find("surveil 1", 1, true) then
@@ -814,7 +854,10 @@ function Effects.parse(text, sourceName)
   -- Tap / untap: "Untap target artifact." / "Untap all nonland permanents you control." / "Tap all creatures your opponents control." / "untap ~".
   do
     local tt = t:gsub("^%s+", ""):gsub("%s+$", ""):gsub("^\226\128\162%s*", "")
-    local seg = tt:match("^(untap .-)%.?$") or tt:match("^(tap .-)%.?$")
+    local seg
+    if tt:sub(1, 6) == "untap " or tt:sub(1, 4) == "tap " then
+      seg = tt:gsub("%.$", "")
+    end
     if seg and not seg:find("%.") and not seg:find(" then ", 1, true) and not seg:find(" and ", 1, true) then
       local verb, rest = seg:match("^(%a+) (.+)$")
       local a = { what = "tapX", who = "you", n = 1, mode = verb, kinds = {}, scope = "any", count = 1 }
@@ -1014,7 +1057,25 @@ function Effects.parse(text, sourceName)
         end
         -- "Create a 5/5 Horse token if you control a Horse." = "If you control a Horse, create ...".
         if cond == nil and not clean:find("^if ") then
-          local eff, cc = clean:match("^(.-) if ([^,]+)$")
+          -- The last " if " in the sentence, found with plain searches: a lazy "(.-) if" pattern over a long
+          -- sentence made TTS's pattern matcher give up ("pattern too complex", White Sun's Twilight).
+          local eff, cc
+          do
+            -- The first " if " whose rest has no comma (what "^(.-) if ([^,]+)$" picked).
+            local from = 1
+            while true do
+              local i = clean:find(" if ", from, true)
+              if not i then
+                break
+              end
+              local tail = clean:sub(i + 4)
+              if tail ~= "" and not tail:find(",", 1, true) then
+                eff, cc = clean:sub(1, i - 1), tail
+                break
+              end
+              from = i + 1
+            end
+          end
           if eff and eff ~= "" and not eff:find(" instead", 1, true) and not eff:find("^you may ") then
             cond, rest = cc:gsub("%.$", ""), eff:gsub("%.$", "") .. "."
           end
@@ -1634,8 +1695,9 @@ function Effects.parse(text, sourceName)
     local after = t:sub(lAt, lAt + 400)
     local lw = after:match("^look at the top (%w+) cards? of your library")
     if lw and num(lw) then
-      local phrase = after:match("reveal (.-) cards? from among") or after:match("put (.-) cards? from among")
-        or after:match("reveal (.-) cards?") or ""
+      local phrase = between(after, "reveal ", { " card from among", " cards from among" })
+        or between(after, "put ", { " card from among", " cards from among" })
+        or between(after, "reveal ", { " card" }) or ""
       phrase = phrase:gsub("^up to %w+ ", ""):gsub("^an? ", ""):gsub("^any number of ", "")
       local q = ""
       if not phrase:find(" or ", 1, true) and not phrase:find("non", 1, true) and phrase:match("^(%a+)$") then

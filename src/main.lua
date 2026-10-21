@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.17 (turn colours sweep round the room in a wave with the woosh; hand zones moved back)"
+SCRIPT_VERSION = "2.18 (White Sun's Twilight \"pattern too complex\" fix, Horizon Stone keeps mana as colorless; fire wave)"
 
 function onLoad(saved)
   GameLog.setup()

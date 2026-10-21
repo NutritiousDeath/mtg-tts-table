@@ -1092,6 +1092,31 @@ function Statics.spellGrantCount(card, seat, word)
 end
 
 -- Notion Thief: who (if anyone) replaces this seat's extra draws, and with which card.
+-- Mana that isn't lost as steps end: { all = Upwelling, colorless = Horizon Stone / Kruphix (the rest becomes
+-- colorless), keep = { G = true } (Omnath, Locus of Mana: "you don't lose unspent green mana") }.
+local KEEP_WORDS = { white = "W", blue = "U", black = "B", red = "R", green = "G" }
+function Statics.manaKeep(seat)
+  local out = { keep = {}, from = {} }
+  for _, p in ipairs(perms()) do
+    local o = p.oracle
+    if o:find("don't lose unspent mana", 1, true) or o:find("mana pools don't empty", 1, true) then
+      out.all = true
+      table.insert(out.from, p.obj.getName())
+    elseif p.seat == seat then
+      if o:find("if you would lose unspent mana, that mana becomes colorless instead", 1, true) then
+        out.colorless = true
+        table.insert(out.from, p.obj.getName())
+      end
+      local w = o:match("you don't lose unspent (%a+) mana")
+      if w and KEEP_WORDS[w] then
+        out.keep[KEEP_WORDS[w]] = true
+        table.insert(out.from, p.obj.getName())
+      end
+    end
+  end
+  return out
+end
+
 -- "Skip your draw step." (Damia, Sage of Stone, Necropotence): the name of a permanent of `seat`'s that says so.
 function Statics.skipsDrawStep(seat)
   for _, p in ipairs(perms()) do
