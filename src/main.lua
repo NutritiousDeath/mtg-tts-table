@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.18 (White Sun's Twilight \"pattern too complex\" fix, Horizon Stone keeps mana as colorless; fire wave)"
+SCRIPT_VERSION = "2.19 (!perf deep, !fires off/on for lag hunting); 2.18 (White Sun's Twilight \"pattern too complex\" fix, Horizon Stone keeps mana as colorless; fire wave)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -643,6 +643,97 @@ function onChat(message, sender)
       end
       print("MTG > Perf watch (15s): " .. table.concat(parts, ", "))
     end, 15)
+    return false
+  end
+
+  -- !perf deep: how long each part of the script takes on this board (milliseconds), to find the lag.
+  if message == "!perf deep" then
+    local function timeIt(n, fn)
+      local t0 = os.clock()
+      for _ = 1, n do
+        pcall(fn)
+      end
+      return (os.clock() - t0) / n * 1000
+    end
+    local cards = {}
+    for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+      if o.type == "Card" and not o.isDestroyed() then
+        table.insert(cards, o)
+      end
+    end
+    local onField = {}
+    for _, o in ipairs(cards) do
+      local loc = Zones.regionAt(o.getPosition())
+      if loc.region == "battlefield" or loc.region == "lands" then
+        table.insert(onField, o)
+      end
+    end
+    local r = {}
+    local function add(label, ms)
+      table.insert(r, string.format("%s %.1f", label, ms))
+    end
+    add("findCards", timeIt(5, function() getObjectsWithTag("MTGCard") end))
+    add("readEachCard", timeIt(3, function()
+      for _, o in ipairs(cards) do
+        o.getPosition()
+        o.getGUID()
+        o.getName()
+      end
+    end))
+    add("notesEachCard", timeIt(3, function()
+      for _, o in ipairs(cards) do
+        o.getGMNotes()
+      end
+    end))
+    add("cardData", timeIt(3, function()
+      for _, o in ipairs(cards) do
+        CardData.get(o)
+      end
+    end))
+    add("areas", timeIt(3, function()
+      for _, o in ipairs(cards) do
+        Zones.regionAt(o.getPosition())
+      end
+    end))
+    add("grants", timeIt(3, function()
+      for _, o in ipairs(onField) do
+        Statics.grants(o)
+      end
+    end))
+    add("abilities", timeIt(3, function()
+      for _, o in ipairs(onField) do
+        Triggers.abilitiesOf(o)
+      end
+    end))
+    add("statics", timeIt(3, function() Statics.compute() end))
+    add("grantLabels", timeIt(3, function() Statics.refreshGrantLabels() end))
+    add("redrawAll", timeIt(1, function()
+      for _, o in ipairs(onField) do
+        Counters.render(o)
+      end
+    end))
+    print("MTG > Perf deep (" .. #cards .. " cards, " .. #onField .. " on battlefields; ms): " .. table.concat(r, " | "))
+    return false
+  end
+
+  -- !fires off / !fires on: remove every fire, torch and the stained glass (their lights), to see if
+  -- the lag is the lighting. On puts them back.
+  if message == "!fires off" or message == "!fires on" then
+    if message == "!fires off" then
+      for _, tag in ipairs({ "HearthFire", "TableTorch", "TableGlass" }) do
+        for _, o in ipairs(getObjectsWithTag(tag)) do
+          o.destruct()
+        end
+      end
+      broadcastToAll("MTG > Fires, braziers and stained glass removed (testing lag). !fires on puts them back.", { 0.75, 0.8, 0.9 })
+    else
+      pcall(TableSetup.ensureTorches)
+      pcall(TableSetup.ensureGlass)
+      if Fires then
+        pcall(Fires.ensure)
+      end
+      broadcastToAll("MTG > Fires, braziers and stained glass are back.", { 0.75, 0.8, 0.9 })
+    end
     return false
   end
 
