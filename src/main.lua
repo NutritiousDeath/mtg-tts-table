@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.12 (braziers on the towers instead of sconces and spires; quieter, seamless fireplace crackle)"
+SCRIPT_VERSION = "2.13 (cumulative upkeep, Damia, Yuna's turn keywords, Fell the Mighty)"
 
 function onLoad(saved)
   GameLog.setup()

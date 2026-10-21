@@ -823,6 +823,11 @@ local function parseGrantLine(line)
     return nil
   end
   local cond
+  -- "During your turn, Yuna and enchantment creatures you control have trample, lifelink, and ward {2}."
+  if line:sub(1, 18) == "during your turn, " then
+    cond = "myturn"
+    line = line:sub(19)
+  end
   local lead = line:find("as long as you have no cards in hand, ", 1, true)
   if lead then
     cond = "hellbent"
@@ -845,7 +850,13 @@ local function parseGrantLine(line)
         return nil
       end
       local rest = line:sub(at + #f[1])
-      local rec = { subj = subj, scope = f[2], cond = cond, kws = {}, lines = {} }
+      -- "~ and enchantment creatures": the card itself as well as the others.
+      local selfToo = false
+      if subj:sub(1, 6) == "~ and " then
+        selfToo = true
+        subj = subj:sub(7)
+      end
+      local rec = { subj = subj, scope = f[2], cond = cond, kws = {}, lines = {}, selfToo = selfToo }
       for q in rest:gmatch('"([^"]*)"') do
         local t = q:gsub("%s+$", "")
         if t:sub(-1) ~= "." then
@@ -893,6 +904,11 @@ local function grantSources()
         local l2 = line
         if nm ~= "" and l2:find(nm, 1, true) then
           l2 = l2:gsub(nm:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "~")
+        end
+        -- The short name too ("Yuna" for Yuna, Hope of Spira).
+        local short = nm:match("^([^,]+),")
+        if short and #short > 2 and l2:find(short, 1, true) then
+          l2 = l2:gsub(short:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "~")
         end
         local rec
         if l2:find(" have ", 1, true) or l2:find(" has ", 1, true) then
@@ -966,7 +982,15 @@ function Statics.grants(obj)
     if g.forge then
       fits = Statics.forgeMatches(g.forge, q, { obj = g.obj, seat = g.seat })
     else
-      fits = sideOk and (g.cond ~= "hellbent" or handEmpty(g.seat)) and subjectMatches(g.subj, q, { obj = g.obj })
+      local condOk = (g.cond ~= "hellbent" or handEmpty(g.seat))
+        and (g.cond ~= "myturn" or (Turns and Turns.isActiveSeat and Turns.isActiveSeat(g.seat)))
+      local subjOk = (g.selfToo and obj == g.obj) or subjectMatches(g.subj, q, { obj = g.obj })
+      -- "<type> creatures" (enchantment creatures, artifact creatures): a creature with that type too.
+      if not subjOk then
+        local tw = g.subj:match("^(%a+) creatures$")
+        subjOk = tw ~= nil and q.tl:find("creature", 1, true) ~= nil and q.tl:find(tw, 1, true) ~= nil
+      end
+      fits = sideOk and condOk and subjOk
     end
     if fits then
       for _, k in ipairs(g.kws) do
@@ -1068,6 +1092,16 @@ function Statics.spellGrantCount(card, seat, word)
 end
 
 -- Notion Thief: who (if anyone) replaces this seat's extra draws, and with which card.
+-- "Skip your draw step." (Damia, Sage of Stone, Necropotence): the name of a permanent of `seat`'s that says so.
+function Statics.skipsDrawStep(seat)
+  for _, p in ipairs(perms()) do
+    if p.seat == seat and p.oracle:find("skip your draw step", 1, true) then
+      return p.obj.getName()
+    end
+  end
+  return nil
+end
+
 function Statics.drawReplacer(seat)
   for _, p in ipairs(perms()) do
     if p.seat ~= seat and p.oracle:find("except the first one they draw in each of their draw steps", 1, true) then

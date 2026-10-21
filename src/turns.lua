@@ -423,7 +423,12 @@ enterStep = function()
         or " skips the first draw (two-player rule)."), INFO)
     else
       for _, c in ipairs(team) do
-        Actions.draw(c, 1, "draw step")
+        local skipBy = Statics and Statics.skipsDrawStep and Statics.skipsDrawStep(c)
+        if skipBy then
+          broadcastToAll(c .. " skips their draw step (" .. skipBy .. ").", INFO)
+        else
+          Actions.draw(c, 1, "draw step")
+        end
       end
     end
     -- Nothing else normally happens in the draw step: move on to Main 1.

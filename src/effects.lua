@@ -89,7 +89,8 @@ function Effects.parse(text, sourceName)
   while i <= #raw do
     local j = raw:find("\n", i, true) or (#raw + 1)
     local line = raw:sub(i, j - 1)
-    if line:find(".", 1, true) or line:find(":", 1, true) or line:lower():find("^fabricate %d") then
+    if line:find(".", 1, true) or line:find(":", 1, true) or line:lower():find("^fabricate %d")
+        or line:lower():find("^cumulative upkeep") then
       table.insert(kept, line)
     end
     i = j + 1
@@ -549,6 +550,24 @@ function Effects.parse(text, sourceName)
         local sub = Effects.parse(first, sourceName) or { actions = {}, notes = {}, conds = {} }
         table.insert(sub.actions, { what = "descentBurst", who = "you", n = 1, treasureWho = tw, damageWho = dw })
         return { optional = sub.optional or false, notes = sub.notes or {}, conds = sub.conds or {}, actions = sub.actions }
+      end
+    end
+    -- Fell the Mighty: "Choose target creature. Destroy each creature with power greater than that creature's power."
+    if t:find("choose target creature. destroy each creature with power greater than that creature's power", 1, true) then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "fellMighty", who = "you", n = 1 } } }
+    end
+    -- Damia, Sage of Stone: "if you have fewer than seven cards in hand, draw cards equal to the difference."
+    do
+      local w = t:match("if you have fewer than (%w+) cards in hand, draw cards equal to the difference")
+      if w and num(w) then
+        return { optional = false, notes = {}, conds = {}, actions = { { what = "drawUpTo", who = "you", n = num(w) } } }
+      end
+    end
+    -- Cumulative upkeep (Mystic Remora): an age counter, then pay the cost once per age counter or sacrifice it.
+    do
+      local cost = t:match("^%s*cumulative upkeep[%s%-—]*([^%(]-)%s*%.?%s*$")
+      if cost then
+        return { optional = false, notes = {}, conds = {}, actions = { { what = "cumUpkeep", who = "you", n = 1, cost = cost } } }
       end
     end
     -- Sly Requisitioner: each player creates a Treasure token.
@@ -2712,6 +2731,12 @@ local function describe(a, target, controller)
     return "an Insect token, or a copy of itself with six or more lands"
   elseif a.what == "eachPlayerToken" then
     return "each player creates a " .. tostring(a.word) .. " token"
+  elseif a.what == "fellMighty" then
+    return "destroy each creature with power greater than the chosen creature's"
+  elseif a.what == "drawUpTo" then
+    return "draw up to " .. tostring(a.n) .. " cards in hand"
+  elseif a.what == "cumUpkeep" then
+    return "cumulative upkeep " .. tostring(a.cost)
   elseif a.what == "copyEachToken" then
     return "a token copy of each token you control"
   elseif a.what == "sacDraw" then
@@ -3453,6 +3478,18 @@ local function apply(it, plan, target)
               Tokens.create(seat, { pt = "1/1", words = { "insect" }, colors = { G = true } }, 1, it.name)
             end
           end
+        elseif a.what == "fellMighty" then
+          Effects.fellMighty(seat, it)
+        elseif a.what == "drawUpTo" then
+          local have = 0
+          pcall(function() have = #(Player[seat].getHandObjects() or {}) end)
+          local k = math.max(0, a.n - have)
+          printToAll("MTG > " .. it.name .. ": " .. seat .. " has " .. have .. " card(s) in hand and draws " .. k .. ".", GOOD)
+          if k > 0 then
+            Actions.draw(seat, k, it.name)
+          end
+        elseif a.what == "cumUpkeep" then
+          Effects.cumulativeUpkeep(seat, a, it)
         elseif a.what == "eachPlayerToken" then
           for _, c in ipairs(Effects.orderFrom(seat)) do
             Tokens.create(c, { words = { a.word }, colors = {} }, 1, it.name)
@@ -8151,6 +8188,81 @@ function Effects.removeAll(seat, a, it)
       .. table.concat(names, ", ") .. "." .. (holdFor and (" They come back when " .. it.name .. " leaves the battlefield.") or ""), GOOD)
   end
   return gone
+end
+
+-- Fell the Mighty: pick a creature; every creature with greater power is destroyed.
+function Effects.fellMighty(seat, it)
+  ask(seat, it.name .. ": choose target creature", "Click CHOOSE on a creature: each creature with power GREATER than its power is destroyed.",
+    { { label = "SKIP", value = false } }, function(chosen)
+      if not chosen or chosen.isDestroyed() then
+        return
+      end
+      local p0 = tonumber(Counters.stats(chosen).power or "") or 0
+      local gone, names = 0, {}
+      for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+        if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) and obj.held_by_color == nil
+            and fieldSeat(obj) and Effects.cardTypes(obj).creature then
+          local pw = tonumber(Counters.stats(obj).power or "") or 0
+          if pw > p0 then
+            local name = obj.getName()
+            if removeOne(obj, "destroy") then
+              gone = gone + 1
+              table.insert(names, name)
+            end
+          end
+        end
+      end
+      printToAll("MTG > " .. it.name .. ": chose " .. chosen.getName() .. " (power " .. p0 .. "); destroyed "
+        .. (gone > 0 and table.concat(names, ", ") or "nothing") .. ".", GOOD)
+    end, { filter = function(obj, owner)
+      return owner ~= nil and Effects.cardTypes(obj).creature == true
+    end, label = "CHOOSE" })
+end
+
+-- Cumulative upkeep: put an age counter on it, then pay the cost once per age counter, or sacrifice it.
+function Effects.cumulativeUpkeep(seat, a, it)
+  local src = it.source and getObjectFromGUID(it.source)
+  if src == nil or src.isDestroyed() or not fieldSeat(src) then
+    printToAll("MTG > " .. it.name .. ": it's gone, so there's no cumulative upkeep to pay.", INFO)
+    return
+  end
+  Counters.change(src, "other", 1, seat)
+  local n = Counters.get(src).other
+  local cost = tostring(a.cost or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  local mana = cost:match("^[{}%w/]+$") and cost:find("{", 1, true) and cost or nil
+  local life = tonumber(cost:match("^pay (%d+) life$") or "")
+  local total, say
+  if mana then
+    total = string.rep(mana, n)
+    say = total
+  elseif life then
+    say = (life * n) .. " life"
+  else
+    say = cost .. " x" .. n
+  end
+  ask(seat, it.name .. ": cumulative upkeep", it.name .. " now has " .. n .. " age counter(s). Pay " .. say
+    .. ", or sacrifice it.", { { label = "PAY " .. say:sub(1, 14), value = "pay" }, { label = "SACRIFICE", value = "sac" } },
+    function(pick)
+      if src.isDestroyed() then
+        return
+      end
+      if pick == "pay" then
+        if mana then
+          local _, covered = ManaChips.pay(seat, total, it.name .. " (cumulative upkeep)")
+          if not covered then
+            broadcastToColor(it.name .. ": pay the rest of " .. total .. " yourself (tap lands, then it comes out of your pool).", seat, INFO)
+          end
+        elseif life then
+          Trackers.changeLife(seat, -(life * n), it.name)
+        else
+          broadcastToColor(it.name .. ": pay " .. say .. " yourself.", seat, INFO)
+        end
+        printToAll("MTG > " .. seat .. " pays the cumulative upkeep for " .. it.name .. " (" .. say .. ").", INFO)
+      elseif pick == "sac" then
+        printToAll("MTG > " .. seat .. " sacrifices " .. it.name .. " instead of paying its cumulative upkeep.", INFO)
+        Combat.sacrifice(src)
+      end
+    end)
 end
 
 -- "Destroy target creature": a DESTROY / EXILE button on each candidate.
