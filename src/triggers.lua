@@ -1427,7 +1427,9 @@ Events.on("stepStarted", function(d)
     for _, a in ipairs(abilitiesOf(p.obj)) do
       local t = a.trig
       if t.kind == "step" and (t.step == d.step or (t.step == "main" and (d.step == "main1" or d.step == "main2"))) then
+        -- 2HG: "your upkeep / your end step" is the whole team's (both teammates take the turn).
         local mine = p.controller == d.seat
+          or (Turns and Turns.isActiveSeat and Turns.isActiveSeat(d.seat) and Turns.isActiveSeat(p.controller))
         local oppOf = d.seat
         local hostOk = false
         if t.who == "host" and Equip then

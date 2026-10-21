@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.13 (cumulative upkeep, Damia, Yuna's turn keywords, Fell the Mighty)"
+SCRIPT_VERSION = "2.15 (2HG: \"your upkeep / end step\" triggers for both teammates; finality counters)"
 
 function onLoad(saved)
   GameLog.setup()

@@ -3161,9 +3161,17 @@ local function apply(it, plan, target)
         elseif a.what == "pump" then
           a.count = Effects.pump(seat, a, it)
         elseif a.what == "graveReturn" then
+          -- "...to the battlefield with a finality counter on it" (Yuna, Hope of Spira): if it would go to a
+          -- graveyard from the battlefield later, it's exiled instead (Effects.finality below).
+          local finality = a.where == "battlefield" and tostring(it.text or ""):lower():find("finality counter", 1, true) ~= nil
           LibSearch.open(seat, a.type, it.name .. ": click the " .. (a.type ~= "" and a.type or "card") .. " to return it"
-            .. (a.where == "battlefield" and " to the battlefield" or (a.where == "top" and " to the top of your library" or " to your hand")) .. ", then CLOSE.",
-            a.where, a.tapped, { typeOnly = true, zone = "graveyard" })
+            .. (a.where == "battlefield" and " to the battlefield" or (a.where == "top" and " to the top of your library" or " to your hand"))
+            .. (finality and " (with a finality counter)" or "") .. ", then CLOSE.",
+            a.where, a.tapped, { typeOnly = true, zone = "graveyard", onTake = finality and function(card)
+              GameState.data.finality = GameState.data.finality or {}
+              GameState.data.finality[card.getGUID()] = true
+              printToAll("MTG > " .. card.getName() .. " has a finality counter: if it would go to a graveyard from the battlefield, it's exiled instead.", INFO)
+            end or nil })
         elseif a.what == "scry" then
           for _ = 1, a.n do
             Actions.openScry(seat)
@@ -8189,6 +8197,56 @@ function Effects.removeAll(seat, a, it)
   end
   return gone
 end
+
+-- Finality counters: a permanent that has one goes to exile instead of the graveyard.
+Events.on("cardMoved", function(d)
+  local fin = GameState.data and GameState.data.finality
+  if fin == nil or d.card == nil or d.from == nil or d.to == nil then
+    return
+  end
+  local g = d.card.getGUID()
+  if not fin[g] then
+    return
+  end
+  local onField = d.from.region == "battlefield" or d.from.region == "lands"
+  if onField and d.to.region == "graveyard" then
+    fin[g] = nil
+    local seat = d.to.seat or d.from.seat
+    local card = d.card
+    local name = card.getName()
+    Wait.time(function()
+      if seat == nil then
+        return
+      end
+      local s = TableSetup.seat(seat)
+      local spot = TableSetup.slot(seat, "exile", TableSetup.SURFACE_TOP + 2)
+      if card.isDestroyed() then
+        -- It already merged into the graveyard pile: take it back out of the pile.
+        for _, o in ipairs(getObjects()) do
+          if o.type == "Deck" and not o.isDestroyed() then
+            local loc = Zones.regionAt(o.getPosition())
+            if loc.seat == seat and loc.region == "graveyard" then
+              for _, e in ipairs(o.getObjects()) do
+                if e.guid == g then
+                  local took = o.takeObject({ guid = g, position = spot, rotation = { 0, s.yaw, 0 }, smooth = false })
+                  Wait.time(function() if took and not took.isDestroyed() then Zones.refresh(took) end end, 0.6)
+                  break
+                end
+              end
+            end
+          end
+        end
+      else
+        card.setRotation({ 0, s.yaw, 0 })
+        card.setPosition(spot)
+        Wait.time(function() if not card.isDestroyed() then Zones.refresh(card) end end, 0.6)
+      end
+      printToAll("MTG > " .. name .. " had a finality counter: exiled instead of going to the graveyard.", INFO)
+    end, 0.4)
+  elseif onField and d.to.region ~= "battlefield" and d.to.region ~= "lands" then
+    fin[g] = nil    -- left the battlefield some other way (bounced, exiled): the counter is gone
+  end
+end)
 
 -- Fell the Mighty: pick a creature; every creature with greater power is destroyed.
 function Effects.fellMighty(seat, it)
