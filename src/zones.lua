@@ -94,6 +94,9 @@ end
 -- The area containing a world position: { seat, region }, or a "table"
 -- location if it's outside every area.
 -- Seat and area rectangles never move while a layout is in use, so they're worked out once.
+-- Each area is kept in its seat's own directions (sideways, toward the middle) relative to the seat's
+-- centre, plus one box around all of a seat's areas: a position is turned into seat directions once per
+-- seat, and seats it is nowhere near are skipped (this runs for every card, many times a second).
 local geo, geoLayout
 local function geometry()
   local lay = TableSetup.layout()
@@ -104,10 +107,19 @@ local function geometry()
   for _, color in ipairs(TableSetup.activeSeats()) do
     local s = TableSetup.seat(color)
     local regs = {}
+    local minS, maxS, minD, maxD = math.huge, -math.huge, math.huge, -math.huge
     for _, name in ipairs(TRACKED_REGIONS) do
-      table.insert(regs, { name = name, r = TableSetup.region(color, name) })
+      local r = TableSetup.region(color, name)
+      local dx, dz = r.center.x - s.center.x, r.center.z - s.center.z
+      local side = dx * s.right.x + dz * s.right.z
+      local depth = dx * s.inward.x + dz * s.inward.z
+      local hw, hd = r.w / 2 + EDGE_MARGIN, r.d / 2 + EDGE_MARGIN
+      table.insert(regs, { name = name, side = side, depth = depth, hw = hw, hd = hd, as = REGION_AS[name] })
+      minS, maxS = math.min(minS, side - hw), math.max(maxS, side + hw)
+      minD, maxD = math.min(minD, depth - hd), math.max(maxD, depth + hd)
     end
-    table.insert(geo, { color = color, s = s, regs = regs })
+    table.insert(geo, { color = color, cx = s.center.x, cz = s.center.z, rx = s.right.x, rz = s.right.z,
+      ix = s.inward.x, iz = s.inward.z, regs = regs, minS = minS, maxS = maxS, minD = minD, maxD = maxD })
   end
   geoLayout = lay
   return geo
@@ -118,20 +130,20 @@ function Zones.regionAt(pos)
   if Stack and Stack.contains(pos) then
     return { seat = nil, region = "stack" }
   end
+  local px, pz = pos.x, pos.z
   for _, g in ipairs(geometry()) do
-    local s = g.s
-    for _, e in ipairs(g.regs) do
-      local r = e.r
-      local dx, dz = pos.x - r.center.x, pos.z - r.center.z
-      -- Position in the seat's own directions (sideways, toward the middle).
-      local side = dx * s.right.x + dz * s.right.z
-      local depth = dx * s.inward.x + dz * s.inward.z
-      if math.abs(side) <= r.w / 2 + EDGE_MARGIN and math.abs(depth) <= r.d / 2 + EDGE_MARGIN then
-        local as = REGION_AS[e.name]
-        if as then
-          return { seat = g.color, region = as[1], slot = as[2] }
+    local dx, dz = px - g.cx, pz - g.cz
+    local side = dx * g.rx + dz * g.rz
+    local depth = dx * g.ix + dz * g.iz
+    if side >= g.minS and side <= g.maxS and depth >= g.minD and depth <= g.maxD then
+      for _, e in ipairs(g.regs) do
+        local a, b = side - e.side, depth - e.depth
+        if a <= e.hw and a >= -e.hw and b <= e.hd and b >= -e.hd then
+          if e.as then
+            return { seat = g.color, region = e.as[1], slot = e.as[2] }
+          end
+          return { seat = g.color, region = e.name }
         end
-        return { seat = g.color, region = e.name }
       end
     end
   end

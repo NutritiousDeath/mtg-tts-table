@@ -7750,15 +7750,17 @@ function Effects.decorate(obj)
   if q == nil or q.pick == nil or Faces.unknown(obj) then
     return
   end
-  local seat = fieldSeat(obj)
-  if seat == nil or not q.pick.filter(obj, seat) then
+  -- Counters.render passes a stand-in that records the buttons: the checks need the card itself.
+  local real = (type(obj) == "table" and rawget(obj, "__real")) or obj
+  local seat = fieldSeat(real)
+  if seat == nil or not q.pick.filter(real, seat) then
     return
   end
   -- Protection: a targeted pick can't choose a creature that has protection
   -- from the source's colour (shown instead of the pick button).
   local PROT = { TARGET = true, GOAD = true, ["CHAOS WARP"] = true, DESTROY = true, EXILE = true }
   if Equip and Equip.protectedFrom and PROT[q.pick.label] and q.pick.protect ~= false and q.pick.noProtect ~= true then
-    local pro = Equip.protectedFrom(obj, q.pick.src or q.src)
+    local pro = Equip.protectedFrom(real, q.pick.src or q.src)
     if pro then
       obj.createButton({
         click_function = "counters_noop",

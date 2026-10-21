@@ -256,7 +256,23 @@ local function forgeStaticEntries(name)
 end
 
 -- { [line number] = entry } for the lines of a card's rules text that exactly one Forge entry fits.
+local forgeLinesCache, forgeLinesN = {}, 0
 function Statics.forgeLines(name, oracle)
+  local key = tostring(name) .. "\0" .. tostring(oracle)
+  local hit = forgeLinesCache[key]
+  if hit then
+    return hit
+  end
+  local out = Statics.forgeLinesRead(name, oracle)
+  forgeLinesN = forgeLinesN + 1
+  if forgeLinesN > 2000 then
+    forgeLinesCache, forgeLinesN = {}, 0
+  end
+  forgeLinesCache[key] = out
+  return out
+end
+
+function Statics.forgeLinesRead(name, oracle)
   local entries = forgeStaticEntries(name)
   if entries == nil or not (Triggers and Triggers.forgeKey) then
     return {}
@@ -1030,6 +1046,10 @@ end
 local grantLabelSig = {}
 function Statics.refreshGrantLabels()
   grantSrc.at = -100     -- read the lords again now
+  -- Nothing gives keywords and no card shows given ones: nothing to redraw (the common case).
+  if #grantSources() == 0 and next(grantLabelSig) == nil then
+    return
+  end
   local seen = {}
   for _, p in ipairs(perms()) do
     local g = p.obj.getGUID()

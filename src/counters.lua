@@ -241,10 +241,71 @@ end
 -- Two labels on the card, both inside its width:
 --   big:   the creature's power/toughness now (when anything changes it), loyalty, other counters
 --   small: where the change comes from, keywords it was given, equipment, protection, badges
+-- Redrawing a card's buttons is the slow part of a big board. The labels are worked out on a stand-in
+-- that only records the buttons; the real card is cleared and redrawn only when they changed.
+local renderSig = {}
+
+local function sigOf(specs)
+  local parts = {}
+  for _, b in ipairs(specs) do
+    local function v3(t)
+      if type(t) ~= "table" then
+        return tostring(t)
+      end
+      return tostring(t[1] or t.x or t.r) .. "," .. tostring(t[2] or t.y or t.g) .. "," .. tostring(t[3] or t.z or t.b)
+        .. "," .. tostring(t[4] or t.a)
+    end
+    table.insert(parts, table.concat({ tostring(b.click_function), tostring(b.label), tostring(b.tooltip),
+      v3(b.position), v3(b.rotation), tostring(b.width), tostring(b.height), tostring(b.font_size),
+      v3(b.font_color), v3(b.color), tostring(b.scale and v3(b.scale) or "") }, "|"))
+  end
+  return table.concat(parts, "\n")
+end
+
+local renderInto
+
 function Counters.render(obj)
   if not isCard(obj) then
     return
   end
+  local real = obj
+  local specs = {}
+  local proxy = setmetatable({
+    __real = real,
+    createButton = function(b)
+      table.insert(specs, b)
+      return true
+    end,
+    clearButtons = function()
+      specs = {}
+    end,
+    getButtons = function()
+      return specs
+    end,
+  }, { __index = function(_, k) return real[k] end })
+  renderInto(proxy)
+  local g = real.getGUID()
+  local sig = sigOf(specs)
+  local have = real.getButtons()
+  local haveN = have and #have or 0
+  if renderSig[g] == sig and haveN == #specs then
+    return
+  end
+  renderSig[g] = sig
+  real.clearButtons()
+  for _, b in ipairs(specs) do
+    real.createButton(b)
+  end
+end
+
+-- Forget what was drawn (a card changed so its buttons must be redrawn for sure).
+function Counters.forgetRender(obj)
+  if obj then
+    renderSig[obj.getGUID()] = nil
+  end
+end
+
+renderInto = function(obj)
   obj.clearButtons()
   if Library and Library.decorateRevealed then Library.decorateRevealed(obj) end
   local c = Counters.get(obj)

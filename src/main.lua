@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.19 (!perf deep, !fires off/on for lag hunting); 2.18 (White Sun's Twilight \"pattern too complex\" fix, Horizon Stone keeps mana as colorless; fire wave)"
+SCRIPT_VERSION = "2.20 (faster big boards: quicker area lookups, cards only redrawn when their labels change, fewer static scans)"
 
 function onLoad(saved)
   GameLog.setup()
