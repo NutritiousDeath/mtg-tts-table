@@ -14,8 +14,9 @@
   runs out, the grave is shuffled into a new library.
 
   Roll the planar die down the tower (drop it in the top, or right-click it >
-  Roll, or !planechase roll): its lines light up in the roller's colour as it
-  falls, and the result counts when it lands in the tray. The table watches it: the first roll each turn is free, every extra
+  Roll, or !planechase roll): it rides down inside while the tower's lights run
+  in the roller's colour, and rolls out of the dragon on the roller's side; the
+  result counts when it settles on the dragon's tongue. The table watches it: the first roll each turn is free, every extra
   roll costs one more mana than the last; a planeswalk or chaos result is
   carried out by itself. Right-click the plane card > Planeswalk for effects
   that say "planeswalk".
@@ -71,10 +72,10 @@ local GRAVE_AT = { x = -8.5, z = GRAVE_MAT.z - MAT_OFF }
 -- East of the stack mat: the dice tower (assets/planechase/mtg_dicetower.unity3d, built by
 -- tools/unity/MTGDiceTowerBuilder.cs). TOWER is the middle of the round tower. Inside are two spiral slides wound
 -- round a column: spiral A comes out of a stone dragon's mouth to the north, spiral B out of a second dragon to
--- the south. A roll drops one die down each spiral, so both sides of the table see a die land; both are made to
--- show the same face.
+-- the south. There's one planar die: it goes down the side nearest whoever rolls it (SIDE_OF) and comes out of
+-- that side's dragon; both dragons breathe fire.
 local TOWER = { x = 8.5, z = 0 }
-local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=13"
+local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=14"
 local TOWER_TOP = 19.8          -- where a die is dropped in (through the deck's hole), above the table
 local HEADS = {
   -- Offsets from TOWER: the dragon's x, which way it faces (z), and the hole its spiral is dropped in by.
@@ -83,6 +84,8 @@ local HEADS = {
 }
 local REST_ALONG = 11.0         -- how far out along its dragon's tongue a die rests
 local DIE_EDGE = 1.0            -- the planar dice are sized to this (they have to fit the dragons' throats)
+-- The dragon each seat's rolls come out of (the one facing / nearest them).
+local SIDE_OF = { White = "B", Blue = "B", Green = "A", Red = "A" }
 -- Effects: looping 0-4 idle and 5-9 rolling in a colour (0 = cyan, then White, Red, Green, Blue);
 -- trigger 0-4 the dragons breathe in that colour, 5 chaos (purple), 6 planeswalk (blue-white).
 local TOWER_IDX = { White = 1, Red = 2, Green = 3, Blue = 4 }
@@ -657,17 +660,15 @@ local function fixDice()
 end
 Planechase.fixDice = fixDice
 
+-- One planar die (an older table had two: the extra one goes).
 putDie = function(cb)
   local dice = fixDice()
-  if #dice == 1 then
-    -- The other dragon's tongue.
-    local onA = (dice[1].getPosition().z - TOWER.z) * HEADS.A.dir >= 0
-    spawnDie("PlanarDie", "Planar Die", restSpot(onA and "B" or "A"))
-  elseif #dice == 0 then
-    spawnDie("PlanarDie", "Planar Die", restSpot("B"))
+  for i = 2, #dice do
+    dice[i].destruct()
   end
   if #dice == 0 then
-    spawnDie("PlanarDie", "Planar Die", restSpot("A"), cb)
+    local t = GameState.data.turn
+    spawnDie("PlanarDie", "Planar Die", restSpot(SIDE_OF[t and t.activeSeat or ""] or "B"), cb)
   elseif cb then
     cb(dice[1])
   end
@@ -1127,9 +1128,9 @@ towerRoll = function(die, color, byHand, chute)
   local breath = (r == 1 and TOWER_WALK) or ((r == 6 or st.aether) and TOWER_CHAOS) or idx
   towerLoop(TOWER_ROLLING + idx)
   towerRolling = true
-  -- It goes in on the side whose dragon it was sitting on (or the side it was dropped over).
-  local hp = chute or ((die.getPosition().z - TOWER.z) * HEADS.A.dir >= 0 and "A" or "B")
-  local ht = hp == "A" and "B" or "A"
+  -- It comes out of the dragon nearest whoever rolled it (or, for a colour with no seat side, the side it was
+  -- dropped over / sitting on).
+  local hp = SIDE_OF[color] or chute or ((die.getPosition().z - TOWER.z) * HEADS.A.dir >= 0 and "A" or "B")
   local function go(twin)
     local breathed = false
     local function spat()
@@ -1152,9 +1153,6 @@ towerRoll = function(die, color, byHand, chute)
       token.done = true
       oneDone()
     end)
-    if twin then
-      Wait.frames(function() journey(twin, ht, r, token, spat, oneDone) end, 2)
-    end
     Wait.time(function() Planechase.onRolled(die, color, true) end, 0.4)
     -- Never leave the tower stuck mid-roll.
     Wait.time(function()
@@ -1166,16 +1164,10 @@ towerRoll = function(die, color, byHand, chute)
       end
     end, 20)
   end
-  local twin = findTwin(die)
-  if twin then
-    go(twin)
-  else
-    spawnDie("PlanarDie", "Planar Die", restSpot(ht), go)
-  end
+  go(nil)
 end
 
--- A player let go of a planar die over the top of the tower: that's a roll down that half's chute (it's put
--- through the hole in the deck, wherever on top it was dropped).
+-- A player let go of the planar die over the top of the tower: that's a roll (it comes out on their side).
 function Planechase.onDrop(color, obj)
   if obj == nil or not obj.hasTag or not obj.hasTag("PlanarDie") or towerObj() == nil then
     return
@@ -1292,7 +1284,7 @@ function Planechase.ensure()
   end
   if plane or findDeck() or findGrave() then
     ensureExtras()
-    Wait.time(fixDice, 2)
+    Wait.time(function() putDie() end, 2)
   end
   local mesh = BASE .. "chest.obj" .. VERSION
   for _, o in ipairs(getObjectsWithTag("PlanechaseChest")) do
