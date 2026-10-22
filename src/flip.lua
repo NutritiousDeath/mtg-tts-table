@@ -230,7 +230,7 @@ runChaos = function(color)
   for _, o in ipairs(getObjects()) do
     local ok, take = pcall(function()
       if not FLIES[o.type] or skip[o.getGUID()] or o.held_by_color ~= nil or inHand[o.getGUID()]
-          or o.hasTag("TableFloor") or o.hasTag("TableHearth") or o.hasTag("HearthFire") or o.hasTag("FireSfx") or o.hasTag("StackFire") or o.hasTag("DiceTower") or o.hasTag("TableRoom") or o.hasTag("TableGlass") then
+          or o.hasTag("TableFloor") or o.hasTag("TableHearth") or o.hasTag("HearthFire") or o.hasTag("FireSfx") or o.hasTag("StackFire") or o.hasTag("DiceTower") or o.hasTag("TableRoom") or o.hasTag("TableRoof") or o.hasTag("TableGlass") then
         return false
       end
       if o.type == "Card" and o.is_face_down then

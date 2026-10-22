@@ -122,7 +122,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.26 (Planechase: dice tower, planar library and grave mats with reshuffle; farewell under the flipped table)"
+SCRIPT_VERSION = "2.27 (chapel roof with a farewell when TTS flips the table; Planechase dice tower and planar mats)"
 
 function onLoad(saved)
   GameLog.setup()

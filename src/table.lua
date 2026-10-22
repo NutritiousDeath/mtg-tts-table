@@ -607,6 +607,134 @@ function TableSetup.ensureRoom()
     type = 0, material = 3, cast_shadows = false })   -- 3: matte (no shine on stone)
 end
 
+-- The chapel's roof (tools/make_roof.py): a stone lid over the rib vault, hidden while you play (the vault
+-- stays open to the sky). When TTS's own Flip button throws the chapel around, the roof appears on it with a
+-- parting message painted on top -- a different one every flip -- and goes away again once the chapel is
+-- back in place. Its faces point outward only, so from inside the chapel it can't be seen anyway.
+local ROOF_VERSION = "?v=1"
+local ROOF_LID = 186.0       -- the lid's height above the floor (tools/make_roof.py LID)
+local ALL_COLORS_INV = { "White", "Brown", "Red", "Orange", "Yellow", "Green", "Teal", "Blue", "Purple", "Pink",
+  "Grey", "Black" }
+local ROOF_FAREWELLS = {
+  "BYE 2 U 2", "SEE YA", "SMELL YA LATER", "GG NO RE", "PEACE OUT", "LATER, NERDS", "HASTA LA VISTA",
+  "TABLE HAS LEFT THE CHAT", "IT'S NOT ME, IT'S YOU", "NO TAKE-BACKS", "SKILL ISSUE", "GO TOUCH GRASS",
+  "CTRL + Z?", "WELP.", "YEET", "BOARD WIPE!", "MULLIGAN TO ZERO", "RAGE QUIT SPEEDRUN", "THANKS FOR PLAYING",
+  "SHUFFLE THAT", "BYE FELICIA", "TOODLES", "ADIOS, AMIGOS", "I DIDN'T LIKE THAT GAME ANYWAY",
+}
+local roofShown, roofLast = false, nil
+
+local function roofObj()
+  local st = GameState.data.table or {}
+  local o = st.roof and getObjectFromGUID(st.roof)
+  if o and not o.isDestroyed() then
+    return o
+  end
+  return nil
+end
+
+local function hideRoof(o)
+  pcall(function() o.setInvisibleTo(ALL_COLORS_INV) end)
+  pcall(function() o.clearButtons() end)
+  o.setLock(true)
+  o.setPosition({ 0, FLOOR_Y, 0 })
+  o.setRotation({ 0, 0, 0 })
+end
+
+function TableSetup.ensureRoof()
+  local state = GameState.data.table
+  local suffix = TableSetup.layout() == "twohg" and "_2hg" or ""
+  local base = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/"
+  local mesh = base .. "room/roof" .. suffix .. ".obj" .. ROOF_VERSION
+  local roof = roofObj()
+  local co = roof and roof.getCustomObject()
+  if roof and co and co.mesh == mesh then
+    roofShown = false
+    hideRoof(roof)
+    return
+  end
+  if roof then
+    roof.destruct()
+  end
+  for _, obj in ipairs(getObjectsWithTag("TableRoof")) do
+    obj.destruct()
+  end
+  local obj = spawnObject({
+    type = "Custom_Model",
+    position = { 0, FLOOR_Y, 0 },
+    rotation = { 0, 0, 0 },
+    scale = { 1, 1, 1 },
+    sound = false,
+    callback_function = function(o)
+      o.interactable = false
+      o.setName("Chapel Roof")
+      o.addTag("TableRoof")
+      state.roof = o.getGUID()
+      roofShown = false
+      hideRoof(o)
+    end,
+  })
+  obj.setCustomObject({ mesh = mesh, diffuse = base .. "table/stone.png?v=3", collider = mesh, convex = false,
+    type = 0, material = 3, cast_shadows = false })
+end
+
+-- Paint a farewell on top of the roof (never the same one twice running).
+local function paintRoof(o)
+  local n = #ROOF_FAREWELLS
+  local i = math.random(n)
+  if ROOF_FAREWELLS[i] == roofLast and n > 1 then
+    i = i % n + 1
+  end
+  roofLast = ROOF_FAREWELLS[i]
+  pcall(function() o.clearButtons() end)
+  pcall(function()
+    o.createButton({
+      click_function = "roof_noop", function_owner = Global, label = roofLast,
+      position = { 0, ROOF_LID + 0.4, 0 }, rotation = { 0, 180, 0 }, scale = { 9, 1, 9 },
+      width = 0, height = 0, font_size = math.floor(math.min(1000, 14000 / #roofLast)),
+      font_color = { 1, 0.33, 0.45, 100 }, color = { 0, 0, 0, 0 },
+    })
+  end)
+end
+
+function roof_noop() end
+
+-- Watch the chapel: TTS's Flip throws it out of place. While it's out, the roof rides along with it.
+local function watchRoom()
+  local st = GameState.data and GameState.data.table or {}
+  local room = st.room and getObjectFromGUID(st.room)
+  local roof = roofObj()
+  if room == nil or room.isDestroyed() or roof == nil then
+    return
+  end
+  local p, r = room.getPosition(), room.getRotation()
+  local function off(a)
+    a = a % 360
+    return math.min(a, 360 - a)
+  end
+  local displaced = math.abs(p.x) + math.abs(p.z) + math.abs(p.y - FLOOR_Y) > 2
+    or off(r.x) + off(r.y) + off(r.z) > 3
+  if displaced and not roofShown then
+    roofShown = true
+    paintRoof(roof)
+    pcall(function() roof.setInvisibleTo({}) end)
+    -- Ride along with the chapel every frame while it's out of place.
+    local function follow()
+      if not roofShown or room.isDestroyed() or roof.isDestroyed() then
+        return
+      end
+      roof.setLock(true)
+      roof.setPosition(room.getPosition())
+      roof.setRotation(room.getRotation())
+      Wait.frames(follow, 1)
+    end
+    follow()
+  elseif not displaced and roofShown then
+    roofShown = false
+    hideRoof(roof)
+  end
+end
+Wait.time(function() pcall(watchRoom) end, 0.5, -1)
+
 -- Stained glass in the chapel windows: translucent, glowing jewel-tone glass you can still see through;
 -- the window behind each seat leans to that seat's colour (sun, drop, flame, leaf) and the two big
 -- corner windows hold all five colours. A Unity AssetBundle (tools/unity/MTGGlassBuilder.cs).
@@ -773,7 +901,7 @@ function TableSetup.ignorePointer()
       pcall(function() o.interactable = false end)
     end
   end
-  for _, tag in ipairs({ "PlaySurface", "TableFrame", "TableFloor", "TableHearth", "HearthFire", "FireSfx", "StackFire", "TableTorch", "TableRoom", "TableGlass", "MatLabel" }) do
+  for _, tag in ipairs({ "PlaySurface", "TableFrame", "TableFloor", "TableHearth", "HearthFire", "FireSfx", "StackFire", "TableTorch", "TableRoom", "TableRoof", "TableGlass", "MatLabel" }) do
     for _, o in ipairs(getObjectsWithTag(tag)) do
       pcall(function() o.interactable = false end)
     end
@@ -831,6 +959,7 @@ function TableSetup.ensure()
   TableSetup.ensureFrame()
   pcall(TableSetup.ensureFloor)
   pcall(TableSetup.ensureRoom)
+  pcall(TableSetup.ensureRoof)
   pcall(TableSetup.ensureGlass)
   -- The braziers and fireplaces load a few seconds later, so a player joining doesn't get every
   -- asset bundle at the same moment (big bursts can time out a Steam connection).
@@ -999,6 +1128,7 @@ function TableSetup.setLayout(layout)
   pcall(TableSetup.ensureFloor)
   pcall(TableSetup.placeTorches)
   pcall(TableSetup.ensureRoom)
+  pcall(TableSetup.ensureRoof)
   pcall(TableSetup.ensureGlass)
   if Fires then
     pcall(Fires.ensure)
