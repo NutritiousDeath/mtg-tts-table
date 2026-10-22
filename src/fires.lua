@@ -22,7 +22,7 @@ local HEARTH_VERSION = "?v=4"
 local HEARTH_FIRE_URL = BASE .. "torch/mtg_hearth.unity3d?v=11"
 -- The roar / woosh sounds on their own invisible object (trigger 0 roar, 1 woosh), so every fire can
 -- change colour the moment the wave reaches it without cutting the sound off.
-local SFX_URL = BASE .. "torch/mtg_sfx.unity3d?v=1"
+local SFX_URL = BASE .. "torch/mtg_sfx.unity3d?v=2"
 local STONE_URL = BASE .. "table/stone.png?v=3"
 local FLOOR_Y = -31
 
