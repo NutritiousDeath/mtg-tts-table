@@ -122,7 +122,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.41 (one planar die, out of the roller's dragon; dragon gates; seat symbol on the tower; purple eyes before the game)"
+SCRIPT_VERSION = "2.42 (the planar die lands where it lands: no more face snapping)"
 
 function onLoad(saved)
   GameLog.setup()

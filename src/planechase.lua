@@ -1055,28 +1055,35 @@ local function ride(die, h, secs, cb)
 end
 
 -- One die's trip: it drops in at the top (real physics), rides down the spiral inside, and rolls out of its
--- dragon's mouth onto the tongue (real physics again for the last gentle roll), then shows face r.
--- spat() is called as it comes out; done() once it's settled.
-local function journey(die, h, r, token, spat, done)
+-- dragon's mouth onto the tongue (real physics again for the last gentle roll). Whatever face it settles on is the
+-- roll: done(value) once it's still. (If it ever ends up off the tongue it's carried back there, on a random face.)
+local function journey(die, h, token, done)
   local finished = false
-  local function finish()
+  local function finish(v)
     if not finished then
       finished = true
-      done()
+      done(v)
     end
+  end
+  local function value()
+    local ok, v = pcall(function() return tonumber(die.getValue()) end)
+    return ok and v or math.random(6)
+  end
+  local function carry()
+    local v = math.random(6)
+    rescue(die, h, v, function() finish(v) end)
   end
   local hd = HEADS[h]
   dropIn(die, h)
   local function inside()
     if roll ~= token or die.isDestroyed() then
-      return finish()
+      return finish(value())
     end
     ride(die, h, INSIDE_SECS, function()
       if roll ~= token or die.isDestroyed() then
-        return finish()
+        return finish(value())
       end
       die.setLock(false)
-      spat()
       Wait.frames(function()
         if die.isDestroyed() then
           return
@@ -1084,22 +1091,21 @@ local function journey(die, h, r, token, spat, done)
         -- Let go rolling gently forward along the tongue (turning over the way it's moving).
         die.setVelocity({ 0, 0, 1.3 * hd.dir })
         die.setAngularVelocity({ 5 * hd.dir, 0, math.random(-1, 1) })
-        -- Settles on the tongue, then shows the face; if the toss went wrong, it's carried there.
         Wait.time(function()
           Wait.condition(function()
             if finished then
               return
             end
             if onTongue(die, h) then
-              showFace(die, r, finish)
+              finish(value())
             else
-              rescue(die, h, r, finish)
+              carry()
             end
           end, function()
             return finished or die.isDestroyed() or (die.resting and not die.spawning)
           end, 6, function()
             if not finished then
-              rescue(die, h, r, finish)
+              carry()
             end
           end)
         end, 0.4)
@@ -1112,51 +1118,41 @@ local function journey(die, h, r, token, spat, done)
   end, 1.2, inside)
 end
 
--- A roll down the tower. The result is picked when the dice go in; one die goes in at each side's hole, the
--- tower's lines run in the roller's colour while they're inside, then both dragons spit theirs out at once,
--- breathing flame (the roller's colour on a blank, purple for chaos, blue-white for planeswalk), and each die is
--- made to land on the picked face.
+-- A roll down the tower: the die goes in, the tower's lines run in the roller's colour while it rides down inside,
+-- it rolls out of the dragon on the roller's side, and once it settles both dragons breathe fire in the result's
+-- colour (the roller's colour on a blank, purple for chaos, blue-white for planeswalk). The face it lands on is the
+-- roll: nothing is forced.
 towerRoll = function(die, color, byHand, chute)
   if rolling or roll ~= nil then
     return
   end
   local st = data()
-  local r = math.random(6)
-  local token = { r = r, done = false }
+  local token = { r = nil, done = false }
   roll = token
   local idx = TOWER_IDX[color] or 0
-  local breath = (r == 1 and TOWER_WALK) or ((r == 6 or st.aether) and TOWER_CHAOS) or idx
   towerLoop(TOWER_ROLLING + idx)
   towerRolling = true
   -- It comes out of the dragon nearest whoever rolled it (or, for a colour with no seat side, the side it was
   -- dropped over / sitting on).
   local hp = SIDE_OF[color] or chute or ((die.getPosition().z - TOWER.z) * HEADS.A.dir >= 0 and "A" or "B")
-  local function go(twin)
-    local breathed = false
-    local function spat()
-      if not breathed and roll == token then
-        breathed = true
-        towerFlash(breath)
-      end
-    end
-    local left = twin and 2 or 1
-    local function oneDone()
-      left = left - 1
-      if left > 0 or roll ~= token then
+  local function go()
+    journey(die, hp, token, function(v)
+      token.r = v
+      token.done = true
+      if roll ~= token then
         return
       end
       roll = nil
       towerRolling = false
       Planechase.towerColor(Fires and Fires.current and Fires.current() or nil)
-    end
-    journey(die, hp, r, token, spat, function()
-      token.done = true
-      oneDone()
+      -- The dragons roar in the result's colour.
+      towerFlash((v == 1 and TOWER_WALK) or ((v == 6 or st.aether) and TOWER_CHAOS) or idx)
     end)
     Wait.time(function() Planechase.onRolled(die, color, true) end, 0.4)
     -- Never leave the tower stuck mid-roll.
     Wait.time(function()
       if roll == token then
+        token.r = token.r or (function() local ok, v = pcall(function() return tonumber(die.getValue()) end) return ok and v or 2 end)()
         token.done = true
         roll = nil
         towerRolling = false
@@ -1164,7 +1160,7 @@ towerRoll = function(die, color, byHand, chute)
       end
     end, 20)
   end
-  go(nil)
+  go()
 end
 
 -- A player let go of the planar die over the top of the tower: that's a roll (it comes out on their side).
