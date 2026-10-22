@@ -74,7 +74,7 @@ local GRAVE_AT = { x = -8.5, z = GRAVE_MAT.z - MAT_OFF }
 -- dragon to the south. A roll drops one die down each chute (the planar die and its twin), so both sides of
 -- the table see a die land; both are made to show the same face.
 local TOWER = { x = 9, z = 0 }
-local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=4"
+local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=5"
 local TOWER_TOP = 19.6          -- where a die is dropped in (through the deck's hole), above the table
 local HEADS = {
   A = { x = -1.3, dir = 1, dropZ = -1.6 },     -- offsets from TOWER; dir = which way the dragon faces (z)
