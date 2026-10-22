@@ -70,12 +70,16 @@ local PLANE_AT = { x = -8.5, z = 0.1 }
 local GRAVE_AT = { x = -8.5, z = GRAVE_MAT.z - MAT_OFF }
 -- East of the stack mat: the dice tower (assets/planechase/mtg_dicetower.unity3d, built by
 -- tools/unity/MTGDiceTowerBuilder.cs). TOWER is its origin, where the tower meets its tray: the tower stands
--- north of it (z 0 to 5), the tray runs south (z 0 to -5). The die rests in the tray (LAND).
+-- north of it (z 0 to 5.6), the tray runs south (z 0 to -5). The die rests in the tray (LAND).
 local TOWER = { x = 9, z = 0 }
 local LAND = { x = 9, z = -2.6 }
-local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=1"
-local TOWER_IDX = { White = 1, Red = 2, Green = 3, Blue = 4 }   -- looping / roll trigger effect per colour (0 = cyan)
+local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=2"
+-- Effects: looping 0-4 idle and 5-9 rolling in a colour (0 = cyan, then White, Red, Green, Blue);
+-- trigger 0-4 landed in that colour, 5 chaos, 6 planeswalk.
+local TOWER_IDX = { White = 1, Red = 2, Green = 3, Blue = 4 }
+local TOWER_ROLLING = 5
 local TOWER_CHAOS, TOWER_WALK = 5, 6
+local towerRolling = false
 local CARD_SCALE_UPRIGHT, CARD_SCALE_SIDEWAYS = 1.4, 1.6
 local YAW_UPRIGHT, YAW_SIDEWAYS = 180, 270   -- upright landscape pictures / sideways Scryfall ones
 local ID_BASE = 31000
@@ -633,8 +637,15 @@ end
 -- The tower's lines in a seat's colour (cyan before the game). Fires.set calls this on every turn change.
 function Planechase.towerColor(color)
   local o = towerObj()
-  if towerReady(o) then
+  if towerReady(o) and not towerRolling then
     pcall(function() o.AssetBundle.playLoopingEffect(TOWER_IDX[color] or 0) end)
+  end
+end
+
+local function towerLoop(idx)
+  local o = towerObj()
+  if towerReady(o) then
+    pcall(function() o.AssetBundle.playLoopingEffect(idx) end)
   end
 end
 
@@ -695,15 +706,16 @@ end
 -- Is the die sitting in the tower's tray?
 local function inTray(die)
   local p = die.getPosition()
-  return math.abs(p.x - TOWER.x) < 2.6 and p.z < TOWER.z + 0.4 and p.z > TOWER.z - 5.3
+  return math.abs(p.x - TOWER.x) < 2.9 and p.z < TOWER.z + 0.4 and p.z > TOWER.z - 5.3
     and p.y < TableSetup.SURFACE_TOP + 2.5
 end
 
 -- Drop the die in the top of the tower, spinning.
 local function dropIn(die)
   pcall(function() die.setLock(false) end)
-  die.setPosition({ TOWER.x + (math.random() - 0.5) * 1.2, TableSetup.SURFACE_TOP + 12.8,
-    TOWER.z + 2.5 + (math.random() - 0.5) * 1.2 })
+  -- Over the top ramp, so it tumbles all the way down.
+  die.setPosition({ TOWER.x + (math.random() - 0.5) * 1.6, TableSetup.SURFACE_TOP + 12.8,
+    TOWER.z + 4.2 + (math.random() - 0.5) * 0.8 })
   die.setRotation({ math.random(0, 359), math.random(0, 359), math.random(0, 359) })
   die.setVelocity({ 0, -2, 0 })
   die.setAngularVelocity({ math.random(-12, 12), math.random(-12, 12), math.random(-12, 12) })
@@ -804,7 +816,24 @@ towerRoll = function(die, color, byHand)
     return
   end
   local idx = TOWER_IDX[color] or 0
-  towerFlash(idx)
+  -- The lines light up and run down the tower until the die lands in the tray (then flash once and go
+  -- back to the turn's colour).
+  towerLoop(TOWER_ROLLING + idx)
+  towerRolling = true
+  local function settle()
+    if towerRolling then
+      towerRolling = false
+      Planechase.towerColor(Fires and Fires.current and Fires.current() or nil)
+    end
+  end
+  Wait.time(function()
+    Wait.condition(function()
+      settle()
+      towerFlash(idx)
+    end, function()
+      return die.isDestroyed() or (die.resting and not die.spawning and inTray(die))
+    end, 22, settle)
+  end, 0.5)
   if not byHand then
     dropIn(die)
   end
@@ -821,7 +850,6 @@ towerRoll = function(die, color, byHand)
       return
     end
     say("the die got stuck in the tower: dropping it in again.", INFO)
-    towerFlash(idx)
     dropIn(die)
     Wait.time(check, 6)
   end
@@ -834,7 +862,7 @@ function Planechase.onDrop(color, obj)
     return
   end
   local p = obj.getPosition()
-  if math.abs(p.x - TOWER.x) < 2.4 and p.z > TOWER.z + 0.1 and p.z < TOWER.z + 4.9
+  if math.abs(p.x - TOWER.x) < 2.7 and p.z > TOWER.z + 0.1 and p.z < TOWER.z + 5.5
       and p.y > TableSetup.SURFACE_TOP + 9 then
     towerRoll(obj, color, true)
   end
