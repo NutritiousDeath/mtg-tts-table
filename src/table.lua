@@ -768,7 +768,7 @@ function TableSetup.ignorePointer()
       pcall(function() o.interactable = false end)
     end
   end
-  for _, tag in ipairs({ "PlaySurface", "TableFrame", "TableFloor", "TableHearth", "HearthFire", "FireSfx", "TableTorch", "TableRoom", "TableGlass", "MatLabel" }) do
+  for _, tag in ipairs({ "PlaySurface", "TableFrame", "TableFloor", "TableHearth", "HearthFire", "FireSfx", "StackFire", "TableTorch", "TableRoom", "TableGlass", "MatLabel" }) do
     for _, o in ipairs(getObjectsWithTag(tag)) do
       pcall(function() o.interactable = false end)
     end

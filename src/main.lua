@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.21 (Aesi deck audit: Class levels, Hydras, Peregrine Drake, Patient Naturalist, Spore Frog fog, Claim the Kingdom, threshold; faster big boards)"
+SCRIPT_VERSION = "2.22 (Planechase: planeswalk on the stack, chaos and spark flames round the stack mat; Aesi deck fixes)"
 
 function onLoad(saved)
   GameLog.setup()

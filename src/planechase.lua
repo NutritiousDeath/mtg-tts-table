@@ -281,9 +281,9 @@ local function activeSeat(fallback)
   return (t and t.activeSeat) or fallback or "White"
 end
 
-local function push(seat, name, text)
+local function push(seat, name, text, planar)
   if Stack and text and text ~= "" then
-    Stack.pushAbility(seat, name, text, nil, { trigger = true })
+    Stack.pushAbility(seat, name, text, nil, { trigger = true, planar = planar })
   end
 end
 
@@ -556,11 +556,13 @@ function Planechase.onRolled(die, color)
     say(color .. " rolled: " .. dieValueText(v, st.aether), v == 1 and GOOD or (v == 6 and CYAN or INFO))
     local chaos = v == 6 or (st.aether and v ~= 1)
     if v == 1 then
-      Planechase.planeswalk(color, true)
+      -- The planeswalker symbol: "Planeswalk" goes on the stack (the ring round the stack mat burns blue-white);
+      -- when everyone passes it resolves and the next plane turns face up (stack.lua).
+      push(activeSeat(color), "Planeswalk", "Planeswalk: " .. plane.getName() .. " leaves and the next plane turns face up.", "walk")
     elseif chaos then
       local text = chaosOf(plane)
       if text then
-        push(activeSeat(color), plane.getName(), text)
+        push(activeSeat(color), plane.getName(), text, "chaos")
       else
         say(plane.getName() .. " has no chaos ability.", INFO)
       end

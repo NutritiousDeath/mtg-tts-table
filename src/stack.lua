@@ -163,6 +163,7 @@ function Stack.render()
     end
   end
   UI.setAttribute("stackPanel", "height", 130 + shown * 31)
+  pcall(Stack.updateFire)
   -- The stack emptied: yields and RESOLVE ALL are over.
   -- Only when it goes from something to empty: a YIELD clicked on an empty stack waits for the next item.
   if #list == 0 and (Stack.lastCount or 0) > 0 then
@@ -249,7 +250,7 @@ function Stack.pushAbility(controller, sourceName, text, image, opts)
   -- can't move on in the meantime.
   table.insert(items(), { guid = obj.getGUID(), kind = "ability", name = sourceName, controller = controller,
     text = text, trigger = opts.trigger, that = opts.that, source = opts.source, thatCard = opts.thatCard,
-    amount = opts.amount, copyOf = opts.copyOf, ninjutsu = opts.ninjutsu,
+    amount = opts.amount, copyOf = opts.copyOf, ninjutsu = opts.ninjutsu, planar = opts.planar,
     auto = (opts.trigger or opts.loyalty or opts.activated or opts.copyOf) and true or nil })
   Stack.render()
   if opts.copyOf then
@@ -322,6 +323,16 @@ function Stack.resolveTop()
   if it.kind == "ability" then
     log(it.name .. "'s ability resolves.")
     obj.destruct()
+    -- The planar die's planeswalker symbol: planeswalk now (the next plane turns face up).
+    if it.planar == "walk" then
+      if Planechase and Planechase.planeswalk then
+        local okp, errp = pcall(Planechase.planeswalk, it.controller, true)
+        if not okp then
+          Events.noteError("planeswalking", errp)
+        end
+      end
+      return
+    end
     -- Carry out what it says, when the table can (effects.lua).
     if Effects then
       local okr, errr = pcall(Effects.resolve, it)
@@ -548,9 +559,95 @@ local function ensureCastMats()
   Trackers.syncTiles("CastZone", { { registry = reg.castTiles, wanted = wanted } })
 end
 
+-- The ring of flame round the mat for planar die results (planechase.lua): purple-blue for chaos, blue-white
+-- (a planeswalker's spark) for planeswalking. It ignites while such an item is on the stack and goes out in a
+-- puff of smoke when it has resolved (tools/unity/MTGTorchBuilder.cs, mtg_stackfire).
+local STACK_FIRE_URL = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/torch/mtg_stackfire.unity3d?v=1"
+local FIRE_EFFECT = { chaos = 1, walk = 2 }
+local fireNow = nil   -- "chaos", "walk" or nil
+
+local function fireObj()
+  local g = data().fire
+  local o = g and getObjectFromGUID(g)
+  if o and not o.isDestroyed() then
+    return o
+  end
+  return nil
+end
+
+function Stack.ensureFire()
+  local reg = data()
+  local o = fireObj()
+  local co = o and o.getCustomObject()
+  local pos = { MAT.x, TableSetup.SURFACE_TOP + 0.05, MAT.z }
+  if o and co and co.assetbundle == STACK_FIRE_URL then
+    o.setLock(true)
+    o.setPosition(pos)
+    return
+  end
+  if o then
+    o.destruct()
+  end
+  for _, x in ipairs(getObjectsWithTag("StackFire")) do
+    x.destruct()
+  end
+  local obj = spawnObject({
+    type = "Custom_AssetBundle",
+    position = pos,
+    rotation = { 0, MAT_YAW, 0 },
+    sound = false,
+    callback_function = function(x)
+      x.setLock(true)
+      x.setPosition(pos)
+      x.interactable = false
+      x.setName("Stack Fire")
+      x.addTag("StackFire")
+      reg.fire = x.getGUID()
+      fireNow = nil
+      Wait.time(function() Stack.updateFire(true) end, 1)
+    end,
+  })
+  obj.setCustomObject({ assetbundle = STACK_FIRE_URL, type = 0 })
+end
+
+-- Light or put out the ring to match the stack: the topmost planar item decides the colour.
+function Stack.updateFire(force)
+  local want
+  local list = items()
+  for i = #list, 1, -1 do
+    if list[i].planar then
+      want = list[i].planar
+      break
+    end
+  end
+  if want == fireNow and not force then
+    return
+  end
+  local o = fireObj()
+  if o == nil or o.loading_custom or o.AssetBundle == nil then
+    if o then
+      Wait.time(function() Stack.updateFire(true) end, 1)
+    end
+    return
+  end
+  local was = fireNow
+  fireNow = want
+  pcall(function()
+    if want then
+      o.AssetBundle.playLoopingEffect(FIRE_EFFECT[want])
+    else
+      o.AssetBundle.playLoopingEffect(0)
+      if was then
+        o.AssetBundle.playTriggerEffect(FIRE_EFFECT[was] - 1)   -- the puff of smoke
+      end
+    end
+  end)
+end
+
 -- The mat itself: one image tile in the middle of the table.
 function Stack.ensure()
   ensureCastMats()
+  pcall(Stack.ensureFire)
   local reg = data()
   reg.mat = reg.mat
   local mat = reg.mat and getObjectFromGUID(reg.mat)
