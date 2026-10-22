@@ -122,7 +122,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.35 (clearer yes/no checks; dice that do not make it down are put on the tongue; round spiral tower)"
+SCRIPT_VERSION = "2.36 (dice tower: dice drop in, ride the lights down unseen, and are spat out by the dragons)"
 
 function onLoad(saved)
   GameLog.setup()

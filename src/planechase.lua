@@ -74,7 +74,7 @@ local GRAVE_AT = { x = -8.5, z = GRAVE_MAT.z - MAT_OFF }
 -- the south. A roll drops one die down each spiral, so both sides of the table see a die land; both are made to
 -- show the same face.
 local TOWER = { x = 8.5, z = 0 }
-local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=10"
+local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=11"
 local TOWER_TOP = 19.8          -- where a die is dropped in (through the deck's hole), above the table
 local HEADS = {
   -- Offsets from TOWER: the dragon's x, which way it faces (z), and the hole its spiral is dropped in by.
@@ -82,7 +82,6 @@ local HEADS = {
   B = { x = 1.85, dir = -1, dropX = 1.97, dropZ = -0.72 },
 }
 local REST_ALONG = 11.0         -- how far out along its dragon's tongue a die rests
-local MOUTH_ALONG = 6.2         -- past this the die is in the dragon's open mouth
 local DIE_EDGE = 1.0            -- the planar dice are sized to this (they have to fit the dragons' throats)
 -- Effects: looping 0-4 idle and 5-9 rolling in a colour (0 = cyan, then White, Red, Green, Blue);
 -- trigger 0-4 the dragons breathe in that colour, 5 chaos (purple), 6 planeswalk (blue-white).
@@ -987,64 +986,85 @@ local function rescue(die, h, r, cb)
   end, 1.0)
 end
 
--- Follow one die down chute h until it rests on its dragon's tongue showing face r, then call done().
--- If it stops anywhere else: a nudge (6 s), then it's dropped in again (10 s), and if it still hasn't made it
--- (15 s) it's carried onto the tongue -- so the dice on show always match the result.
-local function follow(die, h, r, token, done)
-  local finished, rescuing = false, false
+-- How long a die spends inside the tower: one run of the tower's lights down its bands (MTGDiceTowerBuilder.cs
+-- ChaseSecs).
+local INSIDE_SECS = 1.7
+local SPIT_ALONG = 8.6          -- where a die is spat out from, inside the dragon's open mouth
+
+-- One die's trip: it drops in through the hole at the top (real physics), is held out of sight inside the tower
+-- while the lights run down it, then is spat out of its dragon's mouth onto the tongue (real physics again: a
+-- short toss and tumble), and finally shows face r. spat() is called as it comes out; done() once it's settled.
+-- (The inside is never simulated: TTS's dice settle too readily to slide down a ramp reliably.)
+local function journey(die, h, r, token, spat, done)
+  local finished = false
   local function finish()
     if not finished then
       finished = true
       done()
     end
   end
+  local hd = HEADS[h]
+  dropIn(die, h)
   Wait.condition(function()
-    if roll ~= token or finished or rescuing then
-      return
+    if roll ~= token or die.isDestroyed() then
+      return finish()
     end
-    showFace(die, r, finish)
+    -- Out of sight inside the column until it's time to come out.
+    die.setLock(true)
+    die.setPosition({ TOWER.x, TableSetup.SURFACE_TOP + 10, TOWER.z })
+    Wait.time(function()
+      if roll ~= token or die.isDestroyed() then
+        return finish()
+      end
+      die.setPosition({ TOWER.x + hd.x, TableSetup.SURFACE_TOP + 2.4, TOWER.z + hd.dir * SPIT_ALONG })
+      die.setRotation({ math.random(0, 359), math.random(0, 359), math.random(0, 359) })
+      die.setLock(false)
+      spat()
+      Wait.frames(function()
+        if die.isDestroyed() then
+          return
+        end
+        die.setVelocity({ 0, 1.2, 2.6 * hd.dir })
+        die.setAngularVelocity({ math.random(-14, 14), math.random(-14, 14), math.random(-14, 14) })
+        -- Settles on the tongue, then shows the face; if the toss went wrong, it's carried there.
+        Wait.time(function()
+          Wait.condition(function()
+            if finished then
+              return
+            end
+            if onTongue(die, h) then
+              showFace(die, r, finish)
+            else
+              rescue(die, h, r, finish)
+            end
+          end, function()
+            return finished or die.isDestroyed() or (die.resting and not die.spawning)
+          end, 6, function()
+            if not finished then
+              rescue(die, h, r, finish)
+            end
+          end)
+        end, 0.4)
+      end, 1)
+    end, INSIDE_SECS)
   end, function()
-    return die.isDestroyed() or roll ~= token or finished
-      or (not rescuing and die.resting and not die.spawning and onTongue(die, h))
-  end, 30, finish)
-  local function stuck()
-    return not (finished or rescuing or roll ~= token or die.isDestroyed() or onTongue(die, h))
-  end
-  Wait.time(function()
-    if not stuck() then
-      return
+    return die.isDestroyed() or roll ~= token or die.getPosition().y < TableSetup.SURFACE_TOP + 16.8
+  end, 1.5, function()
+    -- Didn't fall in (blocked on the way?): carry on as if it had.
+    if not finished and not die.isDestroyed() then
+      die.setLock(true)
+      die.setPosition({ TOWER.x, TableSetup.SURFACE_TOP + 10, TOWER.z })
+      Wait.time(function()
+        die.setLock(false)
+        rescue(die, h, r, finish)
+      end, INSIDE_SECS)
     end
-    local p = die.getPosition()
-    local dx, dz = p.x - TOWER.x, p.z - TOWER.z
-    local inside = dx * dx + dz * dz < 3.0 * 3.0 and p.y < TableSetup.SURFACE_TOP + 17
-    if inside then
-      -- A nudge on along the spiral (round the column, the way it goes down), a little up, with a spin.
-      pcall(function()
-        local a = math.atan2 and math.atan2(dz, dx) or math.atan(dz, dx)
-        die.setVelocity({ 2.5 * math.sin(a), 2.5, -2.5 * math.cos(a) })
-        die.setAngularVelocity({ math.random(-8, 8), math.random(-8, 8), math.random(-8, 8) })
-      end)
-    else
-      dropIn(die, h)
-    end
-  end, 6)
-  Wait.time(function()
-    if stuck() then
-      dropIn(die, h)
-    end
-  end, 10)
-  Wait.time(function()
-    if stuck() then
-      say("a die didn't make it down the tower: it's put on the dragon's tongue.", INFO)
-      rescuing = true
-      rescue(die, h, r, finish)
-    end
-  end, 16)
+  end)
 end
 
--- A roll down the tower. The result is picked when the dice go in; one die goes down each chute, the
--- tower's lines light up in the roller's colour, the dragons breathe as the dice come out of their mouths
--- (in the roller's colour on a blank, purple for chaos, blue-white for planeswalk), and each die is
+-- A roll down the tower. The result is picked when the dice go in; one die goes in at each side's hole, the
+-- tower's lines run in the roller's colour while they're inside, then both dragons spit theirs out at once,
+-- breathing flame (the roller's colour on a blank, purple for chaos, blue-white for planeswalk), and each die is
 -- made to land on the picked face.
 towerRoll = function(die, color, byHand, chute)
   if rolling or roll ~= nil then
@@ -1058,56 +1078,34 @@ towerRoll = function(die, color, byHand, chute)
   local breath = (r == 1 and TOWER_WALK) or ((r == 6 or st.aether) and TOWER_CHAOS) or idx
   towerLoop(TOWER_ROLLING + idx)
   towerRolling = true
-  -- Not dropped in by hand: it goes down the side whose dragon it was sitting on.
+  -- It goes in on the side whose dragon it was sitting on (or the side it was dropped over).
   local hp = chute or ((die.getPosition().z - TOWER.z) * HEADS.A.dir >= 0 and "A" or "B")
   local ht = hp == "A" and "B" or "A"
-  local twin = findTwin(die)
-  local function go(t)
-    twin = t
-    if not byHand then
-      dropIn(die, hp)
-    end
-    if twin then
-      Wait.frames(function() dropIn(twin, ht) end, 2)
-    end
-    -- The dragons breathe as the planar die comes out into the open mouth.
+  local function go(twin)
     local breathed = false
-    local function watch()
-      if breathed or roll ~= token or die.isDestroyed() then
-        return
-      end
-      if along(die.getPosition(), hp) > MOUTH_ALONG then
+    local function spat()
+      if not breathed and roll == token then
         breathed = true
         towerFlash(breath)
-        return
       end
-      Wait.time(watch, 0.1)
     end
-    Wait.time(watch, 0.3)
     local left = twin and 2 or 1
     local function oneDone()
       left = left - 1
       if left > 0 or roll ~= token then
         return
       end
-      if not breathed then
-        breathed = true
-        towerFlash(breath)
-      end
       roll = nil
       towerRolling = false
       Planechase.towerColor(Fires and Fires.current and Fires.current() or nil)
     end
-    -- (A moment after the drops, so neither die still counts as resting where it was.)
-    Wait.time(function()
-      follow(die, hp, r, token, function()
-        token.done = true
-        oneDone()
-      end)
-      if twin then
-        follow(twin, ht, r, token, oneDone)
-      end
-    end, 0.6)
+    journey(die, hp, r, token, spat, function()
+      token.done = true
+      oneDone()
+    end)
+    if twin then
+      Wait.frames(function() journey(twin, ht, r, token, spat, oneDone) end, 2)
+    end
     Wait.time(function() Planechase.onRolled(die, color, true) end, 0.4)
     -- Never leave the tower stuck mid-roll.
     Wait.time(function()
@@ -1117,8 +1115,9 @@ towerRoll = function(die, color, byHand, chute)
         towerRolling = false
         Planechase.towerColor(Fires and Fires.current and Fires.current() or nil)
       end
-    end, 32)
+    end, 20)
   end
+  local twin = findTwin(die)
   if twin then
     go(twin)
   else
