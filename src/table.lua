@@ -12,6 +12,7 @@
     "four"  one player per side of a square table, everyone facing the middle
             (White south, Red west, Green north, Blue east = clockwise)
     "two"   White and Green facing each other across the table
+    "three" White, Red and Green on three sides (the east side stays open)
     "twohg" Two-Headed Giant: a 120 x 100 table, team White + Red side by side on the south edge,
             team Green + Blue on the north edge
 
@@ -35,7 +36,7 @@
   Cameras: each player's camera is pointed at their seat when they sit down,
   when they import a deck, when the layout changes, and with !view.
 
-  Chat commands (in main.lua): !layout 4, !layout 2, !view
+  Chat commands (in main.lua): !layout 4, !layout 3, !layout 2, !view
 --]]
 
 TableSetup = {}
@@ -50,6 +51,8 @@ TableSetup.SURFACE_TOP = 1.0   -- height of the play surface's top face
 local LAYOUTS = {
   four = { White = 0, Red = 90, Green = 180, Blue = 270 },
   two = { White = 0, Green = 180 },
+  -- Three players: White (south), Red (west), Green (north); the east side stays open.
+  three = { White = 0, Red = 90, Green = 180 },
   -- Two-Headed Giant: team White + Red on the south side, team Green + Blue on the north side.
   twohg = { White = { 0, -29 }, Red = { 0, 29 }, Green = { 180, -29 }, Blue = { 180, 29 } },
 }
@@ -58,6 +61,7 @@ local LAYOUTS = {
 local SURFACE = {
   four = { 100, 100 },
   two = { 100, 100 },
+  three = { 100, 100 },
   twohg = { 120, 100 },
 }
 
@@ -70,6 +74,7 @@ local TEAMS = {
 local SEAT_ORDER = {
   four = { "White", "Red", "Green", "Blue" },
   two = { "White", "Green" },
+  three = { "White", "Red", "Green" },
   twohg = { "White", "Red", "Green", "Blue" },
 }
 
@@ -825,12 +830,17 @@ function TableSetup.ensure()
   end
   TableSetup.ensureFrame()
   pcall(TableSetup.ensureFloor)
-  pcall(TableSetup.ensureTorches)
   pcall(TableSetup.ensureRoom)
   pcall(TableSetup.ensureGlass)
-  if Fires then
-    pcall(Fires.ensure)
-  end
+  -- The braziers and fireplaces load a few seconds later, so a player joining doesn't get every
+  -- asset bundle at the same moment (big bursts can time out a Steam connection).
+  Wait.time(function()
+    pcall(TableSetup.ensureTorches)
+    if Fires then
+      pcall(Fires.ensure)
+    end
+    TableSetup.ignorePointer()
+  end, 3)
   TableSetup.ignorePointer()
   TableSetup.applyLighting()
 
@@ -967,7 +977,17 @@ function TableSetup.lookAtSeat(color)
   })
 end
 
--- Switch layout ("four", "two" or "twohg") and reposition hand zones.
+-- Point every seated player's camera at their seat, after a short wait (so it lands after any
+-- seat changes, table resizes or reloads that are still going on).
+function TableSetup.lookAtAll(delay)
+  Wait.time(function()
+    for _, color in ipairs(TableSetup.activeSeats()) do
+      pcall(TableSetup.lookAtSeat, color)
+    end
+  end, delay or 1)
+end
+
+-- Switch layout ("four", "two", "three" or "twohg") and reposition hand zones.
 function TableSetup.setLayout(layout)
   if LAYOUTS[layout] == nil then
     return false
@@ -989,9 +1009,7 @@ function TableSetup.setLayout(layout)
     Zones.ensure()
   end
   TableSetup.enforceAllSeats()
-  for _, color in ipairs(TableSetup.activeSeats()) do
-    TableSetup.lookAtSeat(color)
-  end
+  TableSetup.lookAtAll(1)
   if Planechase and Planechase.placeChest then
     pcall(Planechase.placeChest)
   end

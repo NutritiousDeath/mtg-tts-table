@@ -647,7 +647,8 @@ end
 -- The mat itself: one image tile in the middle of the table.
 function Stack.ensure()
   ensureCastMats()
-  pcall(Stack.ensureFire)
+  -- The flame ring loads a moment after the rest of the table (see TableSetup.ensure).
+  Wait.time(function() pcall(Stack.ensureFire) end, 4)
   local reg = data()
   reg.mat = reg.mat
   local mat = reg.mat and getObjectFromGUID(reg.mat)

@@ -378,6 +378,9 @@ function GameFlow.start(byColor)
 
   s.participants = players
   s.picks = {}
+  if TableSetup.lookAtAll then
+    TableSetup.lookAtAll(0.5)
+  end
   s.unfriendly = false
   s.freeMulligan = GameState.format().freeFirstMulligan ~= false
   s.phase = "mulligan"

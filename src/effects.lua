@@ -1720,6 +1720,11 @@ function Effects.parse(text, sourceName)
         scope = "allMine"
       elseif head:find("creatures your opponents control", 1, true) then
         scope = "allOpp"
+      -- "each creature you control gets +2/+2" (Kessig's chaos): only yours.
+      elseif head:find("each creature you control", 1, true) or head:find("each other creature you control", 1, true) then
+        scope = "allMine"
+      elseif head:find("each creature your opponents control", 1, true) or head:find("each creature an opponent controls", 1, true) then
+        scope = "allOpp"
       elseif head:find("each creature", 1, true) or head:find("all creatures", 1, true) then
         scope = "all"
       elseif head:find("equipped creature", 1, true) or head:find("enchanted creature", 1, true) then

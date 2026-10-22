@@ -767,3 +767,36 @@ function Planechase.chat(message, color)
   end
   return true
 end
+
+-- The face-up plane's "At the beginning of your upkeep / end step / ..." abilities go on the stack for the
+-- player whose turn it is (Littjara: "When you planeswalk to Littjara and at the beginning of your upkeep,
+-- create a 2/2 blue Shapeshifter ...").
+local PLANE_STEPS = {
+  { "at the beginning of your upkeep", "upkeep" },
+  { "at the beginning of each upkeep", "upkeep" },
+  { "at the beginning of your draw step", "draw" },
+  { "at the beginning of your precombat main phase", "main1" },
+  { "at the beginning of your first main phase", "main1" },
+  { "at the beginning of combat on your turn", "combat" },
+  { "at the beginning of your end step", "end" },
+  { "at the beginning of each end step", "end" },
+}
+Events.on("stepStarted", function(d)
+  if not GameState.data.started or d == nil or d.seat == nil then
+    return
+  end
+  local plane = findPlane()
+  local e = plane and entryOf(plane)
+  if e == nil or e.t == "Phenomenon" then
+    return
+  end
+  for _, l in ipairs(lines(e.o)) do
+    local low = l:lower()
+    for _, ps in ipairs(PLANE_STEPS) do
+      if ps[2] == d.step and low:find(ps[1], 1, true) then
+        push(d.seat, plane.getName(), afterComma(l))
+        break
+      end
+    end
+  end
+end)

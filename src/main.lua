@@ -31,6 +31,7 @@
     !next        next step (active player; same as the NEXT STEP button)
     !endturn     end your turn (active player)
     !layout 4    four players, one per side (White, Red, Green, Blue)
+    !layout 3    three players on three sides (White, Red, Green; the east side stays open)
     !layout 2    two players facing each other (White, Green)
     !layout 2hg  Two-Headed Giant: White + Red vs Green + Blue, two seats per side, 60 shared life per team
     !search      search your library by name, type or rules text
@@ -121,7 +122,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.22 (Planechase: planeswalk on the stack, chaos and spark flames round the stack mat; Aesi deck fixes)"
+SCRIPT_VERSION = "2.23 (!layout 3; Kessig and plane upkeep triggers; cameras re-point after reset and reconnect; staggered fire loading)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -152,9 +153,7 @@ function onLoad(saved)
   -- Give the surface a moment to appear, then face everyone toward their seat.
   Wait.time(function()
     TableSetup.enforceAllSeats()
-    for _, color in ipairs(TableSetup.activeSeats()) do
-      TableSetup.lookAtSeat(color)
-    end
+    TableSetup.lookAtAll(0.5)
     GameFlow.restore()
     Combat.restore()
   end, 1)
@@ -224,6 +223,7 @@ function onPlayerConnect(player)
     if color == "Grey" or color == "Black" or color == "" or color == nil then
       local back = restoreSeat(player)
       if back then
+        Wait.time(function() TableSetup.lookAtSeat(back) end, 1)
         broadcastToAll("MTG > " .. tostring(player.steam_name) .. " is back: seated at " .. back
           .. " again. (Change color in the player list if you wanted a different seat.)", { 0.55, 0.9, 0.6 })
       else
@@ -781,9 +781,9 @@ function onChat(message, sender)
   local lay = message:lower():gsub("^%s+", ""):gsub("%s+$", ""):gsub("%s+", " ")
   if lay:sub(1, 7) == "!layout" then
     local arg = lay:sub(9)
-    local layout = (arg == "4" and "four") or (arg == "2" and "two") or ((arg == "2hg" or arg == "twohg") and "twohg") or nil
+    local layout = (arg == "4" and "four") or (arg == "3" and "three") or (arg == "2" and "two") or ((arg == "2hg" or arg == "twohg") and "twohg") or nil
     if layout == nil then
-      broadcastToColor("Layouts: !layout 4 (four players), !layout 2 (two players), !layout 2hg (Two-Headed Giant).",
+      broadcastToColor("Layouts: !layout 4 (four players), !layout 3 (three players), !layout 2 (two players), !layout 2hg (Two-Headed Giant).",
         sender.color, { 1, 0.6, 0.2 })
       return false
     end
@@ -813,7 +813,7 @@ function onChat(message, sender)
         .. Trackers.TEAM_LIFE_2HG .. " life and 15 poison; 21 damage from one commander to one player still knocks out that player's team.",
         { 0.7, 0.85, 1 })
     else
-      broadcastToAll("Table layout: " .. (layout == "four" and "4 players" or "2 players")
+      broadcastToAll("Table layout: " .. (layout == "four" and "4 players" or layout == "three" and "3 players" or "2 players")
         .. " (" .. table.concat(TableSetup.activeSeats(), ", ") .. ")", { 0.7, 0.85, 1 })
     end
     return false
@@ -991,6 +991,8 @@ function onChat(message, sender)
     local tableState = GameState.data and GameState.data.table
     GameState.new("commander")
     GameState.data.table = tableState
+    TableSetup.enforceAllSeats()
+    TableSetup.lookAtAll(0.5)
     print("MTG > Game state reset.")
     return false
   end

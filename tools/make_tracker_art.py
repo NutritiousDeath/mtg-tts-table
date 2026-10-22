@@ -17,7 +17,7 @@ W, H, PX = 1400, 480, 100
 SEAT_RGB = {"White": (205, 212, 230), "Red": (230, 70, 80), "Green": (70, 220, 120), "Blue": (80, 150, 255)}
 CROWN_ORDER = {"Blue": ["White", "Red", "Green"], "White": ["Blue", "Green", "Red"],
                "Red": ["Blue", "Green", "White"], "Green": ["Blue", "White", "Red"]}
-LAYOUTS = {"four": ["White", "Red", "Green", "Blue"], "two": ["White", "Green"], "twohg": ["White", "Red", "Green", "Blue"]}
+LAYOUTS = {"four": ["White", "Red", "Green", "Blue"], "two": ["White", "Green"], "three": ["White", "Red", "Green"], "twohg": ["White", "Red", "Green", "Blue"]}
 # Two-Headed Giant: teams White + Red (south) and Green + Blue (north). Crowns are only the other team's
 # commanders; the life number is the team's shared life.
 CROWN_ORDER_2HG = {"White": ["Green", "Blue"], "Red": ["Green", "Blue"], "Green": ["White", "Red"], "Blue": ["White", "Red"]}
