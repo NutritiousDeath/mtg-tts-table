@@ -988,7 +988,7 @@ end
 
 -- How long a die takes to ride down inside the tower (about one run of the tower's lights down its bands).
 local INSIDE_SECS = 2.0
-local SPIT_ALONG = 8.6          -- where a die is spat out from, inside the dragon's open mouth
+local OUT_ALONG = 8.4           -- where a die is let go, rolling out over the back of the dragon's tongue
 
 -- The way down inside the tower, as points (x, y, z) from the middle of the tower on the table, for side A (side B
 -- is the same turned round). It follows the spiral slide in MTGDiceTowerBuilder.cs: round once from the hole at the
@@ -1004,7 +1004,7 @@ do
   end
   table.insert(PATH_A, { -1.85, 5.28 + lift, 2.8 })
   table.insert(PATH_A, { -1.85, 1.62 + lift, 7.0 })
-  table.insert(PATH_A, { -1.85, 2.4, SPIT_ALONG })
+  table.insert(PATH_A, { -1.85, 1.44 + lift, OUT_ALONG })   -- on the tongue
 end
 
 -- Ride a die down the path for side h over `secs`, tumbling as it goes, then call cb. (It's locked while it rides:
@@ -1030,7 +1030,9 @@ local function ride(die, h, secs, cb)
       return cb()
     end
     f = f + 1
-    local d = total * math.min(1, f / frames)
+    -- Quick down the spiral, slowing to a gentle roll by the time it comes out onto the tongue.
+    local p = math.min(1, f / frames)
+    local d = total * (1 - (1 - p) ^ 2)
     local k = 2
     while k < #pts and lens[k] < d do
       k = k + 1
@@ -1039,7 +1041,8 @@ local function ride(die, h, secs, cb)
     local seg = lens[k] - lens[k - 1]
     local t = seg > 0 and (d - lens[k - 1]) / seg or 1
     die.setPosition({ a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t })
-    rot = { rot.x + spin[1], rot.y + spin[2], rot.z + spin[3] }
+    local k2 = 2 * (1 - p) + 0.15
+    rot = { rot.x + spin[1] * k2, rot.y + spin[2] * k2, rot.z + spin[3] * k2 }
     die.setRotation(rot)
     if f >= frames then
       return cb()
@@ -1049,8 +1052,8 @@ local function ride(die, h, secs, cb)
   step()
 end
 
--- One die's trip: it drops in at the top (real physics), rides down the spiral inside, and is spat out of its
--- dragon's mouth onto the tongue (real physics again: a short toss and tumble), then shows face r.
+-- One die's trip: it drops in at the top (real physics), rides down the spiral inside, and rolls out of its
+-- dragon's mouth onto the tongue (real physics again for the last gentle roll), then shows face r.
 -- spat() is called as it comes out; done() once it's settled.
 local function journey(die, h, r, token, spat, done)
   local finished = false
@@ -1076,8 +1079,9 @@ local function journey(die, h, r, token, spat, done)
         if die.isDestroyed() then
           return
         end
-        die.setVelocity({ 0, 1.2, 2.6 * hd.dir })
-        die.setAngularVelocity({ math.random(-14, 14), math.random(-14, 14), math.random(-14, 14) })
+        -- Let go rolling gently forward along the tongue (turning over the way it's moving).
+        die.setVelocity({ 0, 0, 1.3 * hd.dir })
+        die.setAngularVelocity({ 5 * hd.dir, 0, math.random(-1, 1) })
         -- Settles on the tongue, then shows the face; if the toss went wrong, it's carried there.
         Wait.time(function()
           Wait.condition(function()
