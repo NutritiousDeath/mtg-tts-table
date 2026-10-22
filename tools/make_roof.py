@@ -2,8 +2,9 @@
 chapel around, with a parting message painted on top (a different one every flip).
 
 A flat eight-sided stone lid just above the rib vault, plus a band from the wall tops up to it, so from
-above the chapel looks closed. Every face points OUTWARD only: TTS doesn't draw the back of a face, so
-from inside the chapel it isn't there at all.
+above the chapel looks closed. Every face is drawn on both sides (TTS doesn't draw the back of a face, so
+each face is there twice, back to back), so it's a solid backdrop for the message from any angle; the
+table script keeps it hidden except during a flip.
 
 Output: assets/room/roof.obj (four / two / three seats) and roof_2hg.obj, world units, floor top at y = 0.
 Shares the chapel's sizes with tools/make_room.py.
@@ -34,6 +35,7 @@ def build(layout):
     pts = [(x, LID, z) for x, z in corners]
     uvs = [(x / TILE, z / TILE) for x, z in corners]
     m.face(pts, uvs, np.array([0, 1.0, 0]))
+    m.face(pts, uvs, np.array([0, -1.0, 0]))
     # The band round it, facing out.
     n = len(corners)
     run = 0.0
@@ -49,6 +51,7 @@ def build(layout):
         t = [(run / TILE, BAND_FROM / TILE), ((run + L) / TILE, BAND_FROM / TILE),
              ((run + L) / TILE, LID / TILE), (run / TILE, LID / TILE)]
         m.face(p, t, out)
+        m.face(p, t, -out)
         run += L
     return m
 

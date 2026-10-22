@@ -611,7 +611,7 @@ end
 -- stays open to the sky). When TTS's own Flip button throws the chapel around, the roof appears on it with a
 -- parting message painted on top -- a different one every flip -- and goes away again once the chapel is
 -- back in place. Its faces point outward only, so from inside the chapel it can't be seen anyway.
-local ROOF_VERSION = "?v=1"
+local ROOF_VERSION = "?v=2"
 local ROOF_LID = 186.0       -- the lid's height above the floor (tools/make_roof.py LID)
 local ALL_COLORS_INV = { "White", "Brown", "Red", "Orange", "Yellow", "Green", "Teal", "Blue", "Purple", "Pink",
   "Grey", "Black" }
@@ -686,12 +686,23 @@ local function paintRoof(o)
   end
   roofLast = ROOF_FAREWELLS[i]
   pcall(function() o.clearButtons() end)
+  local size = math.floor(math.min(1000, 14000 / #roofLast))
+  -- A thick black outline (eight copies around it), then the message itself on top.
+  local d = size / 1000 * 0.9
+  for _, off in ipairs({ { -1, -1 }, { 0, -1 }, { 1, -1 }, { -1, 0 }, { 1, 0 }, { -1, 1 }, { 0, 1 }, { 1, 1 } }) do
+    pcall(function()
+      o.createButton({
+        click_function = "roof_noop", function_owner = Global, label = roofLast,
+        position = { off[1] * d, ROOF_LID + 0.35, off[2] * d }, rotation = { 0, 180, 0 }, scale = { 9, 1, 9 },
+        width = 0, height = 0, font_size = size, font_color = { 0, 0, 0, 100 }, color = { 0, 0, 0, 0 },
+      })
+    end)
+  end
   pcall(function()
     o.createButton({
       click_function = "roof_noop", function_owner = Global, label = roofLast,
-      position = { 0, ROOF_LID + 0.4, 0 }, rotation = { 0, 180, 0 }, scale = { 9, 1, 9 },
-      width = 0, height = 0, font_size = math.floor(math.min(1000, 14000 / #roofLast)),
-      font_color = { 1, 0.33, 0.45, 100 }, color = { 0, 0, 0, 0 },
+      position = { 0, ROOF_LID + 0.45, 0 }, rotation = { 0, 180, 0 }, scale = { 9, 1, 9 },
+      width = 0, height = 0, font_size = size, font_color = { 1, 0.3, 0.42, 100 }, color = { 0, 0, 0, 0 },
     })
   end)
 end

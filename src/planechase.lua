@@ -69,13 +69,22 @@ local DECK_AT = { x = -8.5, z = LIB_MAT.z - MAT_OFF }
 local PLANE_AT = { x = -8.5, z = 0.1 }
 local GRAVE_AT = { x = -8.5, z = GRAVE_MAT.z - MAT_OFF }
 -- East of the stack mat: the dice tower (assets/planechase/mtg_dicetower.unity3d, built by
--- tools/unity/MTGDiceTowerBuilder.cs). TOWER is its origin, where the tower meets its tray: the tower stands
--- north of it (z 0 to 5.6), the tray runs south (z 0 to -5). The die rests in the tray (LAND).
+-- tools/unity/MTGDiceTowerBuilder.cs). TOWER is the middle of the tower. It's split into two chutes: chute A
+-- (the west half) comes out of a stone dragon's mouth to the north, chute B (the east half) out of a second
+-- dragon to the south. A roll drops one die down each chute (the planar die and its twin), so both sides of
+-- the table see a die land; both are made to show the same face.
 local TOWER = { x = 9, z = 0 }
-local LAND = { x = 9, z = -2.6 }
-local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=2"
+local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=3"
+local TOWER_TOP = 17.3          -- where a die is dropped in, above the table
+local HEADS = {
+  A = { x = -1.3, dir = 1, dropZ = -1.6 },     -- offsets from TOWER; dir = which way the dragon faces (z)
+  B = { x = 1.3, dir = -1, dropZ = 1.6 },
+}
+local REST_ALONG = 11.0         -- how far out along its dragon's tongue a die rests
+local MOUTH_ALONG = 6.2         -- past this the die is in the dragon's open mouth
+local DIE_EDGE = 1.0            -- the planar dice are sized to this (they have to fit the dragons' throats)
 -- Effects: looping 0-4 idle and 5-9 rolling in a colour (0 = cyan, then White, Red, Green, Blue);
--- trigger 0-4 landed in that colour, 5 chaos, 6 planeswalk.
+-- trigger 0-4 the dragons breathe in that colour, 5 chaos (purple), 6 planeswalk (blue-white).
 local TOWER_IDX = { White = 1, Red = 2, Green = 3, Blue = 4 }
 local TOWER_ROLLING = 5
 local TOWER_CHAOS, TOWER_WALK = 5, 6
@@ -373,9 +382,11 @@ local function clearTable()
       o.destruct()
     end
   end
-  for _, o in ipairs(getObjectsWithTag("PlanarDie")) do
-    if not o.isDestroyed() then
-      o.destruct()
+  for _, tag in ipairs({ "PlanarDie", "PlanarDieTwin" }) do
+    for _, o in ipairs(getObjectsWithTag(tag)) do
+      if not o.isDestroyed() then
+        o.destruct()
+      end
     end
   end
 end
@@ -544,8 +555,8 @@ local function dieValueText(v, aether)
   return "blank"
 end
 
-local function findDie()
-  for _, o in ipairs(getObjectsWithTag("PlanarDie")) do
+local function findTagged(tag)
+  for _, o in ipairs(getObjectsWithTag(tag)) do
     if not o.isDestroyed() then
       return o
     end
@@ -553,29 +564,72 @@ local function findDie()
   return nil
 end
 
-putDie = function(cb)
-  local die = findDie()
-  if die then
-    if cb then cb(die) end
-    return
-  end
+local function findDie()
+  return findTagged("PlanarDie")
+end
+
+local function findTwin()
+  return findTagged("PlanarDieTwin")
+end
+
+-- Where a die rests on a dragon's tongue.
+local function restSpot(h)
+  local hd = HEADS[h]
+  return { TOWER.x + hd.x, TableSetup.SURFACE_TOP + 2.2, TOWER.z + hd.dir * REST_ALONG }
+end
+
+-- Make a die DIE_EDGE across (whatever size the custom die model comes in).
+local function sizeDie(o)
+  Wait.condition(function()
+    pcall(function()
+      local b = o.getBoundsNormalized()
+      local w = b and b.size and b.size.x or 0
+      if w > 0.05 then
+        local k = DIE_EDGE / (w / o.getScale().x)
+        o.setScale({ k, k, k })
+      end
+    end)
+  end, function() return o.isDestroyed() or not o.loading_custom end, 10)
+end
+
+local function spawnDie(tag, name, at, cb)
   spawnObjectData({
     data = {
       Name = "Custom_Dice",
-      Transform = { posX = 0, posY = 0, posZ = 0, rotX = 0, rotY = 0, rotZ = 0, scaleX = 1.65, scaleY = 1.65, scaleZ = 1.65 },
-      Nickname = "Planar Die",
-      Description = "Roll it by hand: chaos or planeswalk happens by itself. First roll each turn is free, then 1, 2, 3 mana...",
+      Transform = { posX = 0, posY = 0, posZ = 0, rotX = 0, rotY = 0, rotZ = 0, scaleX = 1, scaleY = 1, scaleZ = 1 },
+      Nickname = name,
+      Description = tag == "PlanarDie"
+        and "Drop it in the top of the dice tower (or right-click > Roll): chaos or planeswalk happens by itself. First roll each turn is free, then 1, 2, 3 mana..."
+        or "The planar die's twin: it rolls down the other side of the tower so everyone sees the result.",
       ColorDiffuse = { r = 1, g = 1, b = 1 },
       CustomImage = { ImageURL = DIE_IMAGE, ImageSecondaryURL = "", ImageScalar = 1, WidthScale = 0,
         CustomDice = { Type = 1 } },
-      Tags = { "PlanarDie" },
+      Tags = { tag },
     },
-    position = { LAND.x, TableSetup.SURFACE_TOP + 1.5, LAND.z },
+    position = at,
     callback_function = function(o)
-      o.addTag("PlanarDie")
+      o.addTag(tag)
+      if tag == "PlanarDieTwin" then
+        o.interactable = false
+      end
+      sizeDie(o)
       if cb then cb(o) end
     end,
   })
+end
+
+-- The planar die on dragon A's tongue and its twin on dragon B's.
+putDie = function(cb)
+  local die = findDie()
+  if findTwin() == nil then
+    spawnDie("PlanarDieTwin", "Planar Die (twin)", restSpot("B"))
+  end
+  if die then
+    sizeDie(die)
+    if cb then cb(die) end
+    return
+  end
+  spawnDie("PlanarDie", "Planar Die", restSpot("A"), cb)
 end
 
 ---------------------------------------------------------------------------
@@ -677,7 +731,9 @@ local function ensureTower()
       o.setLock(true)
       o.setPosition(pos)
       o.setName("Dice Tower")
-      o.setDescription("Drop the planar die in the top (or use the die's roll): it tumbles down the tower into the tray.")
+      o.setDescription("Drop the planar die in the top (or right-click it > Roll): one die tumbles down each side and "
+        .. "out of a dragon's mouth.\n\nDragon head: \"Dragon Head | Retopologized version\" by gozdemrl "
+        .. "(sketchfab.com/gozdemrl), CC-BY-4.0.")
       o.addTag("DiceTower")
       Wait.condition(function()
         Planechase.towerColor(Fires and Fires.current and Fires.current() or nil)
@@ -703,26 +759,40 @@ removeExtras = function()
   end
 end
 
--- Is the die sitting in the tower's tray?
-local function inTray(die)
-  local p = die.getPosition()
-  return math.abs(p.x - TOWER.x) < 2.9 and p.z < TOWER.z + 0.4 and p.z > TOWER.z - 5.3
-    and p.y < TableSetup.SURFACE_TOP + 2.5
+-- How far out along dragon h's tongue a position is (negative = behind the head).
+local function along(p, h)
+  return (p.z - TOWER.z) * HEADS[h].dir
 end
 
--- Drop the die in the top of the tower, spinning.
-local function dropIn(die)
+-- Is the die resting on dragon h's tongue (anywhere you can see it, in the open mouth)?
+local function onTongue(die, h)
+  local p = die.getPosition()
+  local a = along(p, h)
+  return math.abs(p.x - (TOWER.x + HEADS[h].x)) < 1.1 and a > 7.2 and a < 12.4 and p.y < TableSetup.SURFACE_TOP + 3.4
+end
+
+-- Drop a die in the top of chute h, spinning.
+local function dropIn(die, h)
+  local hd = HEADS[h]
   pcall(function() die.setLock(false) end)
-  -- Over the top ramp, so it tumbles all the way down.
-  die.setPosition({ TOWER.x + (math.random() - 0.5) * 1.6, TableSetup.SURFACE_TOP + 12.8,
-    TOWER.z + 4.2 + (math.random() - 0.5) * 0.8 })
+  die.setPosition({ TOWER.x + hd.x + (math.random() - 0.5) * 0.8, TableSetup.SURFACE_TOP + TOWER_TOP,
+    TOWER.z + hd.dropZ + (math.random() - 0.5) * 0.5 })
   die.setRotation({ math.random(0, 359), math.random(0, 359), math.random(0, 359) })
   die.setVelocity({ 0, -2, 0 })
   die.setAngularVelocity({ math.random(-12, 12), math.random(-12, 12), math.random(-12, 12) })
 end
 
-local towerToken
+-- Which chute's top a position is over (nil if neither).
+local function chuteAt(p)
+  local dx, dz = p.x - TOWER.x, p.z - TOWER.z
+  if math.abs(dx) > 2.7 or math.abs(dz) > 2.7 or p.y < TableSetup.SURFACE_TOP + 12 then
+    return nil
+  end
+  return dx < 0 and "A" or "B"
+end
+
 local towerRoll   -- defined after onRolled
+local roll = nil  -- the roll going down the tower: { r = result, done = primary settled, ... }
 
 local rollBy, rolling = nil, false
 
@@ -773,22 +843,17 @@ function Planechase.onRolled(die, color, viaTower)
   local cost = st.rolls.n
   st.rolls.n = st.rolls.n + 1
   rolling = true
-  Wait.time(function() rolling = false end, viaTower and 25 or 15)
+  local tok = viaTower and roll or nil     -- the roll down the tower this belongs to (its result, when it's done)
+  Wait.time(function() rolling = false end, viaTower and 30 or 15)
   say(color .. " rolls the planar die" .. (cost == 0 and " (first roll this turn: free)." or (": pay " .. cost .. " mana for this roll.")), CYAN)
   Wait.condition(function()
     rolling = false
     if die.isDestroyed() then
       return
     end
-    towerToken = nil
-    local v = die.getValue()
+    local v = (tok and tok.r) or die.getValue()
     say(color .. " rolled: " .. dieValueText(v, st.aether), v == 1 and GOOD or (v == 6 and CYAN or INFO))
     local chaos = v == 6 or (st.aether and v ~= 1)
-    if v == 1 then
-      towerFlash(TOWER_WALK)
-    elseif chaos then
-      towerFlash(TOWER_CHAOS)
-    end
     if v == 1 then
       -- The planeswalker symbol: "Planeswalk" goes on the stack (the ring round the stack mat burns blue-white);
       -- when everyone passes it resolves and the next plane turns face up (stack.lua).
@@ -802,69 +867,181 @@ function Planechase.onRolled(die, color, viaTower)
       end
     end
   end, function()
-    return die.isDestroyed() or (die.resting and not die.spawning and (not viaTower or inTray(die)))
-  end, viaTower and 22 or 10, function()
+    if tok then
+      return die.isDestroyed() or tok.done
+    end
+    return die.isDestroyed() or (die.resting and not die.spawning)
+  end, viaTower and 28 or 10, function()
     rolling = false
-    towerToken = nil
   end)
 end
 
--- A roll down the tower: the lines light up in the roller's colour as the die falls, and the result counts
--- when the die lands in the tray. If it gets stuck on a ramp, it's dropped in again (twice at most).
-towerRoll = function(die, color, byHand)
-  if rolling then
+-- Turn a resting die so face r is up, as a last little hop (it's lifted a touch, turned, and dropped).
+local function showFace(die, r, cb)
+  local ok, v = pcall(function() return die.getValue() end)
+  if ok and tonumber(v) == r then
+    cb()
     return
   end
-  local idx = TOWER_IDX[color] or 0
-  -- The lines light up and run down the tower until the die lands in the tray (then flash once and go
-  -- back to the turn's colour).
-  towerLoop(TOWER_ROLLING + idx)
-  towerRolling = true
-  local function settle()
-    if towerRolling then
-      towerRolling = false
-      Planechase.towerColor(Fires and Fires.current and Fires.current() or nil)
+  local target
+  pcall(function()
+    for _, rv in ipairs(die.getRotationValues() or {}) do
+      if tonumber(rv.value) == r then
+        target = rv.rotation
+      end
+    end
+  end)
+  if target == nil then
+    pcall(function() die.setValue(r) end)
+    cb()
+    return
+  end
+  local p = die.getPosition()
+  local yaw = die.getRotation().y
+  die.setLock(true)
+  die.setPositionSmooth({ p.x, p.y + 0.55, p.z }, false, true)
+  die.setRotationSmooth({ target.x, yaw + math.random(-40, 40), target.z }, false, true)
+  Wait.time(function()
+    if die.isDestroyed() then
+      return cb()
+    end
+    die.setLock(false)
+    Wait.condition(cb, function() return die.isDestroyed() or (die.resting and not die.spawning) end, 3, cb)
+  end, 0.4)
+end
+
+-- Follow one die down chute h until it rests on its dragon's tongue showing face r, then call done().
+-- If it stops anywhere else it gets a nudge, and if that doesn't free it, it's dropped in again.
+local function follow(die, h, r, token, done)
+  local tries, finished = 0, false
+  local function finish()
+    if not finished then
+      finished = true
+      done()
     end
   end
-  Wait.time(function()
-    Wait.condition(function()
-      settle()
-      towerFlash(idx)
-    end, function()
-      return die.isDestroyed() or (die.resting and not die.spawning and inTray(die))
-    end, 22, settle)
-  end, 0.5)
-  if not byHand then
-    dropIn(die)
-  end
-  local token = {}
-  towerToken = token
-  Wait.time(function() Planechase.onRolled(die, color, true) end, 0.4)
-  local tries = 0
+  Wait.condition(function()
+    if roll ~= token then
+      return
+    end
+    showFace(die, r, finish)
+  end, function()
+    return die.isDestroyed() or roll ~= token
+      or (die.resting and not die.spawning and onTongue(die, h))
+  end, 26, finish)
   local function check()
-    if towerToken ~= token or die.isDestroyed() or inTray(die) then
+    if finished or roll ~= token or die.isDestroyed() or onTongue(die, h) then
       return
     end
     tries = tries + 1
-    if tries > 2 then
+    if tries > 3 then
       return
     end
-    say("the die got stuck in the tower: dropping it in again.", INFO)
-    dropIn(die)
-    Wait.time(check, 6)
+    if tries % 2 == 1 then
+      -- A nudge: toward its dragon and a little up, with a spin.
+      pcall(function()
+        die.setVelocity({ 0, 2.5, 2.5 * HEADS[h].dir })
+        die.setAngularVelocity({ math.random(-8, 8), math.random(-8, 8), math.random(-8, 8) })
+      end)
+    else
+      dropIn(die, h)
+    end
+    Wait.time(check, 4)
   end
   Wait.time(check, 6)
 end
 
--- A player let go of the planar die over the top of the tower: that's a roll.
+-- A roll down the tower. The result is picked when the dice go in; one die goes down each chute, the
+-- tower's lines light up in the roller's colour, the dragons breathe as the dice come out of their mouths
+-- (in the roller's colour on a blank, purple for chaos, blue-white for planeswalk), and each die is
+-- made to land on the picked face.
+towerRoll = function(die, color, byHand, chute)
+  if rolling or roll ~= nil then
+    return
+  end
+  local st = data()
+  local r = math.random(6)
+  local token = { r = r, done = false }
+  roll = token
+  local idx = TOWER_IDX[color] or 0
+  local breath = (r == 1 and TOWER_WALK) or ((r == 6 or st.aether) and TOWER_CHAOS) or idx
+  towerLoop(TOWER_ROLLING + idx)
+  towerRolling = true
+  local hp = chute or "A"
+  local ht = hp == "A" and "B" or "A"
+  local twin = findTwin()
+  local function go(t)
+    twin = t
+    if not byHand then
+      dropIn(die, hp)
+    end
+    if twin then
+      Wait.frames(function() dropIn(twin, ht) end, 2)
+    end
+    -- The dragons breathe as the planar die comes out into the open mouth.
+    local breathed = false
+    local function watch()
+      if breathed or roll ~= token or die.isDestroyed() then
+        return
+      end
+      if along(die.getPosition(), hp) > MOUTH_ALONG then
+        breathed = true
+        towerFlash(breath)
+        return
+      end
+      Wait.time(watch, 0.1)
+    end
+    Wait.time(watch, 0.3)
+    local left = twin and 2 or 1
+    local function oneDone()
+      left = left - 1
+      if left > 0 or roll ~= token then
+        return
+      end
+      if not breathed then
+        breathed = true
+        towerFlash(breath)
+      end
+      roll = nil
+      towerRolling = false
+      Planechase.towerColor(Fires and Fires.current and Fires.current() or nil)
+    end
+    -- (A moment after the drops, so neither die still counts as resting where it was.)
+    Wait.time(function()
+      follow(die, hp, r, token, function()
+        token.done = true
+        oneDone()
+      end)
+      if twin then
+        follow(twin, ht, r, token, oneDone)
+      end
+    end, 0.6)
+    Wait.time(function() Planechase.onRolled(die, color, true) end, 0.4)
+    -- Never leave the tower stuck mid-roll.
+    Wait.time(function()
+      if roll == token then
+        token.done = true
+        roll = nil
+        towerRolling = false
+        Planechase.towerColor(Fires and Fires.current and Fires.current() or nil)
+      end
+    end, 32)
+  end
+  if twin then
+    go(twin)
+  else
+    spawnDie("PlanarDieTwin", "Planar Die (twin)", restSpot(ht), go)
+  end
+end
+
+-- A player let go of the planar die over the top of the tower: that's a roll down that chute.
 function Planechase.onDrop(color, obj)
   if obj == nil or not obj.hasTag or not obj.hasTag("PlanarDie") or towerObj() == nil then
     return
   end
-  local p = obj.getPosition()
-  if math.abs(p.x - TOWER.x) < 2.7 and p.z > TOWER.z + 0.1 and p.z < TOWER.z + 5.5
-      and p.y > TableSetup.SURFACE_TOP + 9 then
-    towerRoll(obj, color, true)
+  local h = chuteAt(obj.getPosition())
+  if h then
+    towerRoll(obj, color, true, h)
   end
 end
 

@@ -1,0 +1,12 @@
+Third-party assets used by the table
+====================================
+
+Planechase dice tower dragon heads (assets/planechase/mtg_dicetower.unity3d):
+  This work is based on "Dragon Head | Retopologized version"
+  (https://sketchfab.com/3d-models/dragon-head-retopologized-version-1ea43925e5b34075a0d6f8bc7c6916b8)
+  by gozdemrl (https://sketchfab.com/gozdemrl), licensed under CC-BY-4.0
+  (http://creativecommons.org/licenses/by/4.0/).
+  Changes: the mouth was cut open and hinged, and the paint turned to the table's stone
+  (tools/make_dragon_head.py).
+
+Fonts: tools/fonts/Orbitron.ttf, SIL Open Font License (tools/fonts/OFL.txt).
