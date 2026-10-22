@@ -74,8 +74,8 @@ local GRAVE_AT = { x = -8.5, z = GRAVE_MAT.z - MAT_OFF }
 -- dragon to the south. A roll drops one die down each chute (the planar die and its twin), so both sides of
 -- the table see a die land; both are made to show the same face.
 local TOWER = { x = 9, z = 0 }
-local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=3"
-local TOWER_TOP = 17.3          -- where a die is dropped in, above the table
+local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=4"
+local TOWER_TOP = 19.6          -- where a die is dropped in (through the deck's hole), above the table
 local HEADS = {
   A = { x = -1.3, dir = 1, dropZ = -1.6 },     -- offsets from TOWER; dir = which way the dragon faces (z)
   B = { x = 1.3, dir = -1, dropZ = 1.6 },
@@ -609,6 +609,12 @@ local function sizeDie(o)
         o.setScale({ k, k, k })
       end
     end)
+    -- Slippery, a little bouncy: it tumbles down the ramps instead of sticking.
+    pcall(function()
+      o.static_friction = 0.15
+      o.dynamic_friction = 0.1
+      o.bounciness = 0.35
+    end)
   end, function() return o.isDestroyed() or not o.loading_custom end, 10)
 end
 
@@ -820,7 +826,7 @@ end
 -- Which chute's top a position is over (nil if neither).
 local function chuteAt(p)
   local dx, dz = p.x - TOWER.x, p.z - TOWER.z
-  if math.abs(dx) > 2.7 or math.abs(dz) > 2.7 or p.y < TableSetup.SURFACE_TOP + 12 then
+  if math.abs(dx) > 3.3 or math.abs(dz) > 3.3 or p.y < TableSetup.SURFACE_TOP + 14 then
     return nil
   end
   return dx < 0 and "A" or "B"
@@ -1070,14 +1076,15 @@ towerRoll = function(die, color, byHand, chute)
   end
 end
 
--- A player let go of the planar die over the top of the tower: that's a roll down that chute.
+-- A player let go of a planar die over the top of the tower: that's a roll down that half's chute (it's put
+-- through the hole in the deck, wherever on top it was dropped).
 function Planechase.onDrop(color, obj)
   if obj == nil or not obj.hasTag or not obj.hasTag("PlanarDie") or towerObj() == nil then
     return
   end
   local h = chuteAt(obj.getPosition())
   if h then
-    towerRoll(obj, color, true, h)
+    towerRoll(obj, color, false, h)
   end
 end
 
