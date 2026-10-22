@@ -656,7 +656,7 @@ end
 -- Braziers: an iron brazier with coals and a colour-changing fire on top of each of the frame's four
 -- towers (a Unity AssetBundle: tools/unity/MTGTorchBuilder.cs, no sound). They replaced the old wall
 -- sconces and the towers' spires. Still called "torches" in the code (fires.lua lights them).
-local TORCH_URL = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/torch/mtg_brazier.unity3d?v=1"
+local TORCH_URL = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/torch/mtg_brazier.unity3d?v=2"
 local TOWER_TOP = 13.6       -- the flat top of each tower (tools/make_table_model.py: lip + 12)
 local BRAZIER_UP = 1.7       -- the bundle's origin is the coal bed, 1.7 above its feet
 local TOWER_HALF = 4.2       -- frame edge to the tower's centre

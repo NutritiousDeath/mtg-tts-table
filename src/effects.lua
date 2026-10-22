@@ -779,6 +779,10 @@ function Effects.parse(text, sourceName)
       t = t:gsub("%s+", " ")
     end
   end
+  -- Carpet of Flowers: up to X mana of one color, X = Islands the chosen opponent controls; once a turn.
+  if t:find("islands target opponent controls", 1, true) and t:find("mana of any one color", 1, true) then
+    return { optional = false, notes = {}, conds = {}, actions = { { what = "carpetMana", who = "you", n = 1 } } }
+  end
   -- Metamorphosis: sacrifice a creature, add X mana of one color (X = 1 + its mana value).
   if t:find("sacrificed creature's mana value", 1, true) and t:find("mana of any one color", 1, true) then
     return { optional = false, notes = {}, conds = {}, actions = { { what = "sacMana", who = "you", n = 1,
@@ -2743,6 +2747,8 @@ local function describe(a, target, controller)
     return "your creature deals damage equal to its power to a creature you don't control"
   elseif a.what == "powerHit" then
     return "damage equal to the creature's power to any target"
+  elseif a.what == "carpetMana" then
+    return "mana of one color for each Island the chosen opponent controls (once a turn)"
   elseif a.what == "manaAsk" then
     return "mana for each " .. tostring(a.label)
   elseif a.what == "copyThat" then
@@ -3886,6 +3892,8 @@ local function apply(it, plan, target)
           end)
         elseif a.what == "powerHit" then
           Effects.powerHit(seat, a, it)
+        elseif a.what == "carpetMana" then
+          Effects.carpetMana(seat, a, it)
         elseif a.what == "manaAsk" then
           Effects.manaAsk(seat, a, it)
         elseif a.what == "copyThat" then
@@ -5277,6 +5285,48 @@ function Effects.powerHit(seat, a, it)
   else
     Effects.askNumber(seat, it.name .. ": power?", "Type the creature's power, then OK.", go)
   end
+end
+
+-- Carpet of Flowers: pick the opponent (each shows how many Islands they control), then a color;
+-- that much mana is added. Only once a turn per card ("if you haven't added mana with this ability").
+function Effects.carpetMana(seat, a, it)
+  local turn = (GameState.data.turn or {}).taken or 0
+  GameState.data.carpetUsed = GameState.data.carpetUsed or {}
+  local key = tostring(it.source or it.name) .. "@" .. seat
+  if GameState.data.carpetUsed[key] == turn then
+    printToAll("MTG > " .. it.name .. ": already added mana this turn.", INFO)
+    return
+  end
+  local choices = {}
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    if c ~= seat and TableSetup.isOpponent(c, seat) then
+      local n = Effects.countPermanents(c, "island", "mine")
+      table.insert(choices, { label = c .. " (" .. n .. ")", value = { seat = c, n = n } })
+    end
+  end
+  table.sort(choices, function(x, y) return x.value.n > y.value.n end)
+  if #choices == 0 or choices[1].value.n == 0 then
+    printToAll("MTG > " .. it.name .. ": no opponent controls an Island, so no mana.", INFO)
+    return
+  end
+  table.insert(choices, { label = "NONE", value = false })
+  ask(seat, it.name .. ": target opponent", "Pick an opponent: you add mana equal to the Islands they control (shown in brackets).",
+    choices, function(pick)
+      if not pick or pick.n == 0 then
+        printToAll("MTG > " .. it.name .. ": " .. seat .. " adds no mana.", INFO)
+        return
+      end
+      local colors = {}
+      for _, c in ipairs({ "W", "U", "B", "R", "G" }) do
+        table.insert(colors, { label = c, value = c })
+      end
+      ask(seat, it.name .. ": which color?", "Add " .. pick.n .. " mana of one color.", colors, function(color)
+        GameState.data.carpetUsed[key] = turn
+        ManaChips.add(seat, color, pick.n)
+        printToAll("MTG > " .. it.name .. ": " .. seat .. " adds " .. pick.n .. " {" .. color .. "} (" .. pick.seat
+          .. " controls " .. pick.n .. " Island" .. (pick.n == 1 and "" or "s") .. ").", GOOD)
+      end)
+    end)
 end
 
 -- Metalworker, Nykthos: the player says how many; the table adds that much mana.

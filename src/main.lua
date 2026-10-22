@@ -122,7 +122,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.23 (!layout 3; Kessig and plane upkeep triggers; cameras re-point after reset and reconnect; staggered fire loading)"
+SCRIPT_VERSION = "2.24 (stack flames come back after !reset; Carpet of Flowers automated; fresh fire bundles)"
 
 function onLoad(saved)
   GameLog.setup()

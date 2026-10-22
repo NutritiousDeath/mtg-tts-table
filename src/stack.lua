@@ -562,15 +562,24 @@ end
 -- The ring of flame round the mat for planar die results (planechase.lua): purple-blue for chaos, blue-white
 -- (a planeswalker's spark) for planeswalking. It ignites while such an item is on the stack and goes out in a
 -- puff of smoke when it has resolved (tools/unity/MTGTorchBuilder.cs, mtg_stackfire).
-local STACK_FIRE_URL = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/torch/mtg_stackfire.unity3d?v=3"
+local STACK_FIRE_URL = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/torch/mtg_stackfire.unity3d?v=4"
 local FIRE_EFFECT = { chaos = 1, walk = 2 }
 local fireNow = nil   -- "chaos", "walk" or nil
+local fireSpawning = false
 
 local function fireObj()
   local g = data().fire
   local o = g and getObjectFromGUID(g)
   if o and not o.isDestroyed() then
     return o
+  end
+  -- Lost track of it (!reset wipes the stack's saved data): take back the one already on the table.
+  for _, x in ipairs(getObjectsWithTag("StackFire")) do
+    local co = x.getCustomObject()
+    if not x.isDestroyed() and co and co.assetbundle == STACK_FIRE_URL then
+      data().fire = x.getGUID()
+      return x
+    end
   end
   return nil
 end
@@ -608,6 +617,7 @@ function Stack.ensureFire()
     end,
   })
   obj.setCustomObject({ assetbundle = STACK_FIRE_URL, type = 0 })
+  reg.fire = obj.getGUID()
 end
 
 -- Light or put out the ring to match the stack: the topmost planar item decides the colour.
@@ -624,10 +634,20 @@ function Stack.updateFire(force)
     return
   end
   local o = fireObj()
-  if o == nil or o.loading_custom or o.AssetBundle == nil then
-    if o then
-      Wait.time(function() Stack.updateFire(true) end, 1)
+  if o == nil then
+    -- No flame ring on the table (removed, or an old version): make one, then light it once it loads.
+    if want and not fireSpawning then
+      fireSpawning = true
+      pcall(Stack.ensureFire)
+      Wait.time(function()
+        fireSpawning = false
+        Stack.updateFire(true)
+      end, 2)
     end
+    return
+  end
+  if o.loading_custom or o.AssetBundle == nil then
+    Wait.time(function() Stack.updateFire(true) end, 1)
     return
   end
   local was = fireNow
