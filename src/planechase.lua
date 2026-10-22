@@ -564,12 +564,32 @@ local function findTagged(tag)
   return nil
 end
 
-local function findDie()
-  return findTagged("PlanarDie")
+-- There are two planar dice, one on each dragon's tongue. Either can be picked up and rolled; the other
+-- one rolls down the other side of the tower with it.
+local function planarDice()
+  local out = {}
+  for _, tag in ipairs({ "PlanarDie", "PlanarDieTwin" }) do
+    for _, o in ipairs(getObjectsWithTag(tag)) do
+      if not o.isDestroyed() then
+        table.insert(out, o)
+      end
+    end
+  end
+  return out
 end
 
-local function findTwin()
-  return findTagged("PlanarDieTwin")
+local function findDie()
+  return planarDice()[1]
+end
+
+-- The other planar die (not `die`).
+local function findTwin(die)
+  for _, o in ipairs(planarDice()) do
+    if o ~= die then
+      return o
+    end
+  end
+  return nil
 end
 
 -- Where a die rests on a dragon's tongue.
@@ -598,9 +618,8 @@ local function spawnDie(tag, name, at, cb)
       Name = "Custom_Dice",
       Transform = { posX = 0, posY = 0, posZ = 0, rotX = 0, rotY = 0, rotZ = 0, scaleX = 1, scaleY = 1, scaleZ = 1 },
       Nickname = name,
-      Description = tag == "PlanarDie"
-        and "Drop it in the top of the dice tower (or right-click > Roll): chaos or planeswalk happens by itself. First roll each turn is free, then 1, 2, 3 mana..."
-        or "The planar die's twin: it rolls down the other side of the tower so everyone sees the result.",
+      Description = "Drop it in the top of the dice tower (or right-click > Roll): the other die rolls down the other "
+        .. "side with it, and chaos or planeswalk happens by itself. First roll each turn is free, then 1, 2, 3 mana...",
       ColorDiffuse = { r = 1, g = 1, b = 1 },
       CustomImage = { ImageURL = DIE_IMAGE, ImageSecondaryURL = "", ImageScalar = 1, WidthScale = 0,
         CustomDice = { Type = 1 } },
@@ -609,9 +628,6 @@ local function spawnDie(tag, name, at, cb)
     position = at,
     callback_function = function(o)
       o.addTag(tag)
-      if tag == "PlanarDieTwin" then
-        o.interactable = false
-      end
       sizeDie(o)
       if cb then cb(o) end
     end,
@@ -619,17 +635,36 @@ local function spawnDie(tag, name, at, cb)
 end
 
 -- The planar die on dragon A's tongue and its twin on dragon B's.
+-- Both dice the same: an older twin couldn't be picked up.
+local function fixDice()
+  local dice = planarDice()
+  for _, o in ipairs(dice) do
+    if o.hasTag("PlanarDieTwin") then
+      o.removeTag("PlanarDieTwin")
+      o.addTag("PlanarDie")
+      o.setName("Planar Die")
+    end
+    o.interactable = true
+    sizeDie(o)
+  end
+  return dice
+end
+Planechase.fixDice = fixDice
+
 putDie = function(cb)
-  local die = findDie()
-  if findTwin() == nil then
-    spawnDie("PlanarDieTwin", "Planar Die (twin)", restSpot("B"))
+  local dice = fixDice()
+  if #dice == 1 then
+    -- The other dragon's tongue.
+    local onA = (dice[1].getPosition().z - TOWER.z) * HEADS.A.dir >= 0
+    spawnDie("PlanarDie", "Planar Die", restSpot(onA and "B" or "A"))
+  elseif #dice == 0 then
+    spawnDie("PlanarDie", "Planar Die", restSpot("B"))
   end
-  if die then
-    sizeDie(die)
-    if cb then cb(die) end
-    return
+  if #dice == 0 then
+    spawnDie("PlanarDie", "Planar Die", restSpot("A"), cb)
+  elseif cb then
+    cb(dice[1])
   end
-  spawnDie("PlanarDie", "Planar Die", restSpot("A"), cb)
 end
 
 ---------------------------------------------------------------------------
@@ -967,9 +1002,10 @@ towerRoll = function(die, color, byHand, chute)
   local breath = (r == 1 and TOWER_WALK) or ((r == 6 or st.aether) and TOWER_CHAOS) or idx
   towerLoop(TOWER_ROLLING + idx)
   towerRolling = true
-  local hp = chute or "A"
+  -- Not dropped in by hand: it goes down the side whose dragon it was sitting on.
+  local hp = chute or ((die.getPosition().z - TOWER.z) * HEADS.A.dir >= 0 and "A" or "B")
   local ht = hp == "A" and "B" or "A"
-  local twin = findTwin()
+  local twin = findTwin(die)
   local function go(t)
     twin = t
     if not byHand then
@@ -1030,7 +1066,7 @@ towerRoll = function(die, color, byHand, chute)
   if twin then
     go(twin)
   else
-    spawnDie("PlanarDieTwin", "Planar Die (twin)", restSpot(ht), go)
+    spawnDie("PlanarDie", "Planar Die", restSpot(ht), go)
   end
 end
 
@@ -1151,6 +1187,7 @@ function Planechase.ensure()
   end
   if plane or findDeck() or findGrave() then
     ensureExtras()
+    Wait.time(fixDice, 2)
   end
   local mesh = BASE .. "chest.obj" .. VERSION
   for _, o in ipairs(getObjectsWithTag("PlanechaseChest")) do
