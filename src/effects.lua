@@ -114,7 +114,7 @@ function Effects.parse(text, sourceName)
     local j = raw:find("\n", i, true) or (#raw + 1)
     local line = raw:sub(i, j - 1)
     if line:find(".", 1, true) or line:find(":", 1, true) or line:lower():find("^fabricate %d")
-        or line:lower():find("^cumulative upkeep") then
+        or line:lower():find("^cumulative upkeep") or line:lower():find("^%s*level %d+%s*$") then
       table.insert(kept, line)
     end
     i = j + 1
@@ -590,6 +590,66 @@ function Effects.parse(text, sourceName)
         local sub = Effects.parse(first, sourceName) or { actions = {}, notes = {}, conds = {} }
         table.insert(sub.actions, { what = "descentBurst", who = "you", n = 1, treasureWho = tw, damageWho = dw })
         return { optional = sub.optional or false, notes = sub.notes or {}, conds = sub.conds or {}, actions = sub.actions }
+      end
+    end
+    -- Claim the Kingdom: "put a +1/+1 counter on target creature you control and a plan counter on this enchantment."
+    if t:find("+1/+1 counter on target creature you control and a plan counter on", 1, true) then
+      return { optional = false, notes = {}, conds = {}, actions = {
+        { what = "counterOn", who = "you", n = 1, ty = "creature", kind = "plus", label = "+1/+1", mine = true },
+        { what = "planCounter", who = "you", n = 1 } } }
+    end
+    -- Mossborn Hydra: "double the number of +1/+1 counters on this creature".
+    if t:find("double the number of +1/+1 counters on this creature", 1, true) or t:find("double the number of +1/+1 counters on ~", 1, true) then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "doubleSelfCounters", who = "you", n = 1 } } }
+    end
+    -- Oran-Rief Hydra: one +1/+1 counter, two if the land that entered is a Forest.
+    if t:find("if that land is a forest, put two +1/+1 counters on", 1, true) then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "landfallForestCounters", who = "you", n = 1 } } }
+    end
+    -- Peregrine Drake: "untap up to five lands".
+    do
+      local w = t:match("untap up to (%w+) lands")
+      if w and num(w) and not t:find("target", 1, true) then
+        return { optional = false, notes = {}, conds = {}, actions = { { what = "untapLands", who = "you", n = num(w) } } }
+      end
+    end
+    -- Patient Naturalist: "mill three cards. Put a land card from among the milled cards into your hand. If you can't,
+    -- create a Treasure token."
+    do
+      local w = t:match("mill (%w+) cards%. put a land card from among the milled cards into your hand")
+      if w and num(w) then
+        return { optional = false, notes = {}, conds = {}, actions = { { what = "millLandToHand", who = "you", n = num(w),
+          treasure = t:find("if you can't, create a treasure token", 1, true) ~= nil } } }
+      end
+    end
+    -- Freed from the Real: "{U}: Untap enchanted creature."
+    if (t:find("untap enchanted permanent", 1, true) or t:find("untap enchanted creature", 1, true))
+        and not t:find("doesn't untap", 1, true) then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "tapHost", who = "you", n = 1, untap = true } } }
+    end
+    -- Arbor Elf: "Untap target Forest."
+    if t:match("^%s*untap target forest%.?%s*$") then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "untapForest", who = "you", n = 1 } } }
+    end
+    -- Fog effects (Spore Frog): "Prevent all combat damage that would be dealt this turn."
+    if t:match("^%s*prevent all combat damage that would be dealt this turn%.?%s*$") then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "fog", who = "you", n = 1 } } }
+    end
+    -- Stuck in Summoner's Sanctum: "When this Aura enters, tap enchanted permanent."
+    if t:find("tap enchanted permanent", 1, true) or t:find("tap enchanted creature", 1, true) then
+      if not t:find("untap", 1, true) and not t:find("doesn't untap", 1, true) then
+        return { optional = false, notes = {}, conds = {}, actions = { { what = "tapHost", who = "you", n = 1 } } }
+      end
+    end
+    -- Dancing from Dark to Dawn: "put X +1/+1 counters on target creature you control, where X is that spell's mana value."
+    if t:find("+1/+1 counters on target creature you control, where x is that spell's mana value", 1, true) then
+      return { optional = false, notes = {}, conds = {}, actions = { { what = "countersSpellMV", who = "you", n = 1 } } }
+    end
+    -- Class enchantments: "{2}{G}: Level 2" - the Class gains its next level.
+    do
+      local lv = t:match("^%s*level (%d+)%.?%s*$")
+      if lv then
+        return { optional = false, notes = {}, conds = {}, actions = { { what = "classLevel", who = "you", n = tonumber(lv) } } }
       end
     end
     -- Fell the Mighty: "Choose target creature. Destroy each creature with power greater than that creature's power."
@@ -2582,6 +2642,10 @@ end
 -- item) lets Forge's counts be worked out; without it they count as 1.
 function Effects.parseBest(text, name, it)
   local plan, why = Effects.parse(text, name)
+  -- Our own readings that Forge's data would get wrong (a Class's "Level 2" is not Forge's level-up effect).
+  if plan and plan.actions and plan.actions[1] and plan.actions[1].what == "classLevel" then
+    return plan, why
+  end
   local ok, fp, notes = pcall(forgePlan, text, name, it)
   if not ok or fp == nil then
     return plan, why
@@ -2795,6 +2859,26 @@ local function describe(a, target, controller)
     return "each player creates a " .. tostring(a.word) .. " token"
   elseif a.what == "fellMighty" then
     return "destroy each creature with power greater than the chosen creature's"
+  elseif a.what == "planCounter" then
+    return "a plan counter on it"
+  elseif a.what == "classLevel" then
+    return "level " .. tostring(a.n)
+  elseif a.what == "doubleSelfCounters" then
+    return "double its +1/+1 counters"
+  elseif a.what == "landfallForestCounters" then
+    return "+1/+1 counter (two for a Forest)"
+  elseif a.what == "untapLands" then
+    return "untap up to " .. tostring(a.n) .. " lands"
+  elseif a.what == "millLandToHand" then
+    return "mill " .. tostring(a.n) .. ", a land from them to your hand"
+  elseif a.what == "tapHost" then
+    return (a.untap and "untap" or "tap") .. " the enchanted permanent"
+  elseif a.what == "untapForest" then
+    return "untap a Forest"
+  elseif a.what == "fog" then
+    return "prevent all combat damage this turn"
+  elseif a.what == "countersSpellMV" then
+    return "+1/+1 counters equal to that spell's mana value"
   elseif a.what == "drawUpTo" then
     return "draw up to " .. tostring(a.n) .. " cards in hand"
   elseif a.what == "cumUpkeep" then
@@ -3550,6 +3634,95 @@ local function apply(it, plan, target)
           end
         elseif a.what == "fellMighty" then
           Effects.fellMighty(seat, it)
+        elseif a.what == "classLevel" then
+          local src = it.source and getObjectFromGUID(it.source)
+          if src and not src.isDestroyed() then
+            local now = Effects.classLevel(src)
+            if a.n ~= now + 1 then
+              broadcastToColor(it.name .. " is level " .. now .. ": it can only go up to level " .. (now + 1) .. " next.", seat, INFO)
+            else
+              GameState.data.classLevels = GameState.data.classLevels or {}
+              GameState.data.classLevels[src.getGUID()] = a.n
+              printToAll("MTG > " .. it.name .. " is now level " .. a.n .. ".", GOOD)
+              local becomes = tostring(CardData.get(src).oracle or ""):match("When this Class becomes level " .. a.n .. ", ([^\n]+)")
+              if becomes then
+                broadcastToColor(it.name .. " level " .. a.n .. ": " .. becomes .. " (do this part yourself).", seat, INFO)
+              end
+              pcall(Counters.render, src)
+            end
+          end
+        elseif a.what == "planCounter" then
+          local src = it.source and getObjectFromGUID(it.source)
+          if src and not src.isDestroyed() then
+            local before = Counters.get(src).other
+            Counters.place(src, "other", 1, seat)
+            local now = Counters.get(src).other
+            printToAll("MTG > " .. it.name .. ": plan counter " .. now .. " of 4.", GOOD)
+            if before < 4 and now >= 4 then
+              printToAll("MTG > " .. it.name .. ": the fourth plan counter - it's sacrificed. " .. seat
+                .. " puts an indestructible counter on target creature they control (by hand: right-click > Counters... > Other, and remember it's indestructible).", GOOD)
+              Combat.sacrifice(src)
+            end
+          end
+        elseif a.what == "doubleSelfCounters" then
+          local src = it.source and getObjectFromGUID(it.source)
+          if src and not src.isDestroyed() then
+            local have = Counters.get(src).plus
+            if have > 0 then
+              local placed = Counters.place(src, "plus", have, seat)
+              printToAll("MTG > " .. it.name .. ": +1/+1 counters doubled (" .. have .. " -> " .. (have + placed) .. ").", GOOD)
+            else
+              printToAll("MTG > " .. it.name .. " has no +1/+1 counters to double.", INFO)
+            end
+          end
+        elseif a.what == "landfallForestCounters" then
+          local src = it.source and getObjectFromGUID(it.source)
+          local land = it.thatCard and getObjectFromGUID(it.thatCard)
+          local forest = false
+          pcall(function() forest = tostring(CardData.get(land).typeLine or ""):find("Forest", 1, true) ~= nil end)
+          if src and not src.isDestroyed() then
+            local placed = Counters.place(src, "plus", forest and 2 or 1, seat)
+            printToAll("MTG > " .. it.name .. ": " .. placed .. " +1/+1 counter(s)" .. (forest and " (the land is a Forest)" or "") .. ".", GOOD)
+          end
+        elseif a.what == "untapLands" then
+          Effects.untapLands(seat, a.n, it)
+        elseif a.what == "millLandToHand" then
+          Effects.millLandToHand(seat, a, it)
+        elseif a.what == "tapHost" then
+          local src = it.source and getObjectFromGUID(it.source)
+          local host = src and Equip and Equip.hostOf and Equip.hostOf(src)
+          if host and not host.isDestroyed() then
+            local hs = TableSetup.seat(Effects.fieldSeat(host) or seat)
+            local r = host.getRotation()
+            host.setRotationSmooth({ r.x, (hs.yaw + (a.untap and 0 or 90)) % 360, r.z }, false, true)
+            printToAll("MTG > " .. it.name .. ": " .. host.getName() .. (a.untap and " is untapped." or " is tapped."), GOOD)
+          else
+            broadcastToColor(it.name .. ": " .. (a.untap and "untap" or "tap") .. " the enchanted permanent yourself (attach the Aura first to have it done for you).", seat, INFO)
+          end
+        elseif a.what == "untapForest" then
+          ask(seat, it.name .. ": untap a Forest", "Click UNTAP on the Forest to untap.", { { label = "SKIP", value = false } }, function(obj)
+            if obj and not obj.isDestroyed() then
+              local hs = TableSetup.seat(Effects.fieldSeat(obj) or seat)
+              local r = obj.getRotation()
+              obj.setRotationSmooth({ r.x, hs.yaw, r.z }, false, true)
+              printToAll("MTG > " .. it.name .. ": " .. obj.getName() .. " is untapped.", GOOD)
+            end
+          end, { filter = function(obj, owner)
+            return owner ~= nil and tostring(CardData.get(obj).typeLine or ""):find("Forest", 1, true) ~= nil
+          end, label = "UNTAP", protect = false })
+        elseif a.what == "fog" then
+          GameState.data.fogTurn = (GameState.data.turn or {}).taken or 0
+          GameState.data.fogBy = it.name
+          printToAll("MTG > " .. it.name .. ": all combat damage this turn will be prevented.", GOOD)
+        elseif a.what == "countersSpellMV" then
+          local spell = it.thatCard and getObjectFromGUID(it.thatCard)
+          local mv = 0
+          pcall(function() mv = tonumber(CardData.get(spell).cmc) or 0 end)
+          if mv <= 0 then
+            printToAll("MTG > " .. it.name .. ": that spell's mana value is 0: no counters.", INFO)
+          else
+            Effects.counterOn(seat, { ty = "creature", kind = "plus", label = "+1/+1", n = mv, mine = true }, it)
+          end
         elseif a.what == "drawUpTo" then
           local have = 0
           pcall(function() have = #(Player[seat].getHandObjects() or {}) end)
@@ -8312,6 +8485,128 @@ Events.on("cardMoved", function(d)
   end
 end)
 
+-- Peregrine Drake: untap up to N of your tapped lands (the ones tapped are untapped, up to N).
+function Effects.untapLands(seat, n, it)
+  local s = TableSetup.seat(seat)
+  local done = 0
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if done >= n then
+      break
+    end
+    if obj.type == "Card" and not obj.isDestroyed() and obj.held_by_color == nil and fieldSeat(obj) == seat
+        and Effects.cardTypes(obj).land then
+      local r = obj.getRotation()
+      local diff = ((r.y - s.yaw + 540) % 360) - 180
+      if math.abs(diff) > 30 then
+        obj.setRotationSmooth({ r.x, s.yaw, r.z }, false, true)
+        done = done + 1
+      end
+    end
+  end
+  printToAll("MTG > " .. it.name .. ": " .. done .. " land(s) untapped.", GOOD)
+end
+
+-- How many cards are in a seat's graveyard (every pile and loose card there).
+function Effects.graveyardSize(seat)
+  local n = 0
+  for _, obj in ipairs(getObjects()) do
+    if (obj.type == "Deck" or obj.type == "Card") and not obj.isDestroyed() and obj.held_by_color == nil then
+      local loc = Zones.regionAt(obj.getPosition())
+      if loc.seat == seat and loc.region == "graveyard" then
+        n = n + (obj.type == "Deck" and #obj.getObjects() or 1)
+      end
+    end
+  end
+  return n
+end
+
+-- Patient Naturalist: mill N, a land from among them goes to the hand (you pick if several); none: a Treasure.
+function Effects.millLandToHand(seat, a, it)
+  local lib = Library.find(seat)
+  local lands = {}
+  if lib and lib.type == "Deck" then
+    for i, e in ipairs(lib.getObjects()) do
+      if i > a.n then
+        break
+      end
+      local d = {}
+      pcall(function() d = JSON.decode(e.gm_notes) or {} end)
+      if tostring(d.typeLine or ""):find("Land", 1, true) then
+        table.insert(lands, { guid = e.guid, name = e.name ~= "" and e.name or tostring(d.name) })
+      end
+    end
+  elseif lib then
+    if tostring(CardData.get(lib).typeLine or ""):find("Land", 1, true) then
+      table.insert(lands, { guid = lib.getGUID(), name = lib.getName() })
+    end
+  end
+  Library.mill(seat, a.n, 0, function(done)
+    local function toHand(pick)
+      Wait.time(function()
+        local hand = Player[seat].getHandTransform()
+        local yard = Library.pileIn(seat, "graveyard")
+        local loose = getObjectFromGUID(pick.guid)
+        if loose and not loose.isDestroyed() and loose.type == "Card" then
+          loose.setPositionSmooth(hand.position, false, true)
+        elseif yard and yard.type == "Deck" then
+          yard.takeObject({ guid = pick.guid, position = hand.position, smooth = true })
+        else
+          broadcastToColor(it.name .. ": put " .. pick.name .. " from your graveyard into your hand yourself.", seat, INFO)
+          return
+        end
+        printToAll("MTG > " .. it.name .. ": " .. seat .. " puts " .. pick.name .. " into their hand.", GOOD)
+      end, 0.6)
+    end
+    if #lands == 0 then
+      if a.treasure then
+        printToAll("MTG > " .. it.name .. ": no land among the milled cards: a Treasure instead.", GOOD)
+        Tokens.create(seat, { words = { "treasure" }, colors = {} }, 1, it.name)
+      end
+    elseif #lands == 1 then
+      toHand(lands[1])
+    else
+      local choices = {}
+      for _, l in ipairs(lands) do
+        table.insert(choices, { label = l.name:sub(1, 22), value = l.guid })
+      end
+      ask(seat, it.name .. ": a land to your hand", "Pick the land card from among the milled cards to put into your hand.",
+        choices, function(g)
+          for _, l in ipairs(lands) do
+            if l.guid == g then
+              toHand(l)
+            end
+          end
+        end)
+    end
+  end)
+end
+
+-- Class enchantments: the level reached (1 until levelled up).
+function Effects.classLevel(obj)
+  local m = GameState.data.classLevels
+  return (m and obj and m[obj.getGUID()]) or 1
+end
+
+-- A card's rules text without the Class levels it hasn't reached yet ("{2}{G}: Level 2" and the lines after it).
+function Effects.unlockedText(obj, oracle)
+  oracle = tostring(oracle or "")
+  if not oracle:find(": Level 2", 1, true) then
+    return oracle
+  end
+  local have = Effects.classLevel(obj)
+  local out, level = {}, 1
+  for line in (oracle .. "\n"):gmatch("([^\n]*)\n") do
+    local lv = line:match(": Level (%d+)%s*$")
+    if lv then
+      level = tonumber(lv)
+    end
+    if level <= have or lv then
+      table.insert(out, line)
+    end
+  end
+  return table.concat(out, "\n")
+end
+
 -- Fell the Mighty: pick a creature; every creature with greater power is destroyed.
 function Effects.fellMighty(seat, it)
   ask(seat, it.name .. ": choose target creature", "Click CHOOSE on a creature: each creature with power GREATER than its power is destroyed.",
@@ -8707,6 +9002,11 @@ function Effects.condValue(cond, seat, name)
         local have = Effects.countPermanents(seat, thing, "mine")
         return have >= need
       end
+    end
+    -- Threshold: "there are seven or more cards in your graveyard".
+    local gw = cond:match("^there are (%w+) or more cards in your graveyard$")
+    if gw and num(gw) then
+      return Effects.graveyardSize(seat) >= num(gw)
     end
     local word = cond:match("^you control an? (%a+)$") or cond:match("^you control another (%a+)$")
     if word and word ~= "creature" and word ~= "permanent" then

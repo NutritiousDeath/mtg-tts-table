@@ -121,7 +121,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.20 (faster big boards: quicker area lookups, cards only redrawn when their labels change, fewer static scans)"
+SCRIPT_VERSION = "2.21 (Aesi deck audit: Class levels, Hydras, Peregrine Drake, Patient Naturalist, Spore Frog fog, Claim the Kingdom, threshold; faster big boards)"
 
 function onLoad(saved)
   GameLog.setup()

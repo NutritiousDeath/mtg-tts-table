@@ -1337,6 +1337,18 @@ local function startDamage()
     return
   end
   c.waitingStack = nil
+  -- Fog effects (Spore Frog): "Prevent all combat damage that would be dealt this turn."
+  local fog = GameState.data.fogTurn
+  if fog and fog == (turn().taken or 0) then
+    c.prevented = c.prevented or {}
+    for g in pairs(c.attackers or {}) do
+      c.prevented[g] = true
+    end
+    for g in pairs(c.blocks or {}) do
+      c.prevented[g] = true
+    end
+    broadcastToAll("All combat damage this turn is prevented (" .. tostring(GameState.data.fogBy or "fog") .. ").", INFO)
+  end
   openRound(anyFirstStrike() and "first" or "regular")
 end
 

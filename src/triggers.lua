@@ -928,7 +928,10 @@ function Triggers.unrecognized(obj)
     if (low:sub(1, 9) == "whenever " or low:sub(1, 5) == "when " or low:sub(1, 21) == "at the beginning of t"
         or low:sub(1, 21) == "at the beginning of y" or low:sub(1, 21) == "at the beginning of e")
         and not known[para]
-        and not low:find("becomes tapped, it deals %d+ damage to you") then   -- City of Brass: handled when a player taps it (actions.lua)
+        and not low:find("becomes tapped, it deals %d+ damage to you")   -- City of Brass: handled when a player taps it (actions.lua)
+        and not low:find("is tapped for mana, its controller adds an additional", 1, true)   -- Wild Growth: mana.lua adds it
+        and not low:find("when this class becomes level", 1, true)
+        and not low:find("when the fourth plan counter is put on", 1, true) then   -- Claim the Kingdom (effects.lua planCounter)   -- said when the Class levels up (effects.lua)
       table.insert(out, para)
     end
   end
@@ -2143,7 +2146,8 @@ Events.on("spellCast", function(d)
     fc.seen[tostring(d.controller) .. "|noncreature"] = fc.seen[tostring(d.controller) .. "|noncreature"] or (not ty.creature) or nil
     fc.seen[tostring(d.controller) .. "|nil"] = true
   end
-  pushAll(found, d.controller)
+  -- thatCard = the spell ("that spell's mana value": Dancing from Dark to Dawn).
+  pushAll(found, d.controller, d.card.getGUID())
 end)
 
 -- A ninjutsu ability was activated (combat.lua).

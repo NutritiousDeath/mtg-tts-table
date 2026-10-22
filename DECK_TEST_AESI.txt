@@ -1,0 +1,71 @@
+MTG COMMANDER TABLE (TTS) - DECK TEST: AESI, TYRANT OF GYRE STRAIT (LANDFALL)
+Version being tested: 2.21
+After loading, chat should say:  MTG > Scripts loaded: version 2.21 (...)
+
+HOW TO USE
+- One person can test alone: !solo on. Pull a card you want to test from the library (right-click library > Search).
+- Each line: DO this -> EXPECT that. Mark OK or WRONG. For WRONG, copy the chat lines into NOTES at the bottom.
+
+BEFORE STARTING
+[ ] 0a. Import the deck.  EXPECT: 100 cards, Aesi in the command zone, no MISS lines (newer sets: Marvel "msh"/"msc",
+        Edge of Eternities "eoe"/"eoc", Final Fantasy "fin"/"fic", Tarkir Dragonstorm "tdm", Secrets of Strixhaven "sos").
+[ ] 0b. Start the game, keep.
+
+PART A - EXTRA LANDS AND LANDFALL (the heart of the deck)
+[ ] A1. Aesi on the battlefield, play a land.  EXPECT: "land 1 of 2 this turn"; Aesi's landfall asks "you may draw a card".
+[ ] A2. Loot, Exuberant Explorer too.  EXPECT: "land 1 of 3".
+[ ] A3. Druid Class: play a land.  EXPECT: gain 1 life. Lands allowed does NOT go up yet.
+        Right-click > Activate {2}{G} (Level 2).  EXPECT: "Druid Class is now level 2", lands allowed +1.
+        Activate {4}{G} (Level 3).  EXPECT: level 3 + a message telling you to make the land a creature yourself.
+[ ] A4. Several landfall cards out (Greensleeves, Rampaging Baloths, Zendikar's Roil, Elfsworn Giant, Dancing from Dark to
+        Dawn, Primeval Bounty, Druid Class, Aesi), play ONE land.  EXPECT: every one triggers; the order panel opens;
+        all go on the stack; tokens: 3/3 Badger, 4/4 Beast, 2/2 Elemental, 1/1 Elf Warrior, 2/2 Bear.
+[ ] A5. Bristly Bill / Ride the Shoopuf / Claim the Kingdom landfall.  EXPECT: COUNTER button on creatures (yours only
+        for Shoopuf and Claim). Claim the Kingdom also gets a plan counter: "plan counter N of 4". On the 4th it is
+        sacrificed and chat tells you to put the indestructible counter on by hand.
+[ ] A6. Oran-Rief Hydra: play a Forest.  EXPECT: 2 counters ("the land is a Forest"). Play an Island: 1 counter.
+[ ] A7. Mossborn Hydra with 2 counters: play a land.  EXPECT: doubled to 4. With Doubling Season: 2 -> 6? (Doubling
+        Season doubles the counters being put on: chat explains the order; adjust by hand if needed.)
+[ ] A8. Territorial Scythecat landfall.  EXPECT: +1/+1 counter on itself.
+[ ] A9. Lush Oasis enters.  EXPECT: 1 damage to an opponent you pick. Thornwood Falls: gain 1 life. Mystic Sanctuary
+        (untapped, 3+ other Islands): offer to put an instant/sorcery from your graveyard on top.
+
+PART B - RAMP AND MANA
+[ ] B1. Peregrine Drake enters with tapped lands.  EXPECT: up to 5 of your tapped lands untap by themselves.
+[ ] B2. Arbor Elf: right-click > Activate {T}.  EXPECT: UNTAP button on Forests; click one: it untaps.
+[ ] B3. Wild Growth on a land: tap the land for mana.  EXPECT: an extra {G}. No "I can't watch for" warning.
+[ ] B4. Ilysian Caryatid: tap for mana with and without a power 4+ creature.  EXPECT: one mana, or two of one colour.
+[ ] B5. Wood Elves enters: search for a Forest (any Forest, incl. Breeding Pool) onto the battlefield untapped.
+        Dawntreader Elk: sacrifice, basic land tapped. Primal Druid dies: may search a basic tapped.
+[ ] B6. Patient Naturalist enters.  EXPECT: mills 3. A land among them goes to your hand (you pick if several).
+        No land: a Treasure.
+[ ] B7. Llanowar Scout: Activate {T} - put a land from your hand onto the battlefield.
+[ ] B8. Prishe's Wanderings / Roamer's Routine: basic land search. Sagu Wildling: gain 3 life on entering.
+
+PART C - SPELLS AND OTHER CARDS
+[ ] C1. Dancing from Dark to Dawn, cast a 5-mana creature.  EXPECT: COUNTER button: 5 +1/+1 counters on a creature you
+        control. Primeval Bounty: creature spell -> 3/3 Beast; noncreature spell -> 3 counters.
+[ ] C2. Kiora, the Rising Tide enters: draw 2, discard 2. Attack with 7+ cards in your graveyard: "you may create
+        Scion of the Deep" -> legendary 8/8 Octopus. With fewer than 7: nothing.
+[ ] C3. The Ten Rings: your end step with fewer than 10 cards in hand: draws up to 10.
+[ ] C4. Ravenhill Flock: each card you draw puts a +1/+1 counter on it.
+[ ] C5. Stuck in Summoner's Sanctum: attach to an opponent's creature.  EXPECT: it gets tapped. (Attach first.)
+[ ] C6. Freed from the Real on a creature: Activate {U} tap / {U} untap.  EXPECT: the enchanted creature taps / untaps.
+[ ] C7. Spore Frog: sacrifice before combat damage.  EXPECT: "all combat damage this turn will be prevented"; in the
+        damage step every attacker and blocker deals no damage.
+[ ] C8. Counterspell / Essence Scatter / Syncopate / Unsummon / Lost in Space / Bite Down / Heritage Reclamation /
+        Quick Study / Magic Damper: each does its thing when it resolves.
+[ ] C9. Wildheart Invoker {8}: +5/+5 and trample. Depth Charge Colossus {3}: untap it. Mind Stone: sac to draw.
+[ ] C10. Marauding Brinefang (Islandcycling {2}) and Striped Riverwinder (Cycling {U}): right-click in hand > Cycle.
+
+BY HAND (the table doesn't do these; just check nothing goes wrong)
+- Ward on Spider-Rex, Marauding Brinefang, Tolarian Terror: the opponent pays or their spell is countered.
+- Tolarian Terror's cost reduction: pay the reduced cost yourself.
+- Tromokratis: hexproof unless attacking/blocking; can't be blocked unless all defending creatures block it.
+- Deepchannel Mentor: your blue creatures can't be blocked (tell the defender).
+- Roil Elemental: gain control of the creature yourself (drag it over); give it back if Roil leaves.
+- Druid Class level 3: make the land a creature yourself.
+- Claim the Kingdom's indestructible counter.
+- Doubling Season with several counter effects at once: check the totals chat shows.
+
+NOTES

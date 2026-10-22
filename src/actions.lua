@@ -208,7 +208,12 @@ function Actions.landsAllowed(seat)
     if o.type == "Card" and not o.isDestroyed() then
       local loc = Zones.regionAt(o.getPosition())
       if loc.seat == seat and (loc.region == "battlefield" or loc.region == "lands") then
-        local ol = tostring(CardData.get(o).oracle or ""):lower()
+        local ol = tostring(CardData.get(o).oracle or "")
+        -- A Class's level-2 "play an additional land" only counts once it has reached that level.
+        if Effects and Effects.unlockedText then
+          ol = Effects.unlockedText(o, ol)
+        end
+        ol = ol:lower()
         local w = ol:match("you may play (%w+) additional lands? on each of your turns")
         if w then
           n = n + (({ an = 1, one = 1, two = 2, three = 3 })[w] or 1)
