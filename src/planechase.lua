@@ -73,15 +73,15 @@ local GRAVE_AT = { x = -8.5, z = GRAVE_MAT.z - MAT_OFF }
 -- (the west half) comes out of a stone dragon's mouth to the north, chute B (the east half) out of a second
 -- dragon to the south. A roll drops one die down each chute (the planar die and its twin), so both sides of
 -- the table see a die land; both are made to show the same face.
-local TOWER = { x = 9, z = 0 }
-local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=5"
-local TOWER_TOP = 19.6          -- where a die is dropped in (through the deck's hole), above the table
+local TOWER = { x = 8.6, z = 0 }
+local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=6"
+local TOWER_TOP = 18.6          -- where a die is dropped in (through the deck's hole), above the table
 local HEADS = {
-  A = { x = -1.3, dir = 1, dropZ = -1.6 },     -- offsets from TOWER; dir = which way the dragon faces (z)
-  B = { x = 1.3, dir = -1, dropZ = 1.6 },
+  A = { x = -1.65, dir = 1, dropZ = -2.1 },    -- offsets from TOWER; dir = which way the dragon faces (z)
+  B = { x = 1.65, dir = -1, dropZ = 2.1 },
 }
-local REST_ALONG = 11.0         -- how far out along its dragon's tongue a die rests
-local MOUTH_ALONG = 6.2         -- past this the die is in the dragon's open mouth
+local REST_ALONG = 11.7         -- how far out along its dragon's tongue a die rests
+local MOUTH_ALONG = 6.9         -- past this the die is in the dragon's open mouth
 local DIE_EDGE = 1.0            -- the planar dice are sized to this (they have to fit the dragons' throats)
 -- Effects: looping 0-4 idle and 5-9 rolling in a colour (0 = cyan, then White, Red, Green, Blue);
 -- trigger 0-4 the dragons breathe in that colour, 5 chaos (purple), 6 planeswalk (blue-white).
@@ -809,7 +809,7 @@ end
 local function onTongue(die, h)
   local p = die.getPosition()
   local a = along(p, h)
-  return math.abs(p.x - (TOWER.x + HEADS[h].x)) < 1.1 and a > 7.2 and a < 12.4 and p.y < TableSetup.SURFACE_TOP + 3.4
+  return math.abs(p.x - (TOWER.x + HEADS[h].x)) < 1.1 and a > 7.9 and a < 13.1 and p.y < TableSetup.SURFACE_TOP + 3.4
 end
 
 -- Drop a die in the top of chute h, spinning.
@@ -826,7 +826,7 @@ end
 -- Which chute's top a position is over (nil if neither).
 local function chuteAt(p)
   local dx, dz = p.x - TOWER.x, p.z - TOWER.z
-  if math.abs(dx) > 3.3 or math.abs(dz) > 3.3 or p.y < TableSetup.SURFACE_TOP + 14 then
+  if math.abs(dx) > 3.9 or math.abs(dz) > 3.9 or p.y < TableSetup.SURFACE_TOP + 13 then
     return nil
   end
   return dx < 0 and "A" or "B"
