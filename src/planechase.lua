@@ -74,7 +74,7 @@ local GRAVE_AT = { x = -8.5, z = GRAVE_MAT.z - MAT_OFF }
 -- the south. A roll drops one die down each spiral, so both sides of the table see a die land; both are made to
 -- show the same face.
 local TOWER = { x = 8.5, z = 0 }
-local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=8"
+local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=10"
 local TOWER_TOP = 19.8          -- where a die is dropped in (through the deck's hole), above the table
 local HEADS = {
   -- Offsets from TOWER: the dragon's x, which way it faces (z), and the hole its spiral is dropped in by.
@@ -952,10 +952,46 @@ local function showFace(die, r, cb)
   end, 0.4)
 end
 
+-- The rotation that shows face r on top (nil if the die can't say).
+local function faceRotation(die, r)
+  local rot
+  pcall(function()
+    for _, rv in ipairs(die.getRotationValues() or {}) do
+      if tonumber(rv.value) == r then
+        rot = rv.rotation
+      end
+    end
+  end)
+  return rot
+end
+
+-- Last resort: carry a die onto its dragon's tongue, showing face r.
+local function rescue(die, h, r, cb)
+  if die.isDestroyed() then
+    return cb()
+  end
+  local rot = faceRotation(die, r)
+  die.setLock(true)
+  die.setPositionSmooth(restSpot(h), false, false)
+  if rot then
+    die.setRotationSmooth({ rot.x, math.random(0, 359), rot.z }, false, false)
+  end
+  Wait.time(function()
+    if not die.isDestroyed() then
+      die.setLock(false)
+      if not rot then
+        pcall(function() die.setValue(r) end)
+      end
+    end
+    cb()
+  end, 1.0)
+end
+
 -- Follow one die down chute h until it rests on its dragon's tongue showing face r, then call done().
--- If it stops anywhere else it gets a nudge, and if that doesn't free it, it's dropped in again.
+-- If it stops anywhere else: a nudge (6 s), then it's dropped in again (10 s), and if it still hasn't made it
+-- (15 s) it's carried onto the tongue -- so the dice on show always match the result.
 local function follow(die, h, r, token, done)
-  local tries, finished = 0, false
+  local finished, rescuing = false, false
   local function finish()
     if not finished then
       finished = true
@@ -963,42 +999,47 @@ local function follow(die, h, r, token, done)
     end
   end
   Wait.condition(function()
-    if roll ~= token then
+    if roll ~= token or finished or rescuing then
       return
     end
     showFace(die, r, finish)
   end, function()
-    return die.isDestroyed() or roll ~= token
-      or (die.resting and not die.spawning and onTongue(die, h))
-  end, 26, finish)
-  local function check()
-    if finished or roll ~= token or die.isDestroyed() or onTongue(die, h) then
+    return die.isDestroyed() or roll ~= token or finished
+      or (not rescuing and die.resting and not die.spawning and onTongue(die, h))
+  end, 30, finish)
+  local function stuck()
+    return not (finished or rescuing or roll ~= token or die.isDestroyed() or onTongue(die, h))
+  end
+  Wait.time(function()
+    if not stuck() then
       return
     end
-    tries = tries + 1
-    if tries > 3 then
-      return
-    end
-    if tries % 2 == 1 then
-      -- A nudge: on along the spiral (round the column, the way it goes down) or, once out of the tower,
-      -- toward its dragon; a little up, with a spin.
+    local p = die.getPosition()
+    local dx, dz = p.x - TOWER.x, p.z - TOWER.z
+    local inside = dx * dx + dz * dz < 3.0 * 3.0 and p.y < TableSetup.SURFACE_TOP + 17
+    if inside then
+      -- A nudge on along the spiral (round the column, the way it goes down), a little up, with a spin.
       pcall(function()
-        local p = die.getPosition()
-        local dx, dz = p.x - TOWER.x, p.z - TOWER.z
-        local vx, vz = 0, 2.5 * HEADS[h].dir
-        if dx * dx + dz * dz < 3.0 * 3.0 then
-          local a = math.atan2 and math.atan2(dz, dx) or math.atan(dz, dx)
-          vx, vz = 2.5 * math.sin(a), -2.5 * math.cos(a)
-        end
-        die.setVelocity({ vx, 2.5, vz })
+        local a = math.atan2 and math.atan2(dz, dx) or math.atan(dz, dx)
+        die.setVelocity({ 2.5 * math.sin(a), 2.5, -2.5 * math.cos(a) })
         die.setAngularVelocity({ math.random(-8, 8), math.random(-8, 8), math.random(-8, 8) })
       end)
     else
       dropIn(die, h)
     end
-    Wait.time(check, 4)
-  end
-  Wait.time(check, 6)
+  end, 6)
+  Wait.time(function()
+    if stuck() then
+      dropIn(die, h)
+    end
+  end, 10)
+  Wait.time(function()
+    if stuck() then
+      say("a die didn't make it down the tower: it's put on the dragon's tongue.", INFO)
+      rescuing = true
+      rescue(die, h, r, finish)
+    end
+  end, 16)
 end
 
 -- A roll down the tower. The result is picked when the dice go in; one die goes down each chute, the

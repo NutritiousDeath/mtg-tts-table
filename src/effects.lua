@@ -4159,6 +4159,8 @@ local function render()
         UI.setAttribute("effChoice_" .. c .. "_" .. i, "active", ch and "true" or "false")
         if ch then
           UI.setValue("effChoiceTxt_" .. c .. "_" .. i, ch.label)
+          -- Wide enough for longer labels ("YES, IT'S TRUE").
+          UI.setAttribute("effChoice_" .. c .. "_" .. i, "preferredWidth", tostring(math.max(80, #tostring(ch.label) * 10 + 24)))
         end
       end
     end
@@ -7193,11 +7195,11 @@ function Effects.xml()
         :format(c, i, c, i, c, i))
     end
     table.insert(parts, ([[
-<Panel id="effAsk_%s" visibility="%s" active="false" rectAlignment="LowerLeft" offsetXY="20 240" width="600" height="236"
+<Panel id="effAsk_%s" visibility="%s" active="false" rectAlignment="LowerLeft" offsetXY="20 240" width="600" height="300"
        color="#0B0F17F5" outline="#5AF0FF" outlineSize="2 2" allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="14 14 12 12" spacing="8" childForceExpandHeight="false">
     <Text id="effTitle_%s" fontSize="17" fontStyle="Bold" color="#5AF0FF" alignment="MiddleLeft" preferredHeight="24">-</Text>
-    <Text id="effText_%s" fontSize="13" color="#E6F1FF" alignment="UpperLeft" preferredHeight="60">-</Text>
+    <Text id="effText_%s" fontSize="13" color="#E6F1FF" alignment="UpperLeft" preferredHeight="124">-</Text>
     <HorizontalLayout id="effNum_%s" active="false" spacing="8" preferredHeight="38" childForceExpandWidth="false" childAlignment="MiddleLeft">
       <InputField id="effNumIn_%s" characterValidation="Integer" onValueChanged="ui_effNumText" preferredWidth="120" fontSize="18" placeholder="X" />
       <Button onClick="ui_effNumOk(%s)" preferredWidth="96" color="#00B3A4" textColor="#06130B" fontStyle="Bold">OK</Button>
@@ -7635,8 +7637,8 @@ function Effects.resolve(it)
       if auto ~= nil then
         go(auto)
       else
-        ask(it.controller, it.name .. ": is this true?", "If " .. cond .. "?\nThen instead: " .. repl,
-          { { label = "YES", value = true }, { label = "NO", value = false } }, go)
+        ask(it.controller, it.name .. ": check this", Effects.checkText(cond, "instead, " .. repl, nil),
+          { { label = "YES, IT'S TRUE", value = true }, { label = "NO", value = false } }, go)
       end
       return
     end
@@ -7712,18 +7714,18 @@ function Effects.resolve(it)
           Effects.resolve(copy)
         end
       else
-        local title, text
+        local title, text, yesLabel
         if c.prev then
-          title, text = it.name .. ": did you?", "Did you do this: \"" .. c.prev .. "\"\nIf you did: " .. c.rest
+          title, yesLabel = it.name .. ": did you?", "YES, I DID"
+          text = Effects.checkText(c.prev, c.rest, c.otherwise, "Did you do this?")
         elseif c.cond == "you do" then
-          title, text = it.name .. ": did you?", "Did you do it? If you did: " .. c.rest
+          title, yesLabel = it.name .. ": did you?", "YES, I DID"
+          text = Effects.checkText(it.text or "it", c.rest, c.otherwise, "Did you do it?")
         else
-          title, text = it.name .. ": is this true?", "If " .. c.cond .. "?\nThen: " .. c.rest
+          title, yesLabel = it.name .. ": check this", "YES, IT'S TRUE"
+          text = Effects.checkText(c.cond, c.rest, c.otherwise)
         end
-        if c.otherwise then
-          text = text .. "\nOtherwise: " .. c.otherwise
-        end
-        ask(seat, title, text, { { label = "YES", value = true }, { label = "NO", value = false } }, function(yes)
+        ask(seat, title, text, { { label = yesLabel, value = true }, { label = "NO", value = false } }, function(yes)
           branch(c, yes)
         end)
       end
@@ -7792,6 +7794,18 @@ function Effects.resolve(it)
     withTarget()
   end
   askConds()
+end
+
+-- The text of a yes/no check ("intervening if" conditions and "if you do"): the question on its own line, then
+-- exactly what happens for each answer, so nobody has to work out the card's grammar.
+function Effects.checkText(cond, yes, no, question)
+  local function cap(t)
+    t = tostring(t or ""):gsub("^%s+", ""):gsub("[%s%.]+$", "")
+    return t:sub(1, 1):upper() .. t:sub(2)
+  end
+  return (question or "Is this true right now?") .. "\n\n      " .. cap(cond) .. "\n\n"
+    .. "YES:  " .. cap(yes) .. ".\n"
+    .. "NO:  " .. (no and (cap(no) .. ".") or "nothing happens.")
 end
 
 -- A spell (instant / sorcery) resolved: carry out its rules text too.
