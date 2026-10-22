@@ -74,7 +74,7 @@ local GRAVE_AT = { x = -8.5, z = GRAVE_MAT.z - MAT_OFF }
 -- the south. A roll drops one die down each spiral, so both sides of the table see a die land; both are made to
 -- show the same face.
 local TOWER = { x = 8.5, z = 0 }
-local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=11"
+local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=12"
 local TOWER_TOP = 19.8          -- where a die is dropped in (through the deck's hole), above the table
 local HEADS = {
   -- Offsets from TOWER: the dragon's x, which way it faces (z), and the hole its spiral is dropped in by.
@@ -826,7 +826,7 @@ end
 -- Which chute's top a position is over (nil if neither).
 local function chuteAt(p)
   local dx, dz = p.x - TOWER.x, p.z - TOWER.z
-  if dx * dx + dz * dz > 4.2 * 4.2 or p.y < TableSetup.SURFACE_TOP + 13 then
+  if dx * dx + dz * dz > 4.6 * 4.6 or p.y < TableSetup.SURFACE_TOP + 12 then
     return nil
   end
   return dx < 0 and "A" or "B"
@@ -986,15 +986,72 @@ local function rescue(die, h, r, cb)
   end, 1.0)
 end
 
--- How long a die spends inside the tower: one run of the tower's lights down its bands (MTGDiceTowerBuilder.cs
--- ChaseSecs).
-local INSIDE_SECS = 1.7
+-- How long a die takes to ride down inside the tower (about one run of the tower's lights down its bands).
+local INSIDE_SECS = 2.0
 local SPIT_ALONG = 8.6          -- where a die is spat out from, inside the dragon's open mouth
 
--- One die's trip: it drops in through the hole at the top (real physics), is held out of sight inside the tower
--- while the lights run down it, then is spat out of its dragon's mouth onto the tongue (real physics again: a
--- short toss and tumble), and finally shows face r. spat() is called as it comes out; done() once it's settled.
--- (The inside is never simulated: TTS's dice settle too readily to slide down a ramp reliably.)
+-- The way down inside the tower, as points (x, y, z) from the middle of the tower on the table, for side A (side B
+-- is the same turned round). It follows the spiral slide in MTGDiceTowerBuilder.cs: round once from the hole at the
+-- top (angle 520 degrees) down to the west side, out along the exit ramp and down the dragon's throat.
+local PATH_A
+do
+  local Ey, Pitch, ride, lift = 7.63, 1.4, 2.3, 0.55
+  PATH_A = {}
+  local a0, a1, n = math.rad(520), math.pi, 40
+  for i = 0, n do
+    local a = a0 + (a1 - a0) * i / n
+    table.insert(PATH_A, { ride * math.cos(a), Ey + Pitch * (a - math.pi) + lift, ride * math.sin(a) })
+  end
+  table.insert(PATH_A, { -1.85, 5.28 + lift, 2.8 })
+  table.insert(PATH_A, { -1.85, 1.62 + lift, 7.0 })
+  table.insert(PATH_A, { -1.85, 2.4, SPIT_ALONG })
+end
+
+-- Ride a die down the path for side h over `secs`, tumbling as it goes, then call cb. (It's locked while it rides:
+-- the inside is never simulated, because TTS's dice settle too readily to slide down a ramp reliably.)
+local function ride(die, h, secs, cb)
+  local flip = HEADS[h].dir    -- side B is side A turned round
+  local pts, lens, total = {}, { 0 }, 0
+  for i, p in ipairs(PATH_A) do
+    pts[i] = { TOWER.x + p[1] * flip, TableSetup.SURFACE_TOP + p[2], TOWER.z + p[3] * flip }
+    if i > 1 then
+      local q = pts[i - 1]
+      total = total + math.sqrt((pts[i][1] - q[1]) ^ 2 + (pts[i][2] - q[2]) ^ 2 + (pts[i][3] - q[3]) ^ 2)
+      lens[i] = total
+    end
+  end
+  die.setLock(true)
+  local rot = die.getRotation()
+  local spin = { math.random(14, 22), math.random(-6, 6), math.random(10, 18) }
+  local frames = math.max(1, math.floor(secs * 60))
+  local f = 0
+  local function step()
+    if die.isDestroyed() then
+      return cb()
+    end
+    f = f + 1
+    local d = total * math.min(1, f / frames)
+    local k = 2
+    while k < #pts and lens[k] < d do
+      k = k + 1
+    end
+    local a, b = pts[k - 1], pts[k]
+    local seg = lens[k] - lens[k - 1]
+    local t = seg > 0 and (d - lens[k - 1]) / seg or 1
+    die.setPosition({ a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t })
+    rot = { rot.x + spin[1], rot.y + spin[2], rot.z + spin[3] }
+    die.setRotation(rot)
+    if f >= frames then
+      return cb()
+    end
+    Wait.frames(step, 1)
+  end
+  step()
+end
+
+-- One die's trip: it drops in at the top (real physics), rides down the spiral inside, and is spat out of its
+-- dragon's mouth onto the tongue (real physics again: a short toss and tumble), then shows face r.
+-- spat() is called as it comes out; done() once it's settled.
 local function journey(die, h, r, token, spat, done)
   local finished = false
   local function finish()
@@ -1005,19 +1062,14 @@ local function journey(die, h, r, token, spat, done)
   end
   local hd = HEADS[h]
   dropIn(die, h)
-  Wait.condition(function()
+  local function inside()
     if roll ~= token or die.isDestroyed() then
       return finish()
     end
-    -- Out of sight inside the column until it's time to come out.
-    die.setLock(true)
-    die.setPosition({ TOWER.x, TableSetup.SURFACE_TOP + 10, TOWER.z })
-    Wait.time(function()
+    ride(die, h, INSIDE_SECS, function()
       if roll ~= token or die.isDestroyed() then
         return finish()
       end
-      die.setPosition({ TOWER.x + hd.x, TableSetup.SURFACE_TOP + 2.4, TOWER.z + hd.dir * SPIT_ALONG })
-      die.setRotation({ math.random(0, 359), math.random(0, 359), math.random(0, 359) })
       die.setLock(false)
       spat()
       Wait.frames(function()
@@ -1046,20 +1098,12 @@ local function journey(die, h, r, token, spat, done)
           end)
         end, 0.4)
       end, 1)
-    end, INSIDE_SECS)
-  end, function()
-    return die.isDestroyed() or roll ~= token or die.getPosition().y < TableSetup.SURFACE_TOP + 16.8
-  end, 1.5, function()
-    -- Didn't fall in (blocked on the way?): carry on as if it had.
-    if not finished and not die.isDestroyed() then
-      die.setLock(true)
-      die.setPosition({ TOWER.x, TableSetup.SURFACE_TOP + 10, TOWER.z })
-      Wait.time(function()
-        die.setLock(false)
-        rescue(die, h, r, finish)
-      end, INSIDE_SECS)
-    end
-  end)
+    end)
+  end
+  -- It has dropped in once it's down past the top of the battlements (or after a moment, whatever happens).
+  Wait.condition(inside, function()
+    return die.isDestroyed() or roll ~= token or die.getPosition().y < TableSetup.SURFACE_TOP + 18.4
+  end, 1.2, inside)
 end
 
 -- A roll down the tower. The result is picked when the dice go in; one die goes in at each side's hole, the
