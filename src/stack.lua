@@ -216,9 +216,33 @@ end
 -- An ability (from a card, or a trigger found by triggers.lua) goes on the
 -- stack as a card-sized item showing the source card's art.
 -- text = its rules text; opts.trigger = true labels it TRIGGER.
+-- Break text into lines of at most `width` characters (on spaces).
+local function wrap(text, width)
+  local out, line = {}, ""
+  for word in tostring(text):gmatch("%S+") do
+    if line == "" then
+      line = word
+    elseif #line + 1 + #word <= width then
+      line = line .. " " .. word
+    else
+      table.insert(out, line)
+      line = word
+    end
+  end
+  if line ~= "" then
+    table.insert(out, line)
+  end
+  return table.concat(out, "\n")
+end
+
 function Stack.pushAbility(controller, sourceName, text, image, opts)
   opts = opts or {}
   local label = opts.copyOf and "COPY" or (opts.trigger and "TRIGGER" or "ABILITY")
+  if opts.planar == "chaos" then
+    label = "CHAOS"
+  elseif opts.planar == "walk" then
+    label = "PLANESWALK"
+  end
   local pos = { MAT.x, TableSetup.SURFACE_TOP + 1, MAT.z }
   local obj = spawnObject({
     type = "Custom_Token",
@@ -226,7 +250,8 @@ function Stack.pushAbility(controller, sourceName, text, image, opts)
     rotation = { 0, MAT_YAW, 0 },
     sound = false,
     callback_function = function(o)
-      o.setName(sourceName .. (opts.copyOf and " (copy)" or (opts.trigger and " (trigger)" or " (ability)")))
+      o.setName(sourceName .. ((opts.planar == "chaos" and " (chaos)") or (opts.copyOf and " (copy)")
+        or (opts.trigger and " (trigger)" or " (ability)")))
       o.setDescription(text or "")
       o.addTag("StackAbility")
       Wait.condition(function()
@@ -239,7 +264,13 @@ function Stack.pushAbility(controller, sourceName, text, image, opts)
         Trackers.tileButton(o, { label = label, click_function = "trk_noop",
           tooltip = sourceName .. (opts.grantedBy and (" (ability given by " .. tostring(opts.grantedBy) .. ")") or "")
             .. "\n" .. tostring(text or ""), width = 900, height = 160, font_size = 120,
-          color = { 0.04, 0.06, 0.1, 0.9 }, font_color = { 0.35, 0.95, 1 } }, 0, -1.3)
+          color = { 0.04, 0.06, 0.1, 0.9 }, font_color = opts.planar == "chaos" and { 0.8, 0.5, 1 } or { 0.35, 0.95, 1 } }, 0, -1.3)
+        -- The ability itself, written on the tile (the source's name on top), so it can be read without hovering.
+        local body = tostring(text or "")
+        local font = (#body > 200 and 34) or (#body > 120 and 40) or 48
+        local shown = wrap(sourceName, math.floor(17 * 48 / font)) .. "\n\n" .. wrap(body, math.floor(19 * 48 / font))
+        Trackers.tileButton(o, { label = shown, click_function = "trk_noop", width = 0, height = 0,
+          font_size = font, color = { 0, 0, 0, 0 }, font_color = { 0.85, 0.92, 1 } }, 0, 0.3)
         Stack.layout()
       end, function() return o.isDestroyed() or not o.loading_custom end, 10)
     end,

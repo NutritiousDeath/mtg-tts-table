@@ -122,7 +122,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.24 (stack flames come back after !reset; Carpet of Flowers automated; fresh fire bundles)"
+SCRIPT_VERSION = "2.26 (Planechase: dice tower, planar library and grave mats with reshuffle; farewell under the flipped table)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -263,6 +263,9 @@ function onObjectDrop(color, obj)
   Zones.onDrop(color, obj)
   Equip.onDrop(color, obj)
   ManaChips.onDrop(obj)
+  if Planechase and Planechase.onDrop then
+    Planechase.onDrop(color, obj)
+  end
 end
 
 function onObjectEnterZone(zone, obj)

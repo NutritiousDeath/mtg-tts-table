@@ -160,6 +160,46 @@ local runChaos   -- defined below
 -- Seconds everything lies scattered on the cathedral floor before it all glides home.
 local LAND = 8
 
+-- A parting shot painted on the underside of the table, a different one each flip: you see it as the
+-- table rears up and tumbles.
+local FAREWELLS = {
+  "BYE 2 U 2", "SEE YA", "SMELL YA LATER", "GG NO RE", "PEACE OUT", "LATER, NERDS", "HASTA LA VISTA",
+  "TABLE HAS LEFT THE CHAT", "IT'S NOT ME, IT'S YOU", "NO TAKE-BACKS", "SKILL ISSUE", "GO TOUCH GRASS",
+  "CTRL + Z?", "WELP.", "YEET", "BOARD WIPE!", "MULLIGAN TO ZERO", "RAGE QUIT SPEEDRUN", "THANKS FOR PLAYING",
+  "SHUFFLE THAT", "BYE FELICIA", "TOODLES", "ADIOS, AMIGOS", "I DIDN'T LIKE THAT GAME ANYWAY",
+}
+local lastFarewell
+
+-- Paint a farewell on the bottom of the play surface. Returns how to remove it.
+local function paintFarewell(surf)
+  local n = #FAREWELLS
+  local i = math.random(n)
+  if FAREWELLS[i] == lastFarewell and n > 1 then
+    i = i % n + 1
+  end
+  lastFarewell = FAREWELLS[i]
+  local before = #(surf.getButtons() or {})
+  local sc = surf.getScale()
+  -- Buttons are drawn in the block's own units (scaled by its size): undo that, then make the text huge.
+  local k = 4
+  local okb = pcall(function()
+    surf.createButton({
+      click_function = "flip_noop", function_owner = Global, label = lastFarewell,
+      position = { 0, -0.52, 0 }, rotation = { 180, 0, 0 },
+      scale = { k / sc.x, 1, k / sc.z }, width = 0, height = 0,
+      font_size = math.floor(math.min(900, 12000 / #lastFarewell)),
+      font_color = { 1, 0.33, 0.45, 100 }, color = { 0, 0, 0, 0 },
+    })
+  end)
+  return function()
+    if okb and surf and not surf.isDestroyed() then
+      pcall(function() surf.removeButton(before) end)
+    end
+  end
+end
+
+function flip_noop() end
+
 function Flip.chaos(color)
   if Flip.chaosOn then
     return
@@ -190,7 +230,7 @@ runChaos = function(color)
   for _, o in ipairs(getObjects()) do
     local ok, take = pcall(function()
       if not FLIES[o.type] or skip[o.getGUID()] or o.held_by_color ~= nil or inHand[o.getGUID()]
-          or o.hasTag("TableFloor") or o.hasTag("TableHearth") or o.hasTag("HearthFire") or o.hasTag("FireSfx") or o.hasTag("StackFire") or o.hasTag("TableRoom") or o.hasTag("TableGlass") then
+          or o.hasTag("TableFloor") or o.hasTag("TableHearth") or o.hasTag("HearthFire") or o.hasTag("FireSfx") or o.hasTag("StackFire") or o.hasTag("DiceTower") or o.hasTag("TableRoom") or o.hasTag("TableGlass") then
         return false
       end
       if o.type == "Card" and o.is_face_down then
@@ -209,6 +249,12 @@ runChaos = function(color)
     end
   end
   Flip.chaosOn = true
+  local unpaint
+  for _, e in ipairs(pieces) do
+    if e.obj.hasTag("PlaySurface") then
+      unpaint = paintFarewell(e.obj)
+    end
+  end
   print("MTG > Table flip: " .. #list .. " piece" .. (#list == 1 and "" or "s") .. " go flying.")
   -- Everything is launched up and away from the flipper, spinning: the pieces first, and a moment
   -- later the stone table itself rears up and tumbles. The mat pictures vanish while it's up.
@@ -262,6 +308,9 @@ runChaos = function(color)
       end)
     end
     Wait.time(function()
+      if unpaint then
+        unpaint()
+      end
       pcall(Flip.fixTable)
       pcall(function() Zones.drawIcons() end)
       for _, e in ipairs(list) do

@@ -252,6 +252,10 @@ end
 local WAVE = { woosh = 0.9, roar = 1.4 }
 
 function Fires.set(color, mode)
+  -- The Planechase dice tower's lines follow the same colour.
+  if Planechase and Planechase.towerColor then
+    pcall(Planechase.towerColor, color)
+  end
   local idx = INDEX[color] or 0
   local shared = shareColors(color)
   GameState.data.fireColor = color

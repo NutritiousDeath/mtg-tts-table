@@ -8,14 +8,20 @@
              planar die out beside the chest
     PACK UP  put the planar deck, the plane and the die away
 
-  Roll the planar die by hand (pick it up and drop it, or right-click it >
-  Roll). The table watches it: the first roll each turn is free, every extra
+  UNPACK also lays out the PLANAR LIBRARY and PLANAR GRAVE mats west of the
+  stack mat (the plane sits between them) and the dice tower east of it. A
+  plane you planeswalk away from goes face up on the grave; when the library
+  runs out, the grave is shuffled into a new library.
+
+  Roll the planar die down the tower (drop it in the top, or right-click it >
+  Roll, or !planechase roll): its lines light up in the roller's colour as it
+  falls, and the result counts when it lands in the tray. The table watches it: the first roll each turn is free, every extra
   roll costs one more mana than the last; a planeswalk or chaos result is
   carried out by itself. Right-click the plane card > Planeswalk for effects
   that say "planeswalk".
 
-  The table does the rest: the old plane goes to the bottom of the planar
-  deck and the next card turns face up; "When you planeswalk to ..." and
+  The table does the rest: the old plane goes to the planar grave and the
+  next card turns face up; "When you planeswalk to ..." and
   "Whenever chaos ensues ..." abilities go on the stack; a Phenomenon
   triggers and then you planeswalk away from it by itself; Chaotic Aether
   turns blank rolls into chaos until a player planeswalks away from a plane.
@@ -53,10 +59,23 @@ local function chestSpot()
   end
   return CHEST
 end
-local DECK_AT = { x = -8.5, z = 3.8 }              -- west of the stack mat
-local PLANE_AT = { x = -8.5, z = -3.8 }
-local LAND = { x = 8.5, z = 3.8 }                    -- the planar die's spot, east of the stack mat (empty until UNPACK)
-local SPOT_SIZE = 4.4
+-- West of the stack mat, north to south: the planar library and the planar grave on their mats, the plane
+-- between them. A mat's card area is MAT_OFF south of the mat's middle (tools/make_planar_mats.py).
+local MAT_OFF = 0.46
+local MAT_W = 5.4
+local LIB_MAT = { x = -8.5, z = 5.3 }
+local GRAVE_MAT = { x = -8.5, z = -4.6 }
+local DECK_AT = { x = -8.5, z = LIB_MAT.z - MAT_OFF }
+local PLANE_AT = { x = -8.5, z = 0.1 }
+local GRAVE_AT = { x = -8.5, z = GRAVE_MAT.z - MAT_OFF }
+-- East of the stack mat: the dice tower (assets/planechase/mtg_dicetower.unity3d, built by
+-- tools/unity/MTGDiceTowerBuilder.cs). TOWER is its origin, where the tower meets its tray: the tower stands
+-- north of it (z 0 to 5), the tray runs south (z 0 to -5). The die rests in the tray (LAND).
+local TOWER = { x = 9, z = 0 }
+local LAND = { x = 9, z = -2.6 }
+local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=1"
+local TOWER_IDX = { White = 1, Red = 2, Green = 3, Blue = 4 }   -- looping / roll trigger effect per colour (0 = cyan)
+local TOWER_CHAOS, TOWER_WALK = 5, 6
 local CARD_SCALE_UPRIGHT, CARD_SCALE_SIDEWAYS = 1.4, 1.6
 local YAW_UPRIGHT, YAW_SIDEWAYS = 180, 270   -- upright landscape pictures / sideways Scryfall ones
 local ID_BASE = 31000
@@ -145,6 +164,10 @@ local function findPlane()
   return o
 end
 
+local function findGrave()
+  return nearest(GRAVE_AT, "pile")
+end
+
 local function entryOf(obj)
   return obj and byName[obj.getName()] or nil
 end
@@ -187,16 +210,16 @@ local function asDeckData(obj)
     CustomDeck = d.CustomDeck, ContainedObjects = { d }, Tags = { "PlanarCard" } }
 end
 
-local function finishDeck(o)
+local function finishDeck(o, name)
   if o and not o.isDestroyed() then
-    o.setName("Planar Deck")
+    o.setName(name or "Planar Deck")
     o.setScale({ cardScale(), 1, cardScale() })
     o.addTag("PlanarCard")
   end
 end
 
 -- Put a card on the bottom of the planar deck (one rebuild).
-local function putBottom(deckObj, card, cb)
+local function putBottom(deckObj, card, cb, name)
   local d = asDeckData(deckObj)
   local cd = card.getData()
   table.insert(d.ContainedObjects, cd)
@@ -209,7 +232,7 @@ local function putBottom(deckObj, card, cb)
   deckObj.destruct()
   spawnObjectData({ data = d, position = pos, rotation = rot,
     callback_function = function(o)
-      finishDeck(o)
+      finishDeck(o, name)
       if cb then cb(o) end
     end })
 end
@@ -335,7 +358,12 @@ end
 -- Actions
 ---------------------------------------------------------------------------
 
+local removeExtras, ensureExtras   -- the mats and the dice tower (below)
+
 local function clearTable()
+  if removeExtras then
+    removeExtras()
+  end
   for _, o in ipairs(getObjectsWithTag("PlanarCard")) do
     if not o.isDestroyed() then
       o.destruct()
@@ -352,7 +380,7 @@ function Planechase.build(color)
   if busy then
     return
   end
-  if findDeck() or findPlane() then
+  if findDeck() or findPlane() or findGrave() then
     broadcastToColor("The planar deck is already out. Click PACK UP first to put it away.", color, WARN)
     return
   end
@@ -409,6 +437,7 @@ function Planechase.build(color)
   end
   busy = true
   Wait.time(function() busy = false end, 20)
+  ensureExtras()
   say("shuffling " .. #list .. " planes and Phenomena into the planar deck...")
   spawnObjectData({ data = deck, position = spotOf(DECK_AT), rotation = { 0, yaw(), 180 },
     callback_function = function(o)
@@ -424,12 +453,43 @@ function Planechase.build(color)
     end })
 end
 
+-- The plane being left goes face up onto the planar grave (on top); the next card comes off the planar
+-- library. When the library is empty, the grave is shuffled into a new library first.
+local function toGrave(card, cb)
+  pcall(function() card.clearContextMenu() end)
+  local grave = findGrave()
+  if grave then
+    -- A face-up pile shows its last card, so the newest plane goes at the end.
+    putBottom(grave, card, cb, "Planar Grave")
+    return
+  end
+  card.setPosition(spotOf(GRAVE_AT))
+  card.setRotation({ 0, yaw(), 0 })
+  Wait.time(function() if cb then cb(card) end end, 0.3)
+end
+
+local function reshuffle(cb)
+  local grave = findGrave()
+  if grave == nil then
+    cb(nil)
+    return
+  end
+  say("the planar library is empty: the planar grave is shuffled into a new planar library.", CYAN)
+  grave.setPosition(spotOf(DECK_AT))
+  grave.setRotation({ 0, yaw(), 180 })
+  if grave.type == "Deck" then
+    pcall(function() grave.shuffle() end)
+    finishDeck(grave, "Planar Deck")
+  end
+  Wait.time(function() cb(grave) end, 0.6)
+end
+
 function Planechase.planeswalk(color, quiet)
   if busy and not quiet then
     return
   end
   local deck, plane = findDeck(), findPlane()
-  if deck == nil and plane == nil then
+  if deck == nil and plane == nil and findGrave() == nil then
     broadcastToColor("No planar deck yet: click UNPACK on the Planechase chest.", color, WARN)
     return
   end
@@ -437,10 +497,23 @@ function Planechase.planeswalk(color, quiet)
   Wait.time(function() busy = false end, 20)
   local st = data()
   local function reveal(d)
+    if d == nil then
+      busy = false
+      broadcastToColor("The planar deck is empty.", color, WARN)
+      return
+    end
     turnTop(d, function(card)
       busy = false
       arrived(card, color, false)
     end)
+  end
+  local function goNext()
+    local d = findDeck()
+    if d then
+      reveal(d)
+    else
+      reshuffle(reveal)
+    end
   end
   if plane then
     local e = entryOf(plane)
@@ -448,16 +521,11 @@ function Planechase.planeswalk(color, quiet)
       st.aether = false
       say("Chaotic Aether ends.", INFO)
     end
-    if deck == nil then
-      busy = false
-      broadcastToColor("The planar deck is empty.", color, WARN)
-      return
-    end
-    putBottom(deck, plane, function(newDeck)
-      Wait.time(function() reveal(newDeck) end, 0.6)
+    toGrave(plane, function()
+      Wait.time(goNext, 0.5)
     end)
   else
-    reveal(deck)
+    goNext()
   end
 end
 
@@ -506,11 +574,159 @@ putDie = function(cb)
   })
 end
 
+---------------------------------------------------------------------------
+-- The mats and the dice tower (out while the planar deck is out)
+---------------------------------------------------------------------------
+
+local function sizeTile(o, width)
+  Wait.condition(function()
+    local b = o.getBoundsNormalized()
+    local w = b and b.size and b.size.x or 0
+    if w > 0.05 then
+      local k = width / (w / o.getScale().x)
+      o.setScale({ k, 1, k })
+    end
+    o.setLock(true)
+  end, function() return o.isDestroyed() or not o.loading_custom end, 10, function() o.setLock(true) end)
+end
+
+local function ensureMat(name, file, at)
+  local img = BASE .. file .. VERSION
+  for _, o in ipairs(getObjectsWithTag("PlanarMat")) do
+    local co = o.getCustomObject()
+    if not o.isDestroyed() and o.getName() == name then
+      if co and co.image == img then
+        o.setLock(true)
+        o.setPosition({ at.x, TableSetup.SURFACE_TOP + 0.05, at.z })
+        return
+      end
+      o.destruct()
+    end
+  end
+  local obj = spawnObject({
+    type = "Custom_Token",
+    position = { at.x, TableSetup.SURFACE_TOP + 0.05, at.z },
+    rotation = { 0, 180, 0 },
+    sound = false,
+    callback_function = function(o)
+      o.setName(name)
+      o.addTag("PlanarMat")
+      sizeTile(o, MAT_W)
+    end,
+  })
+  obj.setCustomObject({ image = img, thickness = 0.05, merge_distance = 0, stackable = false })
+end
+
+local function towerObj()
+  for _, o in ipairs(getObjectsWithTag("DiceTower")) do
+    if not o.isDestroyed() then
+      return o
+    end
+  end
+  return nil
+end
+
+local function towerReady(o)
+  return o ~= nil and not o.isDestroyed() and not o.loading_custom and o.AssetBundle ~= nil
+end
+
+-- The tower's lines in a seat's colour (cyan before the game). Fires.set calls this on every turn change.
+function Planechase.towerColor(color)
+  local o = towerObj()
+  if towerReady(o) then
+    pcall(function() o.AssetBundle.playLoopingEffect(TOWER_IDX[color] or 0) end)
+  end
+end
+
+local function towerFlash(idx)
+  local o = towerObj()
+  if towerReady(o) then
+    pcall(function() o.AssetBundle.playTriggerEffect(idx) end)
+  end
+end
+
+local function ensureTower()
+  local pos = { TOWER.x, TableSetup.SURFACE_TOP + 0.01, TOWER.z }
+  for _, o in ipairs(getObjectsWithTag("DiceTower")) do
+    local co = o.getCustomObject()
+    if not o.isDestroyed() and co and co.assetbundle == TOWER_URL then
+      o.setLock(true)
+      o.setPosition(pos)
+      o.setRotation({ 0, 0, 0 })
+      return
+    end
+    o.destruct()
+  end
+  local obj = spawnObject({
+    type = "Custom_AssetBundle",
+    position = pos,
+    rotation = { 0, 0, 0 },
+    sound = false,
+    callback_function = function(o)
+      o.setLock(true)
+      o.setPosition(pos)
+      o.setName("Dice Tower")
+      o.setDescription("Drop the planar die in the top (or use the die's roll): it tumbles down the tower into the tray.")
+      o.addTag("DiceTower")
+      Wait.condition(function()
+        Planechase.towerColor(Fires and Fires.current and Fires.current() or nil)
+      end, function() return towerReady(o) or o.isDestroyed() end, 20)
+    end,
+  })
+  obj.setCustomObject({ assetbundle = TOWER_URL, type = 0 })
+end
+
+ensureExtras = function()
+  ensureMat("Planar Library", "planar_library.png", LIB_MAT)
+  ensureMat("Planar Grave", "planar_grave.png", GRAVE_MAT)
+  ensureTower()
+end
+
+removeExtras = function()
+  for _, tag in ipairs({ "PlanarMat", "DiceTower" }) do
+    for _, o in ipairs(getObjectsWithTag(tag)) do
+      if not o.isDestroyed() then
+        o.destruct()
+      end
+    end
+  end
+end
+
+-- Is the die sitting in the tower's tray?
+local function inTray(die)
+  local p = die.getPosition()
+  return math.abs(p.x - TOWER.x) < 2.6 and p.z < TOWER.z + 0.4 and p.z > TOWER.z - 5.3
+    and p.y < TableSetup.SURFACE_TOP + 2.5
+end
+
+-- Drop the die in the top of the tower, spinning.
+local function dropIn(die)
+  pcall(function() die.setLock(false) end)
+  die.setPosition({ TOWER.x + (math.random() - 0.5) * 1.2, TableSetup.SURFACE_TOP + 12.8,
+    TOWER.z + 2.5 + (math.random() - 0.5) * 1.2 })
+  die.setRotation({ math.random(0, 359), math.random(0, 359), math.random(0, 359) })
+  die.setVelocity({ 0, -2, 0 })
+  die.setAngularVelocity({ math.random(-12, 12), math.random(-12, 12), math.random(-12, 12) })
+end
+
+local towerToken
+local towerRoll   -- defined after onRolled
+
 local rollBy, rolling = nil, false
 
 -- The planar die was rolled (by hand or by !planechase roll).
-function Planechase.onRolled(die, color)
+-- viaTower: the die was dropped down the tower; its result counts once it lands in the tray.
+function Planechase.onRolled(die, color, viaTower)
   if die == nil or die.isDestroyed() or not die.hasTag("PlanarDie") or rolling then
+    return
+  end
+  -- Rolled in place (right-click > Roll, or shaken) with the tower out: send it down the tower instead.
+  if not viaTower and towerObj() then
+    if die.held_by_color then
+      return   -- shaken in hand: it counts when it's dropped in the top of the tower
+    end
+    towerRoll(die, rollBy or color or "White", false)
+    rollBy = nil
     return
   end
   color = rollBy or color or "White"
@@ -545,16 +761,22 @@ function Planechase.onRolled(die, color)
   local cost = st.rolls.n
   st.rolls.n = st.rolls.n + 1
   rolling = true
-  Wait.time(function() rolling = false end, 15)
+  Wait.time(function() rolling = false end, viaTower and 25 or 15)
   say(color .. " rolls the planar die" .. (cost == 0 and " (first roll this turn: free)." or (": pay " .. cost .. " mana for this roll.")), CYAN)
   Wait.condition(function()
     rolling = false
     if die.isDestroyed() then
       return
     end
+    towerToken = nil
     local v = die.getValue()
     say(color .. " rolled: " .. dieValueText(v, st.aether), v == 1 and GOOD or (v == 6 and CYAN or INFO))
     local chaos = v == 6 or (st.aether and v ~= 1)
+    if v == 1 then
+      towerFlash(TOWER_WALK)
+    elseif chaos then
+      towerFlash(TOWER_CHAOS)
+    end
     if v == 1 then
       -- The planeswalker symbol: "Planeswalk" goes on the stack (the ring round the stack mat burns blue-white);
       -- when everyone passes it resolves and the next plane turns face up (stack.lua).
@@ -567,9 +789,55 @@ function Planechase.onRolled(die, color)
         say(plane.getName() .. " has no chaos ability.", INFO)
       end
     end
-  end, function() return die.isDestroyed() or (die.resting and not die.spawning) end, 10, function()
+  end, function()
+    return die.isDestroyed() or (die.resting and not die.spawning and (not viaTower or inTray(die)))
+  end, viaTower and 22 or 10, function()
     rolling = false
+    towerToken = nil
   end)
+end
+
+-- A roll down the tower: the lines light up in the roller's colour as the die falls, and the result counts
+-- when the die lands in the tray. If it gets stuck on a ramp, it's dropped in again (twice at most).
+towerRoll = function(die, color, byHand)
+  if rolling then
+    return
+  end
+  local idx = TOWER_IDX[color] or 0
+  towerFlash(idx)
+  if not byHand then
+    dropIn(die)
+  end
+  local token = {}
+  towerToken = token
+  Wait.time(function() Planechase.onRolled(die, color, true) end, 0.4)
+  local tries = 0
+  local function check()
+    if towerToken ~= token or die.isDestroyed() or inTray(die) then
+      return
+    end
+    tries = tries + 1
+    if tries > 2 then
+      return
+    end
+    say("the die got stuck in the tower: dropping it in again.", INFO)
+    towerFlash(idx)
+    dropIn(die)
+    Wait.time(check, 6)
+  end
+  Wait.time(check, 6)
+end
+
+-- A player let go of the planar die over the top of the tower: that's a roll.
+function Planechase.onDrop(color, obj)
+  if obj == nil or not obj.hasTag or not obj.hasTag("PlanarDie") or towerObj() == nil then
+    return
+  end
+  local p = obj.getPosition()
+  if math.abs(p.x - TOWER.x) < 2.4 and p.z > TOWER.z + 0.1 and p.z < TOWER.z + 4.9
+      and p.y > TableSetup.SURFACE_TOP + 9 then
+    towerRoll(obj, color, true)
+  end
 end
 
 -- !planechase roll: throw the die for the player.
@@ -577,6 +845,10 @@ function Planechase.roll(color)
   local die = findDie()
   if die == nil then
     broadcastToColor("No planar die out: UNPACK the Planechase chest first.", color, WARN)
+    return
+  end
+  if towerObj() then
+    towerRoll(die, color, false)
     return
   end
   rollBy = color
@@ -633,43 +905,6 @@ local function addButtons(obj)
   end
 end
 
--- The empty spot on the table where the planar die sits once unpacked.
-local function ensureSpot()
-  local img = BASE .. "die_spot.png" .. VERSION
-  for _, o in ipairs(getObjectsWithTag("PlanarDieSpot")) do
-    local co = o.getCustomObject()
-    if co and co.image == img then
-      o.setLock(true)
-      pcall(function() o.setInvisibleTo(Player.getColors()) end)
-      return
-    end
-    o.destruct()
-  end
-  local obj = spawnObject({
-    type = "Custom_Token",
-    position = { LAND.x, TableSetup.SURFACE_TOP + 0.05, LAND.z },
-    rotation = { 0, 0, 0 },
-    sound = false,
-    callback_function = function(o)
-      o.setName("Planar Die Spot")
-      o.setDescription("The planar die sits here after UNPACK.")
-      o.addTag("PlanarDieSpot")
-      Wait.condition(function()
-        local b = o.getBoundsNormalized()
-        local w = b and b.size and b.size.x or 0
-        if w > 0.05 then
-          local k = SPOT_SIZE / (w / o.getScale().x)
-          o.setScale({ k, 1, k })
-        end
-        o.setLock(true)
-        pcall(function() o.setInvisibleTo(Player.getColors()) end)
-      end, function() return o.isDestroyed() or not o.loading_custom end, 10,
-      function() o.setLock(true) end)
-    end,
-  })
-  obj.setCustomObject({ image = img, thickness = 0.05, merge_distance = 0, stackable = false })
-end
-
 -- Put the chest where it belongs for the current layout (called on load and when the layout changes).
 function Planechase.placeChest(o)
   o = o or getObjectsWithTag("PlanechaseChest")[1]
@@ -701,10 +936,16 @@ function Planechase.ensure()
     return
   end
   buildIndex()
-  ensureSpot()
+  -- The old die spot (before the dice tower): gone.
+  for _, o in ipairs(getObjectsWithTag("PlanarDieSpot")) do
+    o.destruct()
+  end
   local plane = findPlane()
   if plane then
     planeMenu(plane)
+  end
+  if plane or findDeck() or findGrave() then
+    ensureExtras()
   end
   local mesh = BASE .. "chest.obj" .. VERSION
   for _, o in ipairs(getObjectsWithTag("PlanechaseChest")) do
