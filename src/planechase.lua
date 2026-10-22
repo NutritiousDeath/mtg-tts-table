@@ -74,7 +74,7 @@ local GRAVE_AT = { x = -8.5, z = GRAVE_MAT.z - MAT_OFF }
 -- the south. A roll drops one die down each spiral, so both sides of the table see a die land; both are made to
 -- show the same face.
 local TOWER = { x = 8.5, z = 0 }
-local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=12"
+local TOWER_URL = BASE .. "mtg_dicetower.unity3d?v=13"
 local TOWER_TOP = 19.8          -- where a die is dropped in (through the deck's hole), above the table
 local HEADS = {
   -- Offsets from TOWER: the dragon's x, which way it faces (z), and the hole its spiral is dropped in by.
@@ -1002,7 +1002,7 @@ do
     local a = a0 + (a1 - a0) * i / n
     table.insert(PATH_A, { ride * math.cos(a), Ey + Pitch * (a - math.pi) + lift, ride * math.sin(a) })
   end
-  table.insert(PATH_A, { -1.85, 5.28 + lift, 2.8 })
+  table.insert(PATH_A, { -1.85, 4.6, 2.9 })   -- through the wall into the back of the dragon's head, unseen
   table.insert(PATH_A, { -1.85, 1.62 + lift, 7.0 })
   table.insert(PATH_A, { -1.85, 1.44 + lift, OUT_ALONG })   -- on the tongue
 end
@@ -1021,7 +1021,8 @@ local function ride(die, h, secs, cb)
     end
   end
   die.setLock(true)
-  local rot = die.getRotation()
+  local r0 = die.getRotation()
+  local rot = { r0.x, r0.y, r0.z }
   local spin = { math.random(14, 22), math.random(-6, 6), math.random(10, 18) }
   local frames = math.max(1, math.floor(secs * 60))
   local f = 0
@@ -1042,7 +1043,7 @@ local function ride(die, h, secs, cb)
     local t = seg > 0 and (d - lens[k - 1]) / seg or 1
     die.setPosition({ a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t })
     local k2 = 2 * (1 - p) + 0.15
-    rot = { rot.x + spin[1] * k2, rot.y + spin[2] * k2, rot.z + spin[3] * k2 }
+    rot = { rot[1] + spin[1] * k2, rot[2] + spin[2] * k2, rot[3] + spin[3] * k2 }
     die.setRotation(rot)
     if f >= frames then
       return cb()
