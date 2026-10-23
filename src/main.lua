@@ -122,7 +122,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.42 (the planar die lands where it lands: no more face snapping)"
+SCRIPT_VERSION = "2.43 (planar die waits on the active player's dragon; result read only when the die is truly still)"
 
 function onLoad(saved)
   GameLog.setup()

@@ -731,10 +731,47 @@ local function towerReady(o)
 end
 
 -- The tower's lines in a seat's colour (cyan before the game). Fires.set calls this on every turn change.
+local moving = false
+
+-- Put the planar die on the active player's dragon's tongue (lifted over the tower), ready for their roll.
+local function dieToSide(color)
+  local side = SIDE_OF[color]
+  local die = findDie()
+  if side == nil or die == nil or die.isDestroyed() or towerRolling or moving or die.held_by_color then
+    return
+  end
+  local p = die.getPosition()
+  local hd = HEADS[side]
+  local a = (p.z - TOWER.z) * hd.dir
+  if math.abs(p.x - (TOWER.x + hd.x)) < 1.3 and a > 7.0 and a < 12.6 then
+    return   -- already there
+  end
+  moving = true
+  local dest = restSpot(side)
+  die.setLock(true)
+  die.setPositionSmooth({ (p.x + dest[1]) / 2, TableSetup.SURFACE_TOP + 23, (p.z + dest[3]) / 2 }, false, false)
+  Wait.time(function()
+    if not die.isDestroyed() then
+      die.setPositionSmooth(dest, false, false)
+    end
+    Wait.time(function()
+      moving = false
+      if not die.isDestroyed() then
+        die.setLock(false)
+      end
+    end, 1.0)
+  end, 0.9)
+end
+
+-- The tower's lines and the dragons' eyes in a seat's colour (purple / cyan before the game), and the die moved
+-- to that seat's dragon. Fires.set calls this on every turn change.
 function Planechase.towerColor(color)
   local o = towerObj()
   if towerReady(o) and not towerRolling then
     pcall(function() o.AssetBundle.playLoopingEffect(TOWER_IDX[color] or 0) end)
+  end
+  if o and not towerRolling then
+    pcall(dieToSide, color)
   end
 end
 
@@ -1092,17 +1129,41 @@ local function journey(die, h, token, done)
         die.setVelocity({ 0, 0, 1.3 * hd.dir })
         die.setAngularVelocity({ 5 * hd.dir, 0, math.random(-1, 1) })
         Wait.time(function()
+          -- Really still (not just a pause mid-tumble): resting, barely moving, and still so a moment later.
+          local function still()
+            if die.isDestroyed() then
+              return true
+            end
+            local ok, v = pcall(function() return die.getVelocity() end)
+            local ok2, w = pcall(function() return die.getAngularVelocity() end)
+            local slow = ok and ok2 and v and w and (math.abs(v.x) + math.abs(v.y) + math.abs(v.z)) < 0.05
+              and (math.abs(w.x) + math.abs(w.y) + math.abs(w.z)) < 0.05
+            return die.resting and not die.spawning and (slow or not ok)
+          end
           Wait.condition(function()
             if finished then
               return
             end
-            if onTongue(die, h) then
-              finish(value())
-            else
-              carry()
-            end
+            Wait.time(function()
+              if finished then
+                return
+              end
+              if not still() then
+                -- It moved again: wait for it to settle properly.
+                return Wait.condition(function()
+                  if not finished then
+                    if onTongue(die, h) then finish(value()) else carry() end
+                  end
+                end, still, 5, function() if not finished then carry() end end)
+              end
+              if onTongue(die, h) then
+                finish(value())
+              else
+                carry()
+              end
+            end, 0.4)
           end, function()
-            return finished or die.isDestroyed() or (die.resting and not die.spawning)
+            return finished or still()
           end, 6, function()
             if not finished then
               carry()
