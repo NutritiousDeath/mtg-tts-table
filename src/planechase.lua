@@ -1024,8 +1024,8 @@ local function rescue(die, h, r, cb)
   end, 1.0)
 end
 
--- How long a die takes to ride down inside the tower (about one run of the tower's lights down its bands).
-local INSIDE_SECS = 2.0
+-- How long a die takes to ride down inside the tower (about two runs of the tower's lights down its bands).
+local INSIDE_SECS = 3.5
 local OUT_ALONG = 8.4           -- where a die is let go, rolling out over the back of the dragon's tongue
 
 -- The way down inside the tower, as points (x, y, z) from the middle of the tower on the table, for side A (side B
@@ -1061,7 +1061,7 @@ local function ride(die, h, secs, cb)
   die.setLock(true)
   local r0 = die.getRotation()
   local rot = { r0.x, r0.y, r0.z }
-  local spin = { math.random(14, 22), math.random(-6, 6), math.random(10, 18) }
+  local spin = { math.random(8, 12), math.random(-4, 4), math.random(6, 10) }
   local frames = math.max(1, math.floor(secs * 60))
   local f = 0
   local function step()
@@ -1071,7 +1071,7 @@ local function ride(die, h, secs, cb)
     f = f + 1
     -- Quick down the spiral, slowing to a gentle roll by the time it comes out onto the tongue.
     local p = math.min(1, f / frames)
-    local d = total * (1 - (1 - p) ^ 2)
+    local d = total * (1 - (1 - p) ^ 1.6)
     local k = 2
     while k < #pts and lens[k] < d do
       k = k + 1

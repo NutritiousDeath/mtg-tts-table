@@ -122,7 +122,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.43 (planar die waits on the active player's dragon; result read only when the die is truly still)"
+SCRIPT_VERSION = "2.44 (slower, more natural ride down the dice tower)"
 
 function onLoad(saved)
   GameLog.setup()
