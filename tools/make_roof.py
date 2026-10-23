@@ -56,7 +56,24 @@ def build(layout):
     return m
 
 
+def tiny_collider():
+    """The roof's collider: a 0.2 box just above the lid, so the roof never gets in the way of anything (the chapel
+    falling under TTS's Flip used to snag on a full-size roof collider that was being moved along with it)."""
+    m = Mesh()
+    c, h = (0.0, LID + 0.5, 0.0), 0.1
+    x0, x1, y0, y1, z0, z1 = c[0] - h, c[0] + h, c[1] - h, c[1] + h, c[2] - h, c[2] + h
+    uv = [(0, 0), (1, 0), (1, 1), (0, 1)]
+    m.face([(x0, y0, z0), (x1, y0, z0), (x1, y1, z0), (x0, y1, z0)], uv, np.array([0, 0, -1.0]))
+    m.face([(x0, y0, z1), (x1, y0, z1), (x1, y1, z1), (x0, y1, z1)], uv, np.array([0, 0, 1.0]))
+    m.face([(x0, y0, z0), (x0, y0, z1), (x0, y1, z1), (x0, y1, z0)], uv, np.array([-1.0, 0, 0]))
+    m.face([(x1, y0, z0), (x1, y0, z1), (x1, y1, z1), (x1, y1, z0)], uv, np.array([1.0, 0, 0]))
+    m.face([(x0, y1, z0), (x1, y1, z0), (x1, y1, z1), (x0, y1, z1)], uv, np.array([0, 1.0, 0]))
+    m.face([(x0, y0, z0), (x1, y0, z0), (x1, y0, z1), (x0, y0, z1)], uv, np.array([0, -1.0, 0]))
+    return m
+
+
 if __name__ == "__main__":
+    tiny_collider().write(os.path.join(OUT, "roof_collider.obj"), "# Chapel roof collider: tiny on purpose (tools/make_roof.py)\n")
     os.makedirs(OUT, exist_ok=True)
     build("four").write(os.path.join(OUT, "roof.obj"), "# Chapel roof, shown during a TTS flip (tools/make_roof.py)\n")
     build("twohg").write(os.path.join(OUT, "roof_2hg.obj"), "# Chapel roof, 2HG (tools/make_roof.py)\n")

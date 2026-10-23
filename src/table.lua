@@ -610,8 +610,8 @@ end
 -- The chapel's roof (tools/make_roof.py): a stone lid over the rib vault, hidden while you play (the vault
 -- stays open to the sky). When TTS's own Flip button throws the chapel around, the roof appears on it with a
 -- parting message painted on top -- a different one every flip -- and goes away again once the chapel is
--- back in place. Its faces point outward only, so from inside the chapel it can't be seen anyway.
-local ROOF_VERSION = "?v=2"
+-- back in place. Its collider is a tiny box (assets/room/roof_collider.obj), so the falling chapel never snags on it.
+local ROOF_VERSION = "?v=3"
 local ROOF_LID = 186.0       -- the lid's height above the floor (tools/make_roof.py LID)
 local ALL_COLORS_INV = { "White", "Brown", "Red", "Orange", "Yellow", "Green", "Teal", "Blue", "Purple", "Pink",
   "Grey", "Black" }
@@ -673,7 +673,7 @@ function TableSetup.ensureRoof()
       hideRoof(o)
     end,
   })
-  obj.setCustomObject({ mesh = mesh, diffuse = base .. "table/stone.png?v=3", collider = mesh, convex = false,
+  obj.setCustomObject({ mesh = mesh, diffuse = base .. "table/stone.png?v=3", collider = base .. "room/roof_collider.obj" .. ROOF_VERSION, convex = true,
     type = 0, material = 3, cast_shadows = false })
 end
 
@@ -733,7 +733,6 @@ local function watchRoom()
       if not roofShown or room.isDestroyed() or roof.isDestroyed() then
         return
       end
-      roof.setLock(true)
       roof.setPosition(room.getPosition())
       roof.setRotation(room.getRotation())
       Wait.frames(follow, 1)

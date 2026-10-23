@@ -122,7 +122,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.44 (slower, more natural ride down the dice tower)"
+SCRIPT_VERSION = "2.45 (chapel falls cleanly on Flip: roof no longer collides)"
 
 function onLoad(saved)
   GameLog.setup()
