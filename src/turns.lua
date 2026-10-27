@@ -61,7 +61,16 @@ end
 
 local function players()
   local s = GameState.data.setup
-  return (s and s.participants) or TableSetup.activeSeats()
+  if s and s.participants then
+    -- Drop anything in the player list that isn't a seat colour (it would break the prompts and the mana).
+    for i = #s.participants, 1, -1 do
+      if TableSetup.badSeat(s.participants[i], "the player list") then
+        table.remove(s.participants, i)
+      end
+    end
+    return s.participants
+  end
+  return TableSetup.activeSeats()
 end
 
 ---------------------------------------------------------------------------
@@ -516,6 +525,9 @@ function Turns.pendingLabel()
 end
 
 local function showPrompt(color, show)
+  if TableSetup.badSeat(color, "the response pop-ups") then
+    return
+  end
   UI.setAttribute("respond_" .. color, "active", show and "true" or "false")
 end
 
@@ -552,7 +564,9 @@ local function hideAllPrompts()
   dropHeld()
   for _, c in ipairs(TableSetup.activeSeats()) do
     showPrompt(c, false)
-    UI.setValue("respondTimer_" .. c, "")
+    if type(c) == "string" then
+      UI.setValue("respondTimer_" .. c, "")
+    end
   end
 end
 

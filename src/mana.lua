@@ -42,6 +42,9 @@ end
 
 local function pool(color)
   GameState.data.mana = GameState.data.mana or {}
+  if TableSetup.badSeat(color, "the mana pools") then
+    return {}
+  end
   GameState.data.mana[color] = GameState.data.mana[color] or {}
   return GameState.data.mana[color]
 end
@@ -54,7 +57,7 @@ local renderTile
 
 -- Add (or take away) mana of one color. Never below 0.
 function ManaChips.add(color, key, delta)
-  if BY_KEY[key] == nil or delta == nil or delta == 0 then
+  if BY_KEY[key] == nil or delta == nil or delta == 0 or TableSetup.badSeat(color, "adding mana") then
     return
   end
   local p = pool(color)

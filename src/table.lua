@@ -143,8 +143,43 @@ function TableSetup.layout()
 end
 
 -- Seats that are in play for the current layout, in turn order.
+-- A fresh copy each call, so nothing that changes the list it gets back can change the layout's seats.
 function TableSetup.activeSeats()
-  return SEAT_ORDER[TableSetup.layout()]
+  local out = {}
+  for _, c in ipairs(SEAT_ORDER[TableSetup.layout()] or SEAT_ORDER.four) do
+    table.insert(out, c)
+  end
+  return out
+end
+
+-- A seat colour that isn't a plain string (seen once: a table got into a seat list). Says where it came from
+-- (once per place) so it can be tracked down, and tells the caller to skip it.
+local badSeatSeen = {}
+function TableSetup.badSeat(c, where)
+  if type(c) == "string" then
+    return false
+  end
+  local tb = ""
+  pcall(function() tb = debug.traceback("", 2) end)
+  local desc = type(c)
+  if type(c) == "table" then
+    local keys = {}
+    pcall(function()
+      for k, v in pairs(c) do
+        if #keys < 6 then
+          table.insert(keys, tostring(k) .. "=" .. tostring(v))
+        end
+      end
+    end)
+    desc = "table {" .. table.concat(keys, ", ") .. "}"
+  end
+  local key = tostring(where) .. "|" .. tb
+  if not badSeatSeen[key] then
+    badSeatSeen[key] = true
+    print("MTG > Skipped a broken seat entry in " .. tostring(where) .. ": " .. desc .. ". Please send Claude this: "
+      .. tostring(tb):gsub("\n", " / "))
+  end
+  return true
 end
 
 function TableSetup.isActive(color)
