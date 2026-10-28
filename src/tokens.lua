@@ -313,6 +313,14 @@ function Tokens.spawn(color, r, n, opts)
         end
         Zones.presetFrom(obj, color)
         Zones.refresh(obj)
+        -- Living weapon: attach the Equipment to the new Germ (only the first one, if a doubler made more).
+        if opts and opts.onSpawn then
+          Wait.time(function()
+            if not obj.isDestroyed() then
+              pcall(opts.onSpawn, obj)
+            end
+          end, 0.6)
+        end
         if piled then
           Pile.announceExtra(obj, color, n)
           Pile.mergeSoon(2.0)

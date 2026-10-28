@@ -86,9 +86,19 @@ local function effectPart(t)
   end
   local first = t:sub(1, 8)
   if first:find("^whenever") or first:find("^when ") or first:find("^at ") then
-    local comma = t:find(", ", 1, true)
-    if comma then
-      return t:sub(comma + 2)
+    -- The first comma that ends the trigger: not one inside a list in it ("with mana value, power, or
+    -- toughness equal to ...", Talion).
+    local from = 1
+    while true do
+      local comma = t:find(", ", from, true)
+      if not comma then
+        break
+      end
+      local rest = t:sub(comma + 2)
+      if not (rest:find("^or ") or rest:find("^and ") or rest:find("^[%a%-]+, or ") or rest:find("^[%a%-]+, and ")) then
+        return rest
+      end
+      from = comma + 2
     end
   end
   -- Loyalty ability: "+1: ..." / "−3: ...".
@@ -1600,6 +1610,8 @@ function Effects.parse(text, sourceName)
           end
           local atk = sentence:find("tapped and attacking", 1, true) ~= nil
           local act = { what = "token", who = "you", n = n, spec = spec, phrase = phrase,
+            -- Living weapon: "create a 0/0 black Phyrexian Germ creature token, then attach this Equipment to it".
+            attachSelf = sentence:find("then attach this", 1, true) ~= nil or sentence:find("then attach ~ to it", 1, true) ~= nil,
             attacking = atk, tapped = atk or sentence:find("tapped", 1, true) ~= nil,
             haste = sentence:find("with haste", 1, true) ~= nil or sentence:find("and haste", 1, true) ~= nil
               or sentence:find(", haste", 1, true) ~= nil }
@@ -3224,6 +3236,21 @@ local function apply(it, plan, target)
           local made = amountOf(a, controller, it.name, it)
           local opts = (a.tapped or a.attacking or a.haste)
             and { tapped = a.tapped, attacking = a.attacking, haste = a.haste, from = it.thatCard or it.source } or nil
+          -- Living weapon: the Equipment goes onto the new Germ.
+          if a.attachSelf and it.source then
+            opts = opts or {}
+            local attached = false
+            opts.onSpawn = function(tok)
+              local eq = getObjectFromGUID(it.source)
+              if attached or eq == nil or eq.isDestroyed() or not Effects.fieldSeat(eq) then
+                return
+              end
+              attached = true
+              if Equip and Equip.attach then
+                Equip.attach(eq, tok, controller)
+              end
+            end
+          end
           if made < 1 then
             printToAll("MTG > " .. it.name .. ": no tokens (the count is 0).", INFO)
           elseif a.alt then
@@ -6485,6 +6512,33 @@ Events.on("cardMoved", function(d)
   end
 end)
 
+-- "As ~ enters, choose a number between 1 and 10" (Talion, the Kindly Lord): kept per card.
+function Effects.chosenNumber(obj)
+  local c = GameState.data and GameState.data.chosenNumber
+  return c and obj and c[obj.getGUID()] or nil
+end
+
+function Effects.chooseNumber(obj, seat, lo, hi)
+  if obj == nil or obj.isDestroyed() then
+    return
+  end
+  local nm = obj.getName()
+  Effects.askNumber(seat, nm .. ": choose a number", "Type a number from " .. lo .. " to " .. hi .. ", then OK.", function(n)
+    n = math.floor(tonumber(n) or 0)
+    if obj.isDestroyed() then
+      return
+    end
+    if n < lo or n > hi then
+      broadcastToColor(nm .. ": the number must be from " .. lo .. " to " .. hi .. ". Pick again.", seat, { 1, 0.6, 0.2 })
+      Effects.chooseNumber(obj, seat, lo, hi)
+      return
+    end
+    GameState.data.chosenNumber = GameState.data.chosenNumber or {}
+    GameState.data.chosenNumber[obj.getGUID()] = n
+    printToAll("MTG > " .. seat .. " chooses " .. n .. " for " .. nm .. ".", { 0.55, 0.9, 0.6 })
+  end)
+end
+
 -- "As this creature enters, choose a color" (Diamond Mare): the color is kept per card.
 function Effects.chosenColor(obj)
   local c = GameState.data and GameState.data.chosenColor
@@ -6547,6 +6601,15 @@ Events.on("cardMoved", function(d)
         Stack.pushAbility(d.to.seat, obj.getName(), line, face, { trigger = true, source = obj.getGUID() })
       end
     end, 0.5)
+  end
+  do
+    local lo, hi = low:match("enters, choose a number between (%d+) and (%d+)")
+    if lo then
+      if GameState.data.chosenNumber then
+        GameState.data.chosenNumber[obj.getGUID()] = nil   -- a new object: choose again
+      end
+      Effects.chooseNumber(obj, d.to.seat, tonumber(lo), tonumber(hi))
+    end
   end
   if low:find("enters, choose a color", 1, true) then
     if GameState.data.chosenColor then
@@ -8394,7 +8457,7 @@ local function hasKeyword(obj, kw)
     found = okk and yes or false
   end
   pcall(function()
-    local d = JSON.decode(obj.getGMNotes())
+    local d = CardData.get(obj)   -- (a double-faced card's keywords are just this face's)
     for _, k in ipairs(type(d) == "table" and d.keywords or {}) do
       if tostring(k):lower() == kw then
         found = true

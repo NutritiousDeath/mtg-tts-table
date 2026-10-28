@@ -12,6 +12,8 @@ GameState = {}
 CardData = {}
 local cdCache, cdCount = {}, 0
 local EMPTY = {}
+local DFC_LAYOUT = { transform = true, modal_dfc = true, flip = true, double_faced_token = true, meld = true,
+  reversible_card = true }
 function CardData.get(obj)
   if obj == nil then
     return EMPTY
@@ -37,6 +39,18 @@ function CardData.get(obj)
     if cdCount > 1500 then
       cdCache, cdCount = {}, 0
     end
+  end
+  -- Double-faced cards: Scryfall's keyword list covers BOTH faces (Sephiroth, Fabled SOLDIER isn't flying,
+  -- his back face is). Keep only the keywords this face's own rules text has.
+  if d ~= EMPTY and type(d.keywords) == "table" and #d.keywords > 0 and DFC_LAYOUT[tostring(d.layout)] then
+    local low = tostring(d.oracle or ""):lower()
+    local kept = {}
+    for _, k in ipairs(d.keywords) do
+      if low:find(tostring(k):lower(), 1, true) then
+        table.insert(kept, k)
+      end
+    end
+    d.keywords = kept
   end
   cdCache[guid] = { notes = notes, data = d }
   return d

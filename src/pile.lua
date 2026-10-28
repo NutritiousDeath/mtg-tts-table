@@ -338,7 +338,7 @@ function Pile.wantsPile(r, n, opts)
   if not Pile.enabled() or n < 1 then
     return false
   end
-  if opts and (opts.attacking or opts.haste) then
+  if opts and (opts.attacking or opts.haste or opts.onSpawn) then
     return false
   end
   local oracle

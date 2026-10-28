@@ -123,7 +123,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.48 (fire sound volume: !firevolume / TURN OPTIONS)"
+SCRIPT_VERSION = "2.49 (Talion, Bloodline Pretender, intervening if, living weapon, DFC keywords)"
 
 function onLoad(saved)
   GameLog.setup()

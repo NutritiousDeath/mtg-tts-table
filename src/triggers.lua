@@ -361,6 +361,8 @@ local function parseTrigger(p)
               return ex
             end)(),
             tokenOnly = subj:find(" token", 1, true) ~= nil and subj:find("nontoken", 1, true) == nil,
+            -- Bloodline Pretender: "another creature of the chosen type" (chosen as it entered).
+            chosenType = subj:find("of the chosen type", 1, true) ~= nil,
             -- Garruk's Uprising: "a creature you control with power 4 or greater".
             powerMin = tonumber(subj:match("with power (%d+) or greater") or ""),
             toughMin = tonumber(subj:match("with toughness (%d+) or greater") or ""),
@@ -399,6 +401,10 @@ local function parseTrigger(p)
   end
   if plainFind(p, "whenever an opponent casts their first spell each turn") then
     return { kind = "cast", who = "opp", first = true }
+  end
+  -- Talion, the Kindly Lord: "a spell with mana value, power, or toughness equal to the chosen number".
+  if plainFind(p, "whenever an opponent casts a spell with mana value, power, or toughness equal to the chosen number") then
+    return { kind = "cast", who = "opp", spellType = "chosen number" }
   end
   local oppType = between(p, "whenever an opponent casts a", " spell")
   oppType = oppType and oppType:gsub("^n? ", "") or nil
@@ -756,11 +762,44 @@ end
 -- Exalted as the table resolves it: "it" is the creature that attacked alone (thatCard).
 local EXALTED_TEXT = "Exalted \226\128\148 Whenever a creature you control attacks alone, it gets +1/+1 until end of turn."
 
+-- Living weapon: an Equipment's own keyword, or given by Ekthi, Contaminator Priest ("Each Equipment you control
+-- has living weapon"). The trigger: create a 0/0 black Phyrexian Germ and attach the Equipment to it.
+local LIVING_WEAPON_TEXT = "Living weapon: when this Equipment enters, create a 0/0 black Phyrexian Germ creature token, then attach this Equipment to it."
+local function livingWeapon(obj, d)
+  if not tostring(d.typeLine or ""):lower():find("equipment", 1, true) then
+    return false
+  end
+  for line in (tostring(d.oracle or "") .. "\n"):gmatch("([^\n]*)\n") do
+    if stripReminder(line):lower():gsub("^%s+", ""):sub(1, 13) == "living weapon" then
+      return true
+    end
+  end
+  local okl, loc = pcall(function() return Zones.regionAt(obj.getPosition()) end)
+  local seat = okl and loc and loc.seat or nil
+  if seat == nil then
+    return false
+  end
+  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+    if o ~= obj and o.type == "Card" and not o.isDestroyed() and not o.is_face_down then
+      local od = cardData(o)
+      local ol = type(od) == "table" and tostring(od.oracle or ""):lower() or ""
+      if ol:find("equipment you control has living weapon", 1, true) or ol:find("equipment you control have living weapon", 1, true) then
+        local ok2, l2 = pcall(function() return Zones.regionAt(o.getPosition()) end)
+        if ok2 and l2 and l2.seat == seat and (l2.region == "battlefield" or l2.region == "lands") then
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
 local function abilitiesOf(obj)
   local d = cardData(obj)
   if d == nil or type(d) ~= "table" then
     return {}
   end
+  local lw = livingWeapon(obj, d)
   -- Abilities other permanents give this one (Sliver lords...): part of the key, so they come and go.
   local given = ""
   if Statics and Statics.grants then
@@ -775,7 +814,7 @@ local function abilitiesOf(obj)
     end
     d = setmetatable({ oracle = "" }, { __index = d })
   end
-  local key = obj.getGUID() .. "|" .. tostring(d.name) .. "|" .. given
+  local key = obj.getGUID() .. "|" .. tostring(d.name) .. "|" .. given .. (lw and "|lw" or "")
   if cache[key] then
     return visibleTo(obj, cache[key])
   end
@@ -895,6 +934,9 @@ local function abilitiesOf(obj)
         table.insert(list, { trig = trig, text = text })
       end
     end
+  end
+  if lw then
+    table.insert(list, { trig = { kind = "enters", self = true }, text = LIVING_WEAPON_TEXT })
   end
   -- Exalted given by other permanents (First Sliver's Chosen): one trigger per instance.
   if given ~= "" then
@@ -1030,6 +1072,19 @@ local function matchesSubject(obj, trig)
     end
   end
   return #list == 0
+end
+
+-- "of the chosen type": the card is the creature type its watcher chose as it entered.
+local function chosenTypeOk(card, watcher)
+  local ty = Statics and Statics.chosenType and Statics.chosenType(watcher)
+  if ty == nil then
+    return false
+  end
+  local d = cardData(card) or {}
+  if Statics.typeMatches then
+    return Statics.typeMatches(d.typeLine, d.oracle, ty) == true
+  end
+  return tostring(d.typeLine or ""):lower():find(ty:lower(), 1, true) ~= nil
 end
 
 local function isToken(obj)
@@ -1346,6 +1401,34 @@ local function pushAll(found, that, thatCard)
     end
   end
   found = kept
+  -- Intervening "if" (CR 603.4): "At the beginning of your upkeep, if you control three or more artifacts, ..."
+  -- doesn't trigger at all unless it's true now (it's checked again as it resolves).
+  kept = {}
+  for _, f in ipairs(found) do
+    local low = tostring(f.text or ""):lower()
+    local cond = low:match("^%s*whenever [^,]-, if ([^,]+),") or low:match("^%s*when [^,]-, if ([^,]+),")
+      or low:match("^%s*at the [^,]-, if ([^,]+),")
+    local holds = nil
+    if cond and Effects and Effects.condValue then
+      local nm = ""
+      pcall(function() nm = tostring(f.obj.getName() or ""):lower() end)
+      if nm ~= "" then
+        cond = replacePlain(cond, nm, "~")
+      end
+      local okc, v = pcall(Effects.condValue, cond, f.controller, f.obj and f.obj.getName and f.obj.getName() or nil)
+      if okc then
+        holds = v
+      end
+    end
+    if holds == false then
+      local nm = "?"
+      pcall(function() nm = f.obj.getName() end)
+      printToAll("MTG > " .. nm .. " doesn't trigger (not true: " .. cond .. ").", { 0.6, 0.65, 0.75 })
+    else
+      table.insert(kept, f)
+    end
+  end
+  found = kept
   if #found == 0 then
     return
   end
@@ -1567,6 +1650,7 @@ Events.on("cardMoved", function(d)
         for _, a in ipairs(abilitiesOf(p.obj)) do
           local t = a.trig
           if t.kind == kind and not t.self and not t.equipped and matchesSubject(card, t)
+              and not (t.chosenType and not chosenTypeOk(card, p.obj))
               and not (t.tapped and not entersTappedNow(card))
               and not (t.goaded and not (Counters.goadedBy(card) and Combat and Combat.inCombat and Combat.inCombat(card)))
               and not (t.nontoken and isToken(card))
@@ -1771,6 +1855,14 @@ end
 local function spellMatches(card, spellType, source)
   if spellType == nil then
     return true
+  end
+  if spellType == "chosen number" then
+    local n = source and Effects and Effects.chosenNumber and Effects.chosenNumber(source)
+    if n == nil then
+      return false
+    end
+    local cd = cardData(card) or {}
+    return tonumber(cd.cmc) == n or tonumber(cd.power) == n or tonumber(cd.toughness) == n
   end
   if spellType == "chosen color" then
     local chosen = source and Effects and Effects.chosenColor and Effects.chosenColor(source)
