@@ -360,6 +360,17 @@ function LibSearch.open(color, preset, note, where, tapped, opts)
   if not TableSetup.isActive(color) then
     return
   end
+  -- A graveyard card targeted as the spell or ability was cast: say which one to take.
+  local r = Effects and Effects.replay
+  if r and r.seat == color and opts and opts.zone == "graveyard" then
+    for _, e in ipairs(r.entries or {}) do
+      if e.kind == "gycard" and not e.used then
+        e.used = true
+        note = tostring(note or "") .. "\nIts target (chosen as it was cast): " .. tostring(e.name) .. "."
+        break
+      end
+    end
+  end
   open[color] = true
   searched[color] = false
   dest[color] = { where = where or "hand", tapped = tapped and true or false,

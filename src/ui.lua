@@ -70,7 +70,7 @@ end
 function TableUI.build()
   local panels = { importPanel() }
   local xml = HEADER .. table.concat(panels) .. GameFlow.xml() .. Turns.xml() .. Actions.xml() .. Flip.xml()
-    .. Dice.xml() .. Tokens.xml() .. LibSearch.xml() .. Stack.xml() .. Combat.xml() .. Triggers.orderXml() .. Effects.xml() .. Counters.xml()
+    .. Dice.xml() .. Tokens.xml() .. LibSearch.xml() .. Stack.xml() .. Combat.xml() .. Triggers.orderXml() .. Effects.xml() .. Counters.xml() .. (Rulebook and Rulebook.xml() or "")
   -- The top-left screen buttons (Import / Start / Turn Options / Dice) are on the table's console strips now;
   -- hidden unless "!screenbuttons" turned them back on.
   do

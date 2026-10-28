@@ -315,6 +315,63 @@ local function chaosOf(card)
   return nil
 end
 
+-- Lines of a plane card that the table puts on the stack itself (chaos, planeswalking to / away, rolling):
+-- left out of what the trigger reader watches for (triggers.lua treats the face-up plane as a permanent).
+local HANDLED = { "^whenever chaos ensues", "^when you planeswalk to", "^whenever you planeswalk to", "^when you encounter",
+  "^when you planeswalk away from", "^whenever you planeswalk away from", "^whenever you roll the planar die",
+  "^whenever you roll a blank on the planar die" }
+
+-- The face-up plane (not a Phenomenon), or nil.
+function Planechase.currentPlane()
+  local p = findPlane()
+  if p == nil or p.isDestroyed() or p.is_face_down then
+    return nil
+  end
+  local e = entryOf(p)
+  if e == nil or e.t == "Phenomenon" then
+    return nil
+  end
+  return p
+end
+
+-- A plane's rules text for the trigger reader: everything except the lines handled here.
+function Planechase.triggerText(name)
+  if next(byName) == nil then
+    buildIndex()
+  end
+  local e = byName and byName[name]
+  if e == nil then
+    return ""
+  end
+  local keep = {}
+  for _, l in ipairs(lines(e.o)) do
+    local low = l:lower()
+    local handled = false
+    for _, pat in ipairs(HANDLED) do
+      handled = handled or low:find(pat) ~= nil
+    end
+    if not handled then
+      table.insert(keep, l)
+    end
+  end
+  return table.concat(keep, "\n")
+end
+
+-- The plane's own lines that start with one of these (for the plane in play).
+local function linesStarting(card, heads)
+  local out = {}
+  local e = entryOf(card)
+  for _, l in ipairs(lines(e and e.o)) do
+    local low = l:lower()
+    for _, h in ipairs(heads) do
+      if low:find(h) then
+        table.insert(out, l)
+      end
+    end
+  end
+  return out
+end
+
 local function activeSeat(fallback)
   local t = GameState.data.turn
   return (t and t.activeSeat) or fallback or "White"
@@ -535,6 +592,10 @@ function Planechase.planeswalk(color, quiet)
   end
   if plane then
     local e = entryOf(plane)
+    -- "When you planeswalk away from ~, ..." goes on the stack.
+    for _, l in ipairs(linesStarting(plane, { "^when you planeswalk away from", "^whenever you planeswalk away from" })) do
+      push(activeSeat(color), plane.getName(), afterComma(l))
+    end
     if e and e.t == "Plane" and st.aether then
       st.aether = false
       say("Chaotic Aether ends.", INFO)
@@ -933,6 +994,15 @@ function Planechase.onRolled(die, color, viaTower)
     local v = (tok and tok.r) or die.getValue()
     say(color .. " rolled: " .. dieValueText(v, st.aether), v == 1 and GOOD or (v == 6 and CYAN or INFO))
     local chaos = v == 6 or (st.aether and v ~= 1)
+    -- "Whenever you roll the planar die, ..." / "Whenever you roll a blank, ..." (the plane's own triggers).
+    for _, l in ipairs(linesStarting(plane, { "^whenever you roll the planar die" })) do
+      push(activeSeat(color), plane.getName(), afterComma(l))
+    end
+    if v ~= 1 and v ~= 6 then
+      for _, l in ipairs(linesStarting(plane, { "^whenever you roll a blank on the planar die" })) do
+        push(activeSeat(color), plane.getName(), afterComma(l))
+      end
+    end
     if v == 1 then
       -- The planeswalker symbol: "Planeswalk" goes on the stack (the ring round the stack mat burns blue-white);
       -- when everyone passes it resolves and the next plane turns face up (stack.lua).

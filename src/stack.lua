@@ -208,9 +208,24 @@ function Stack.pushCard(obj, controller, from)
   log(controller .. " casts " .. obj.getName() .. " (on the stack).")
   -- Instants and sorceries choose their targets now (CR 601.2c), then everyone gets to respond.
   local ty = typesOf(obj)
-  if (ty.Instant or ty.Sorcery) and not (ty.Creature or ty.Enchantment or ty.Artifact or ty.Planeswalker or ty.Battle or ty.Land)
+  local cd = CardData.get(obj)
+  -- An Aura spell targets what it will enchant ("Enchant creature"), chosen now too.
+  local enchant = tostring(cd.typeLine or ""):find("Aura", 1, true) and tostring(cd.oracle or ""):match("^[Ee]nchant ([^\n%(]+)")
+  if enchant and Effects and Effects.chooseTargets and not obj.is_face_down then
+    item.auraText = enchant:gsub("%s+$", "")
+    item.choosing = true
+    item.choosingAt = os.time()
+    Wait.time(function()
+      local okc, errc = pcall(Effects.chooseTargets, item, Stack.offer)
+      if not okc then
+        item.choosing = nil
+        Events.noteError("choosing a target for " .. tostring(item.name), errc)
+        Stack.offer()
+      end
+    end, 0.3)
+  elseif (ty.Instant or ty.Sorcery) and not (ty.Creature or ty.Enchantment or ty.Artifact or ty.Planeswalker or ty.Battle or ty.Land)
       and Effects and Effects.chooseTargets then
-    item.targetText = tostring(CardData.get(obj).oracle or "")
+    item.targetText = tostring(cd.oracle or "")
     item.choosing = true
     item.choosingAt = os.time()
     Wait.time(function()
@@ -310,6 +325,7 @@ function Stack.pushAbility(controller, sourceName, text, image, opts)
   local item = { guid = obj.getGUID(), kind = "ability", name = sourceName, controller = controller,
     text = text, trigger = opts.trigger, that = opts.that, source = opts.source, thatCard = opts.thatCard,
     amount = opts.amount, copyOf = opts.copyOf, ninjutsu = opts.ninjutsu, planar = opts.planar,
+    ward = opts.ward, room = opts.room,
     auto = (opts.trigger or opts.loyalty or opts.activated or opts.copyOf) and true or nil }
   table.insert(items(), item)
   Stack.render()
@@ -389,6 +405,34 @@ function Stack.resolveTop()
   resolveTopNow()
   -- The next item down (if any) gets its own round of responses.
   Stack.offer()
+  -- State-based actions (CR 704.3): anything left at 0 toughness by what just resolved dies.
+  Wait.time(function()
+    if Counters and Counters.checkDeath then
+      for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+        if o.type == "Card" and not o.isDestroyed() and o.held_by_color == nil then
+          local okl, loc = pcall(function() return Zones.regionAt(o.getPosition()) end)
+          if okl and loc and (loc.region == "battlefield" or loc.region == "lands") then
+            pcall(Counters.checkDeath, o)
+          end
+        end
+      end
+    end
+  end, 1.5)
+end
+
+-- Split second (CR 702.61): while a spell with split second is on the stack, players can't cast spells
+-- or activate abilities that aren't mana abilities. Returns its name, or nil.
+function Stack.splitSecond()
+  for _, it in ipairs(items()) do
+    if it.kind == "card" then
+      local obj = getObjectFromGUID(it.guid)
+      local o = obj and tostring(CardData.get(obj).oracle or ""):lower() or ""
+      if o:find("split second", 1, true) then
+        return it.name
+      end
+    end
+  end
+  return nil
 end
 
 function resolveTopNow()
@@ -453,6 +497,9 @@ function resolveTopNow()
     log(it.name .. " resolves (to " .. it.controller .. "'s graveyard).")
     -- Read its text before it merges into the graveyard pile.
     local keep = false
+    if Effects then
+      Effects.pendingModes = it.modesChosen   -- modes chosen as it was cast
+    end
     if Effects and Effects.resolveSpell then
       local oks, res = pcall(Effects.resolveSpell, obj, it.controller)
       if oks then
@@ -474,8 +521,33 @@ function resolveTopNow()
       sendCard(obj, it, "graveyard")
     end
   else
+    -- An Aura spell whose target is gone doesn't resolve (CR 608.3b); otherwise it enters attached to it.
+    local auraOn = nil
+    if it.targetsChosen and Effects and Effects.checkTargets then
+      local okt, legal = pcall(Effects.checkTargets, it)
+      if okt and legal == false then
+        log(it.name .. " doesn't resolve: what it would enchant isn't a legal target any more (to the graveyard).", WARN)
+        sendCard(obj, it, "graveyard")
+        return
+      end
+      Effects.replay = nil
+      for _, e in ipairs(it.preTargets or {}) do
+        if e.kind == "card" and auraOn == nil then
+          auraOn = e.guid
+        end
+      end
+    end
     log(it.name .. " resolves (onto " .. it.controller .. "'s battlefield).")
     sendCard(obj, it, "battlefield")
+    if auraOn and Equip and Equip.attach then
+      local controller = it.controller
+      Wait.time(function()
+        local host = getObjectFromGUID(auraOn)
+        if host and not host.isDestroyed() and not obj.isDestroyed() then
+          Equip.attach(obj, host, controller)
+        end
+      end, 1.6)
+    end
   end
 end
 
@@ -493,6 +565,35 @@ function Stack.uncounterable(it)
     return "\"This spell can't be countered\""
   end
   return nil
+end
+
+-- Counter one item by its object (ward counters the spell it was put on the stack for, wherever it is).
+function Stack.counterGuid(guid, byWhat)
+  local list = items()
+  local i = indexOf(guid)
+  if i == nil then
+    return
+  end
+  local it = list[i]
+  local why = Stack.uncounterable(it)
+  if why then
+    log(it.name .. " can't be countered: " .. why .. ".", WARN)
+    return
+  end
+  local obj = getObjectFromGUID(it.guid)
+  removeAt(i)
+  if Effects and Effects.clearTargets then
+    pcall(Effects.clearTargets, it)
+  end
+  log(it.name .. (it.kind == "ability" and "'s ability" or "") .. " is countered (" .. tostring(byWhat) .. ").", WARN)
+  if obj then
+    if it.kind == "ability" then
+      obj.destruct()
+    else
+      sendCard(obj, it, "graveyard")
+    end
+  end
+  Stack.offer()
 end
 
 function Stack.counterTop(byColor)
@@ -631,6 +732,15 @@ function Stack.onDrop(color, obj)
   -- A player who has left the game casts nothing (leave.lua).
   if Leave and Leave.isOut(color) then
     return
+  end
+  -- Split second on the stack: no casting (the card stays where it was dropped; take it back).
+  local ss = Stack.splitSecond()
+  if ss and obj.type == "Card" and obj.hasTag("MTGCard") then
+    local fromLoc = Zones.locationOf(obj)
+    if fromLoc and CAST_FROM[fromLoc.region] then
+      broadcastToColor(ss .. " has split second: nobody can cast spells until it resolves. Take " .. obj.getName() .. " back.", color, WARN)
+      return
+    end
   end
   dropper[obj.getGUID()] = color
   local from = Zones.locationOf(obj)
@@ -1152,6 +1262,12 @@ end
 
 function Stack.activate(obj, playerColor, ab)
   if obj == nil or obj.isDestroyed() then
+    return
+  end
+  -- Split second on the stack: no activated abilities except mana abilities (CR 702.61a).
+  local ss = Stack.splitSecond()
+  if ss and not tostring(ab and ab.effect or ""):lower():find("^add ") then
+    broadcastToColor(ss .. " has split second: no abilities (except mana abilities) until it resolves.", playerColor, WARN)
     return
   end
   -- "Activated abilities of ... can't be activated" (Forge static): warn, naming the source.

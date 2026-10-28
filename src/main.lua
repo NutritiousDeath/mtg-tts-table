@@ -105,6 +105,7 @@ require("src/music")
 require("src/planechase_data")
 require("src/planechase")
 require("src/leave")
+require("src/rulebook")
 Pile.install()
 
 local SAMPLE_DECK = [[
@@ -125,7 +126,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.51 (players leaving the game: bag, dark seat, !concede)"
+SCRIPT_VERSION = "2.52 (rules batches 1-3, plane triggers, rules book)"
 
 function onLoad(saved)
   GameLog.setup()

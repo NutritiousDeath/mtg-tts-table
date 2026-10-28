@@ -1022,6 +1022,9 @@ function TableSetup.ensure()
     if Fires then
       pcall(Fires.ensure)
     end
+    if Rulebook and Rulebook.ensure then
+      pcall(Rulebook.ensure)
+    end
     TableSetup.ignorePointer()
   end, 3)
   TableSetup.ignorePointer()
@@ -1186,6 +1189,9 @@ function TableSetup.setLayout(layout)
   pcall(TableSetup.ensureGlass)
   if Fires then
     pcall(Fires.ensure)
+  end
+  if Rulebook and Rulebook.ensure then
+    pcall(Rulebook.ensure)
   end
   applyHandZones()
   TableSetup.drawMats()

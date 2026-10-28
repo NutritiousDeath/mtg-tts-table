@@ -330,6 +330,10 @@ local WAVE = { woosh = 0.9, roar = 1.4 }
 
 function Fires.set(color, mode)
   -- The Planechase dice tower's lines follow the same colour.
+  -- The rules book's title glows in the same colour.
+  if Rulebook and Rulebook.setColor then
+    pcall(Rulebook.setColor, color)
+  end
   if Planechase and Planechase.towerColor then
     pcall(Planechase.towerColor, color)
   end

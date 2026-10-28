@@ -191,6 +191,10 @@ function Leave.run(color)
       printToAll("MTG > " .. color .. "'s cards are in the bag at their seat (" .. #toBag .. " item" .. (#toBag == 1 and "" or "s") .. ").", INFO)
     end)
   end
+  -- The monarch / initiative passes on (CR 724.4, 725.4).
+  if Effects and Effects.holderLeft then
+    pcall(Effects.holderLeft, color)
+  end
   if Turns and Turns.playerLeft then
     pcall(Turns.playerLeft, color)
   end

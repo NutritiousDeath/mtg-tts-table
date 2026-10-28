@@ -54,10 +54,20 @@ end
 
 local cache = {}   -- [guid .. name] = { abilities }, rebuilt when a card changes
 
+-- A plane card (planechase.lua) reads as a permanent with the plane's rules text, minus what Planechase
+-- puts on the stack itself (chaos, planeswalking, rolling).
+local planeData = {}
 local function cardData(obj)
   local d = CardData.get(obj)
   if next(d) == nil then
     return nil
+  end
+  if d.planar and Planechase and Planechase.triggerText then
+    local nm = tostring(d.name)
+    if planeData[nm] == nil then
+      planeData[nm] = { name = nm, oracle = Planechase.triggerText(nm), typeLine = "Plane", types = { "Plane" }, keywords = {} }
+    end
+    return planeData[nm]
   end
   return d
 end
@@ -1111,6 +1121,14 @@ local function permanents()
       if loc.seat and (loc.region == "battlefield" or loc.region == "lands") then
         table.insert(list, { obj = obj, controller = loc.seat })
       end
+    end
+  end
+  -- The face-up plane: its triggered abilities belong to the planar controller (the active player, CR 901.6).
+  if Planechase and Planechase.currentPlane and GameState.data.started then
+    local okp, plane = pcall(Planechase.currentPlane)
+    local t = GameState.data.turn or {}
+    if okp and plane and t.activeSeat then
+      table.insert(list, { obj = plane, controller = t.activeSeat, plane = true })
     end
   end
   return list
@@ -2418,6 +2436,10 @@ end
 
 -- Creatures dealt combat damage to players: list of { obj, controller, seat }.
 function Triggers.onCombatDamage(list)
+  -- The monarch and the initiative change hands on combat damage (a rule, not a trigger setting).
+  if GameState.data.started and Effects and Effects.combatDamageToPlayers then
+    pcall(Effects.combatDamageToPlayers, list)
+  end
   if not enabled() or not GameState.data.started then
     return
   end

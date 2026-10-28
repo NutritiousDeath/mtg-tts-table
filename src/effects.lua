@@ -1647,6 +1647,13 @@ function Effects.parse(text, sourceName)
       end
     end
   end
+  -- The monarch (CR 724) and the initiative (CR 725).
+  if t:find("you become the monarch", 1, true) then
+    table.insert(actions, { what = "monarch", who = "you", n = 1 })
+  end
+  if t:find("you take the initiative", 1, true) then
+    table.insert(actions, { what = "initiative", who = "you", n = 1 })
+  end
   -- Goad: "goad target creature [an opponent controls]" (Baeloth, Disrupt Decorum).
   if t:find("goad target creature", 1, true) or t:find("goad up to one target creature", 1, true) then
     table.insert(actions, { what = "goad", who = "you", n = 1 })
@@ -2818,6 +2825,10 @@ local function describe(a, target, controller)
     return "the damaged player may discard their hand, draw seven cards and get a contract counter"
   elseif a.what == "goad" then
     return "goads a target creature"
+  elseif a.what == "monarch" then
+    return "becomes the monarch"
+  elseif a.what == "initiative" then
+    return "takes the initiative"
   elseif a.what == "bounceSelf" then
     return "it returns to its owner's hand"
   elseif a.what == "copySelf" then
@@ -3305,6 +3316,10 @@ local function apply(it, plan, target)
             end)
         elseif a.what == "contract" then
           Effects.contractOffer(seat, controller, it)
+        elseif a.what == "monarch" then
+          Effects.setMonarch(seat, it.name)
+        elseif a.what == "initiative" then
+          Effects.setInitiative(seat, it.name)
         elseif a.what == "goad" then
           Effects.askChoice(seat, it.name .. ": goad a creature", "Click GOAD on the creature (it attacks each combat if able, and a player other than " .. seat .. " if able).",
             { { label = "SKIP", value = false } }, function(obj)
@@ -4394,6 +4409,23 @@ function Effects.counterSpell(seat, a, it)
     if a.drain then
       Effects.addDelayed({ seat = seat, step = "main", kind = "mana", color = "C", amount = mv, name = it.name })
       broadcastToColor(it.name .. ": you will get " .. mv .. " colorless mana at the beginning of your next main phase.", seat, GOOD)
+    end
+  end
+  -- The spell it targeted as it was cast (CR 601.2c).
+  local r = Effects.replay
+  if r and r.seat == seat then
+    for _, e in ipairs(r.entries) do
+      if e.kind == "spell" and not e.used then
+        e.used = true
+        for _, c in ipairs(cands) do
+          if c.guid == e.guid then
+            counter(c)
+            return
+          end
+        end
+        printToAll("MTG > " .. it.name .. ": its target isn't a spell it can counter any more.", INFO)
+        return
+      end
     end
   end
   if #cands == 0 then
@@ -7324,6 +7356,28 @@ function Effects.resolve(it)
     Effects.resolveCopy(it)
     return
   end
+  if it.ward then
+    Effects.resolveWard(it)
+    return
+  end
+  -- Modes chosen as it was cast (CR 601.2b): each chosen mode resolves in printed order.
+  if it.modesChosen and not it.modePicked then
+    if #it.modesChosen == 0 then
+      printToAll("MTG > " .. it.name .. ": no mode was chosen, nothing happens.", INFO)
+      return
+    end
+    for _, m in ipairs(it.modesChosen) do
+      local copy = {}
+      for k, v in pairs(it) do
+        copy[k] = v
+      end
+      copy.text = (m:gsub(" %[pay [^%]]*%]$", ""))
+      copy.modePicked = true
+      copy.modesChosen = nil
+      Effects.resolve(copy)
+    end
+    return
+  end
   -- Ninjutsu resolving: the ninja enters tapped and attacking (combat.lua).
   if it.ninjutsu and it.source then
     if not (Combat and Combat.ninjutsuResolve and Combat.ninjutsuResolve(it.source)) then
@@ -7901,7 +7955,8 @@ function Effects.resolveSpell(obj, controller)
     return false
   end
   Effects.resolve({ name = obj.getName(), controller = controller, text = text, auto = true, manaCost = cost,
-    card = obj.getGUID() })
+    card = obj.getGUID(), modesChosen = Effects.pendingModes })
+  Effects.pendingModes = nil
   -- Rebound: exiled as it resolves; its owner may cast it free at their next upkeep.
   local low = text:lower()
   local rc = GameState.data.reboundCast
@@ -8138,10 +8193,36 @@ function effects_cardPick(obj, color, alt)
   end
 end
 
-local function returnToHand(obj)
+local function returnToHand(obj, cmdAsked)
   local seat = fieldSeat(obj)
   if seat == nil then
     return
+  end
+  -- A commander that would go to its owner's hand may go to the command zone instead (CR 903.9b): asked first.
+  if not cmdAsked and Combat and Combat.isCommander and Combat.isCommander(obj) then
+    local owner = Effects.ownerOf(obj) or seat
+    local card = obj
+    Effects.askChoice(owner, card.getName() .. " would go to your hand", "It's your commander: put it into the command zone instead?",
+      { { label = "COMMAND ZONE", value = true }, { label = "HAND", value = false } }, function(yes)
+        if card.isDestroyed() then
+          return
+        end
+        GameState.data.cmdAsked = GameState.data.cmdAsked or {}
+        GameState.data.cmdAsked[card.getGUID()] = os.time()
+        if yes then
+          Combat.toCommandZone(card, owner)
+        else
+          returnToHand(card, true)
+        end
+      end)
+    return
+  end
+  -- To its OWNER's hand (it may be someone else's card under this seat's control).
+  do
+    local owner = Effects.ownerOf(obj)
+    if owner and owner ~= seat and TableSetup.isActive(owner) then
+      seat = owner
+    end
   end
   if Faces and Faces.state(obj) == 2 then
     obj = Faces.front(obj)
@@ -10002,7 +10083,26 @@ function Effects.targetSpecs(text)
           end
         end
         local nextWord = rest:match("^(%a+)") or ""
-        if nextWord == "card" or nextWord == "cards" or nextWord == "spell" or nextWord == "spells" then
+        local sentence = after:sub(1, (after:find("[%.;]") or (#after + 1)) - 1)
+        if w1 == "activated" or w1 == "triggered" then
+          -- "target activated or triggered ability" (Stifle).
+          sp = { kind = "spell", ability = true, spellsToo = false, filt = "" }
+        elseif nextWord == "spell" or nextWord == "spells" then
+          -- "target spell", "target noncreature spell", "target spell or ability".
+          local filt = after:sub(1, #after - #rest):gsub("%s+$", "")
+          sp = { kind = "spell", filt = filt, spellsToo = true,
+            ability = rest:find("^spells? or ability") ~= nil or rest:find("^spells?, activated ability, or triggered ability") ~= nil }
+        elseif (nextWord == "card" or nextWord == "cards") and sentence:find("graveyard", 1, true) then
+          -- "target creature card from your graveyard", "target card from a graveyard".
+          local whose = "any"
+          if sentence:find("your graveyard", 1, true) then
+            whose = "you"
+          elseif sentence:find("opponent's graveyard", 1, true) then
+            whose = "opp"
+          end
+          sp = { kind = "gycard", types = types, nots = nots, whose = whose,
+            phrase = (after:sub(1, #after - #rest) .. "card"):gsub("^%s+", "") }
+        elseif nextWord == "card" or nextWord == "cards" then
           sp = nil
         elseif any and adj["or"] and nextWord == "player" and types.creature then
           -- Older wording: "target creature or player" is any target.
@@ -10082,6 +10182,9 @@ local function targetFits(sp, obj, owner, seat, srcGuid, taken)
       if ty[k] then
         return false
       end
+    end
+    if sp.landSub and not tostring(CardData.get(obj).typeLine or ""):lower():find(sp.landSub, 1, true) then
+      return false
     end
     if sp.sub and Statics and Statics.typeMatches then
       local d = CardData.get(obj)
@@ -10196,6 +10299,134 @@ local function targetBody(text)
 end
 
 -- Choose the targets for a stack item now (as it goes on the stack). done() runs once they're chosen.
+-- Modes of a modal spell or ability: { modes = { "text", ... }, kind = "one" | "two" | "three" | "many" }, or nil.
+function Effects.modeInfo(raw)
+  raw = tostring(raw or "")
+  local lowRaw = raw:lower()
+  local modes = {}
+  local spree = lowRaw:find("spree", 1, true) and raw:find("\n+ ", 1, true)
+  if spree then
+    for line in raw:gmatch("[^\n]+") do
+      if line:sub(1, 2) == "+ " then
+        local body = line:match("— (.*)$") or line:sub(3)
+        local cost = (line:match("^%+ ([^—]*)—") or ""):gsub("%s+$", "")
+        table.insert(modes, (body:gsub("%s+$", "")) .. (cost ~= "" and (" [pay " .. cost .. "]") or ""))
+      end
+    end
+  else
+    local bullet = raw:find("•", 1, true)
+    if not bullet then
+      return nil
+    end
+    local rest = raw:sub(bullet)
+    local pos = 1
+    while true do
+      local a = rest:find("•", pos, true)
+      if not a then
+        break
+      end
+      local b = rest:find("•", a + 1, true)
+      local m = rest:sub(a + #"•", (b or (#rest + 1)) - 1):gsub("^%s+", ""):gsub("%s+$", "")
+      if m ~= "" then
+        table.insert(modes, m)
+      end
+      if not b then
+        break
+      end
+      pos = b
+    end
+  end
+  if #modes == 0 then
+    return nil
+  end
+  local kind = "one"
+  if spree or lowRaw:find("choose one or more", 1, true) or lowRaw:find("choose any number", 1, true) then
+    kind = "many"
+  elseif lowRaw:find("choose two", 1, true) then
+    kind = "two"
+  elseif lowRaw:find("choose three", 1, true) then
+    kind = "three"
+  elseif lowRaw:find("you may choose both", 1, true) then
+    kind = "will"
+  end
+  return { modes = modes, kind = kind }
+end
+
+-- Choose the modes now, as it's cast / put on the stack (CR 601.2b). cb(list of mode texts).
+local function chooseModes(it, info, cb)
+  local seat = it.controller
+  local kind = info.kind
+  if kind == "will" then
+    kind = (Effects.controlsCommander and Effects.controlsCommander(seat)) and "many" or "one"
+  end
+  local function banner(chosen)
+    if #chosen > 0 then
+      printToAll("MTG > " .. it.name .. " (" .. seat .. ") mode" .. (#chosen == 1 and "" or "s") .. ": " .. table.concat(chosen, " + "), { 1, 0.85, 0.3 })
+    else
+      printToAll("MTG > " .. it.name .. " (" .. seat .. "): no mode chosen.", INFO)
+    end
+  end
+  if kind == "many" then
+    local chosen = {}
+    local function step(i)
+      if i > #info.modes then
+        banner(chosen)
+        return cb(chosen)
+      end
+      ask(seat, it.name .. ": mode " .. i .. " of " .. #info.modes, info.modes[i],
+        { { label = "USE IT", value = true }, { label = "SKIP IT", value = false } }, function(yes)
+          if yes then
+            table.insert(chosen, info.modes[i])
+          end
+          step(i + 1)
+        end)
+    end
+    return step(1)
+  end
+  local need = (kind == "two" and 2) or (kind == "three" and 3) or 1
+  local chosen, used = {}, {}
+  local function pick()
+    if #chosen >= need then
+      banner(chosen)
+      return cb(chosen)
+    end
+    local lines, choices = {}, {}
+    for i, m in ipairs(info.modes) do
+      if not used[i] and #choices < MAX_CHOICES then
+        table.insert(lines, i .. ") " .. (#m > 150 and (m:sub(1, 148) .. "...") or m))
+        table.insert(choices, { label = tostring(i), value = i })
+      end
+    end
+    ask(seat, it.name .. ": choose a mode" .. (need > 1 and (" (" .. (#chosen + 1) .. " of " .. need .. ")") or ""),
+      "Choose now, as it goes on the stack.\n" .. table.concat(lines, "\n"), choices, function(i)
+        i = tonumber(i) or 1
+        used[i] = true
+        table.insert(chosen, info.modes[i])
+        pick()
+      end)
+  end
+  pick()
+end
+
+-- "Enchant creature you control" -> a target spec.
+local LAND_TYPES = { forest = true, island = true, swamp = true, mountain = true, plains = true }
+function Effects.auraSpec(phrase)
+  local p = tostring(phrase or ""):lower():gsub("^%s+", ""):gsub("[%.%s]+$", "")
+  if LAND_TYPES[p] then
+    return { kind = "card", types = { land = true }, nots = {}, landSub = p, phrase = p, n = 1, upTo = false }
+  end
+  local list = Effects.targetSpecs("target " .. p)
+  local sp = list[1]
+  if sp == nil then
+    sp = { kind = "card", types = { permanent = true }, nots = {}, phrase = p }
+  end
+  sp.n, sp.upTo = 1, false
+  return sp
+end
+
+local pickAll
+
+-- Choose the targets (and modes) for a stack item now, as it goes on the stack. done() runs once they're chosen.
 function Effects.chooseTargets(it, done)
   local function finish()
     it.choosing = nil
@@ -10209,13 +10440,76 @@ function Effects.chooseTargets(it, done)
   if it.kind ~= "card" and (not it.auto or it.copyOf or it.planar or it.ninjutsu) then
     return finish()
   end
-  local text = it.kind == "card" and it.targetText or it.text
-  local low = tostring(text or ""):lower()
-  -- Modal spells and abilities pick their mode as they resolve (not yet moved to casting).
-  if low == "" or low:find("•", 1, true) or (low:find("spree", 1, true) and low:find("\n+ ", 1, true)) then
+  if not TableSetup.isActive(it.controller) then
     return finish()
   end
-  local specs = Effects.targetSpecs(targetBody(text))
+  -- An Aura spell targets what it will enchant (CR 303.4a).
+  if it.auraText then
+    return pickAll(it, it.auraText, { Effects.auraSpec(it.auraText) }, done)
+  end
+  local text = it.kind == "card" and it.targetText or it.text
+  if tostring(text or "") == "" then
+    return finish()
+  end
+  local info = Effects.modeInfo(text)
+  if info and not it.modesChosen then
+    it.choosing = true
+    return chooseModes(it, info, function(chosen)
+      it.modesChosen = chosen
+      local body = table.concat(chosen, " ")
+      pickAll(it, body, Effects.targetSpecs((body:gsub(" %[pay [^%]]*%]", ""))), done)
+    end)
+  end
+  pickAll(it, text, Effects.targetSpecs(targetBody(text)), done)
+end
+
+-- The candidates for a "target spell / ability" on the stack (not the item itself).
+local function stackCandidates(it, sp)
+  local out = {}
+  for _, e in ipairs(Stack.entries()) do
+    if e.guid ~= it.guid and e.guid ~= it.card then
+      local obj = getObjectFromGUID(e.guid)
+      if obj then
+        if e.kind == "ability" then
+          if sp.ability then
+            table.insert(out, e)
+          end
+        elseif sp.spellsToo and spellFits(obj, sp.filt, nil) then
+          table.insert(out, e)
+        end
+      end
+    end
+  end
+  return out
+end
+
+-- The cards in a seat's graveyard: { guid, name, typeLine }.
+local function graveyardCards(seat)
+  local out = {}
+  local pile = Library and Library.pileIn and Library.pileIn(seat, "graveyard")
+  if pile and pile.type == "Deck" then
+    for _, e in ipairs(pile.getObjects() or {}) do
+      local tl = ""
+      pcall(function()
+        local d = JSON.decode(e.gm_notes or "")
+        tl = type(d) == "table" and tostring(d.typeLine or "") or ""
+      end)
+      table.insert(out, { guid = e.guid, name = e.name or e.nickname or "?", typeLine = tl })
+    end
+  elseif pile and pile.type == "Card" then
+    table.insert(out, { guid = pile.getGUID(), name = pile.getName(), typeLine = tostring(CardData.get(pile).typeLine or "") })
+  end
+  return out
+end
+Effects.graveyardCards = graveyardCards
+
+function pickAll(it, text, specs, done)
+  local function finish()
+    it.choosing = nil
+    if done then
+      done()
+    end
+  end
   if #specs == 0 then
     return finish()
   end
@@ -10254,6 +10548,10 @@ function Effects.chooseTargets(it, done)
       if #it.preTargets > 0 then
         highlightTargets(it, true)
         printToAll("MTG > " .. it.name .. " (" .. seat .. ") targets " .. Effects.targetSummary(it) .. ".", { 1, 0.85, 0.3 })
+        -- Ward on anything it targets: the ward trigger goes on top (CR 702.21).
+        if Effects.wardTriggers then
+          pcall(Effects.wardTriggers, it)
+        end
       else
         printToAll("MTG > " .. it.name .. " (" .. seat .. "): no target chosen.", INFO)
       end
@@ -10268,6 +10566,96 @@ function Effects.chooseTargets(it, done)
       end
       if sp.kind == "card" then
         return pickCard(sp, k, one)
+      end
+      if sp.kind == "spell" then
+        -- "Target spell / ability": one of the items on the stack.
+        local cands = stackCandidates(it, sp)
+        if #cands == 0 then
+          printToAll("MTG > " .. it.name .. ": nothing on the stack it can target.", INFO)
+          return nextSpec()
+        end
+        local lines, choices = {}, {}
+        for i = #cands, 1, -1 do
+          if #choices < MAX_CHOICES - 1 then
+            local e = cands[i]
+            table.insert(lines, (#choices + 1) .. ") " .. e.name .. (e.kind == "ability" and "'s ability" or "") .. " (" .. tostring(e.controller) .. ")")
+            table.insert(choices, { label = tostring(#choices + 1), value = i })
+          end
+        end
+        table.insert(choices, { label = "SKIP", value = false })
+        return ask(seat, it.name .. ": target " .. (sp.ability and not sp.spellsToo and "ability" or "spell"),
+          "Choose the target now, as it goes on the stack.\n" .. table.concat(lines, "\n"), choices, function(i)
+            if not i then
+              return nextSpec()
+            end
+            local e = cands[i]
+            table.insert(it.preTargets, { kind = "spell", guid = e.guid, name = e.name, owner = e.controller })
+            one()
+          end)
+      end
+      if sp.kind == "gycard" then
+        -- "Target creature card from your graveyard": pick it from a list (a few at a time).
+        local seats = {}
+        for _, c in ipairs(players()) do
+          if sp.whose == "any" or (sp.whose == "you" and c == seat) or (sp.whose == "opp" and TableSetup.isOpponent(c, seat)) then
+            table.insert(seats, c)
+          end
+        end
+        local list = {}
+        for _, c in ipairs(seats) do
+          for _, e in ipairs(graveyardCards(c)) do
+            local tl = e.typeLine:lower()
+            local okT = next(sp.types or {}) == nil
+            for ty in pairs(sp.types or {}) do
+              okT = okT or ty == "permanent" and not (tl:find("instant", 1, true) or tl:find("sorcery", 1, true)) or tl:find(ty, 1, true) ~= nil
+            end
+            for ty in pairs(sp.nots or {}) do
+              if tl:find(ty, 1, true) then
+                okT = false
+              end
+            end
+            if okT and not taken[e.guid] then
+              table.insert(list, { guid = e.guid, name = e.name, owner = c })
+            end
+          end
+        end
+        if #list == 0 then
+          printToAll("MTG > " .. it.name .. ": no " .. tostring(sp.phrase) .. " to target in " .. (sp.whose == "you" and "your graveyard" or "a graveyard") .. ".", INFO)
+          return nextSpec()
+        end
+        local page = 0
+        local function show()
+          local per = MAX_CHOICES - 2
+          local lines, choices = {}, {}
+          for i = page * per + 1, math.min(#list, page * per + per) do
+            local e = list[i]
+            table.insert(lines, (#choices + 1) .. ") " .. e.name .. " (" .. e.owner .. "'s graveyard)")
+            table.insert(choices, { label = tostring(#choices + 1), value = i })
+          end
+          if #list > (page + 1) * per then
+            table.insert(choices, { label = "MORE", value = "more" })
+          elseif page > 0 then
+            table.insert(choices, { label = "BACK TO START", value = "first" })
+          end
+          table.insert(choices, { label = "SKIP", value = false })
+          ask(seat, it.name .. ": target " .. tostring(sp.phrase), "Choose the target now, as it goes on the stack.\n"
+            .. table.concat(lines, "\n"), choices, function(v)
+              if v == "more" then
+                page = page + 1
+                return show()
+              elseif v == "first" then
+                page = 0
+                return show()
+              elseif not v then
+                return nextSpec()
+              end
+              local e = list[v]
+              taken[e.guid] = true
+              table.insert(it.preTargets, { kind = "gycard", guid = e.guid, name = e.name, owner = e.owner })
+              one()
+            end)
+        end
+        return show()
       end
       local choices = {}
       local pro = GameState.data.playerPro or {}
@@ -10320,6 +10708,15 @@ function Effects.checkTargets(it)
       local pro = GameState.data.playerPro or {}
       ok = p ~= nil and not p.eliminated and not (pro[e.seat] and e.seat ~= it.controller)
       why = "out of the game or protected"
+    elseif e.kind == "spell" then
+      ok = Stack.has(e.guid)
+      why = "it isn't on the stack any more"
+    elseif e.kind == "gycard" then
+      ok = false
+      for _, g in ipairs(graveyardCards(e.owner)) do
+        ok = ok or g.guid == e.guid
+      end
+      why = "it isn't in that graveyard any more"
     else
       local obj = getObjectFromGUID(e.guid)
       local owner = obj and not obj.isDestroyed() and fieldSeat(obj) or nil
@@ -10330,7 +10727,7 @@ function Effects.checkTargets(it)
       end
     end
     if ok then
-      table.insert(legal, { kind = e.kind, seat = e.seat, guid = e.guid })
+      table.insert(legal, { kind = e.kind, seat = e.seat, guid = e.guid, name = e.name })
     else
       printToAll("MTG > " .. it.name .. ": " .. tostring(e.name or e.seat) .. " is no longer a legal target (" .. why .. ").", { 1, 0.6, 0.2 })
     end
@@ -10350,7 +10747,7 @@ end
 -- A target prompt from the resolving code, answered from the targets chosen earlier.
 -- Returns true, value when it answers; nil to show the prompt as usual.
 local REPLAY_LABELS = { TARGET = true, DAMAGE = true, DESTROY = true, EXILE = true, RETURN = true, COUNTER = true,
-  TAP = true, UNTAP = true, GOAD = true, ["CHAOS WARP"] = true }
+  TAP = true, UNTAP = true, GOAD = true, ["CHAOS WARP"] = true, BLINK = true, COPY = true }
 function Effects.replayAnswer(seat, title, text, choices, pick)
   local r = Effects.replay
   if r == nil or seat ~= r.seat then
@@ -10410,3 +10807,433 @@ function Effects.replayAnswer(seat, title, text, choices, pick)
   end
   return nil
 end
+
+---------------------------------------------------------------------------
+-- Ward (CR 702.21): "Whenever this permanent becomes the target of a spell or ability an opponent
+-- controls, counter that spell or ability unless that player pays [cost]." Checked as the targets are
+-- chosen (Effects.chooseTargets): the ward trigger goes on the stack on top of the spell or ability.
+---------------------------------------------------------------------------
+
+-- The ward cost on a permanent ("{2}", "Pay 3 life.", "Discard a card."), or nil if it has no ward.
+function Effects.wardCost(obj)
+  if obj == nil or not hasKeyword(obj, "ward") then
+    return nil
+  end
+  local d = CardData.get(obj)
+  for line in (tostring(d.oracle or "") .. "\n"):gmatch("([^\n]*)\n") do
+    local plain = line
+    if Triggers and Triggers.stripReminder then
+      plain = Triggers.stripReminder(line)
+    end
+    local c = plain:match("^[Ww]ard%s*—%s*(.+)$") or plain:match("^[Ww]ard%s*%-%s*(.+)$") or plain:match("^[Ww]ard%s+(.+)$")
+    if c then
+      return (c:gsub("%s+$", ""))
+    end
+  end
+  -- Ward given by something else ("Creatures you control have ward {1}").
+  if Statics and Statics.grants then
+    local okg, g = pcall(Statics.grants, obj)
+    for _, k in ipairs(okg and g and g.kws or {}) do
+      local c = tostring(k):match("^ward%s+(.+)$")
+      if c then
+        return c:upper()
+      end
+    end
+  end
+  return "its ward cost (see the card)"
+end
+
+local function wardTriggers(it)
+  for _, e in ipairs(it.preTargets or {}) do
+    if e.kind == "card" then
+      local obj = getObjectFromGUID(e.guid)
+      local owner = obj and fieldSeat(obj)
+      if owner and TableSetup.isOpponent(owner, it.controller) then
+        local cost = Effects.wardCost(obj)
+        if cost then
+          local text = "Ward: counter " .. it.name .. " (" .. it.controller .. ") unless " .. it.controller .. " pays " .. cost .. "."
+          printToAll("MTG > " .. obj.getName() .. " has ward: " .. text, { 1, 0.75, 0.3 })
+          Stack.pushAbility(owner, obj.getName(), text, nil, { trigger = true, source = obj.getGUID(),
+            ward = { target = it.guid, cost = cost, payer = it.controller, what = it.name } })
+        end
+      end
+    end
+  end
+end
+Effects.wardTriggers = wardTriggers
+
+function Effects.resolveWard(it)
+  local w = it.ward
+  if not (Stack and Stack.has and Stack.has(w.target)) then
+    printToAll("MTG > Ward (" .. it.name .. "): " .. tostring(w.what) .. " isn't on the stack any more.", INFO)
+    return
+  end
+  local cost = tostring(w.cost)
+  local life = tonumber(cost:lower():match("pay (%d+) life"))
+  ask(w.payer, "Ward: pay " .. cost .. "?", tostring(w.what) .. " targeted " .. it.name .. ", which has ward. Pay "
+    .. cost .. " (do it yourself" .. (life and "; the table takes the life" or ", e.g. with your mana chips") .. "), or it's countered.",
+    { { label = "PAY", value = true }, { label = "DON'T PAY", value = false } }, function(pays)
+      if pays then
+        if life then
+          Trackers.changeLife(w.payer, -life, "ward (" .. it.name .. ")")
+        end
+        printToAll("MTG > " .. w.payer .. " pays " .. cost .. " for ward: " .. tostring(w.what) .. " goes on.", GOOD)
+      elseif Stack.counterGuid then
+        Stack.counterGuid(w.target, "ward (" .. it.name .. ")")
+      end
+    end)
+end
+
+---------------------------------------------------------------------------
+-- The monarch (CR 724) and the initiative (CR 725). One player at a time holds each.
+--   Monarch: draws a card at the beginning of their end step. A creature dealing combat damage to the
+--   monarch makes its controller the monarch.
+--   Initiative: taking it, and the beginning of your upkeep while you have it, venture into Undercity.
+--   Combat damage to the holder passes it to the creature's controller.
+--   If the holder leaves the game, the active player takes it (the next player if that's them).
+---------------------------------------------------------------------------
+
+local function badgeRefresh()
+  if Trackers and Trackers.render then
+    for _, c in ipairs(TableSetup.activeSeats()) do
+      pcall(Trackers.render, c)
+    end
+  end
+end
+
+function Effects.monarch()
+  return GameState.data and GameState.data.monarch or nil
+end
+
+function Effects.initiative()
+  return GameState.data and GameState.data.initiative or nil
+end
+
+function Effects.setMonarch(seat, why)
+  if seat == nil or GameState.data.monarch == seat then
+    if seat then
+      printToAll("MTG > " .. seat .. " is still the monarch.", INFO)
+    end
+    return
+  end
+  GameState.data.monarch = seat
+  broadcastToAll(seat .. " becomes the monarch" .. (why and (" (" .. why .. ")") or "") .. ". They draw a card at the beginning of their end step.", { 1, 0.85, 0.3 })
+  badgeRefresh()
+end
+
+-- Undercity (the initiative's dungeon): room -> { text, next rooms }.
+local UNDERCITY = {
+  ["Secret Entrance"] = { "Search your library for a basic land card, reveal it, put it into your hand, then shuffle.", { "Forge", "Lost Well" } },
+  ["Forge"] = { "Put two +1/+1 counters on target creature.", { "Trap!", "Arena" } },
+  ["Lost Well"] = { "Scry 2.", { "Arena", "Stash" } },
+  ["Trap!"] = { "Target player loses 5 life.", { "Archives" } },
+  ["Arena"] = { "Goad target creature.", { "Archives", "Catacombs" } },
+  ["Stash"] = { "Create a Treasure token.", { "Catacombs" } },
+  ["Archives"] = { "Draw a card.", { "Throne of the Dead Three" } },
+  ["Catacombs"] = { "Create a 4/1 black Skeleton creature token with menace.", { "Throne of the Dead Three" } },
+  ["Throne of the Dead Three"] = { "Reveal the top ten cards of your library. Put a creature card from among them onto the battlefield with three +1/+1 counters on it. It gains hexproof until your next turn. Then shuffle.", {} },
+}
+
+local function enterRoom(seat, room)
+  GameState.data.undercity = GameState.data.undercity or {}
+  GameState.data.undercity[seat] = room
+  local r = UNDERCITY[room]
+  printToAll("MTG > " .. seat .. " ventures into Undercity: " .. room .. ".", { 0.55, 0.9, 0.6 })
+  if room == "Throne of the Dead Three" then
+    printToAll("MTG > Throne of the Dead Three: " .. r[1] .. " (by hand). Undercity is complete; the next venture starts over.", { 1, 0.85, 0.3 })
+    GameState.data.undercity[seat] = "done"
+    return
+  end
+  -- The room's ability is a triggered ability: on the stack, targets and all.
+  Stack.pushAbility(seat, "Undercity: " .. room, r[1], nil, { trigger = true, room = room })
+end
+
+function Effects.venture(seat)
+  GameState.data.undercity = GameState.data.undercity or {}
+  local at = GameState.data.undercity[seat]
+  if at == nil or at == "done" then
+    return enterRoom(seat, "Secret Entrance")
+  end
+  local nexts = (UNDERCITY[at] or { nil, {} })[2]
+  if #nexts == 0 then
+    return enterRoom(seat, "Secret Entrance")
+  elseif #nexts == 1 then
+    return enterRoom(seat, nexts[1])
+  end
+  local choices = {}
+  for _, n in ipairs(nexts) do
+    table.insert(choices, { label = string.upper(n), value = n })
+  end
+  local lines = {}
+  for _, n in ipairs(nexts) do
+    table.insert(lines, n .. ": " .. UNDERCITY[n][1])
+  end
+  ask(seat, "Venture into Undercity", "You're in " .. at .. ". Which room next?\n" .. table.concat(lines, "\n"), choices, function(n)
+    enterRoom(seat, n or nexts[1])
+  end)
+end
+
+function Effects.setInitiative(seat, why)
+  if seat == nil then
+    return
+  end
+  GameState.data.initiative = seat
+  broadcastToAll(seat .. " takes the initiative" .. (why and (" (" .. why .. ")") or "") .. " and ventures into Undercity.", { 0.4, 0.9, 1 })
+  badgeRefresh()
+  Effects.venture(seat)
+end
+
+-- A player left the game (leave.lua): the monarch / initiative goes to the active player (or the next one).
+function Effects.holderLeft(color)
+  local t = GameState.data.turn or {}
+  local function heir()
+    local a = t.activeSeat
+    if a and a ~= color and not (Leave and Leave.isOut(a)) then
+      return a
+    end
+    local seats = TableSetup.activeSeats()
+    local idx = 1
+    for i, c in ipairs(seats) do
+      if c == color then
+        idx = i
+      end
+    end
+    for k = 1, #seats do
+      local c = seats[(idx - 1 + k) % #seats + 1]
+      if c ~= color and not (Leave and Leave.isOut(c)) then
+        return c
+      end
+    end
+    return nil
+  end
+  if GameState.data.monarch == color then
+    GameState.data.monarch = nil
+    local h = heir()
+    if h then
+      Effects.setMonarch(h, color .. " left the game")
+    end
+  end
+  if GameState.data.initiative == color then
+    GameState.data.initiative = nil
+    local h = heir()
+    if h then
+      Effects.setInitiative(h, color .. " left the game")
+    end
+  end
+end
+
+-- Combat damage to the holder passes the monarch / initiative on (triggers.lua calls this with each hit).
+function Effects.combatDamageToPlayers(list)
+  for _, h in ipairs(list or {}) do
+    if (tonumber(h.amount) or 0) > 0 and h.seat and h.controller and h.controller ~= h.seat then
+      if GameState.data.monarch == h.seat then
+        Effects.setMonarch(h.controller, "combat damage to " .. h.seat)
+      end
+      if GameState.data.initiative == h.seat then
+        Effects.setInitiative(h.controller, "combat damage to " .. h.seat)
+      end
+    end
+  end
+end
+
+Events.on("stepStarted", function(d)
+  if d == nil or not GameState.data.started then
+    return
+  end
+  if d.step == "end" and GameState.data.monarch and GameState.data.monarch == d.seat then
+    local m = GameState.data.monarch
+    Stack.pushAbility(m, "The Monarch", "At the beginning of your end step, draw a card.", nil, { trigger = true })
+  end
+  if d.step == "upkeep" and GameState.data.initiative and GameState.data.initiative == d.seat then
+    printToAll("MTG > " .. d.seat .. " has the initiative: they venture into Undercity.", { 0.4, 0.9, 1 })
+    Effects.venture(d.seat)
+  end
+end)
+
+---------------------------------------------------------------------------
+-- The legend rule (CR 704.5j): two or more legendary permanents with the same name controlled by one
+-- player: they choose one, the rest go to their owners' graveyards.
+---------------------------------------------------------------------------
+
+local function legendRuleOff()
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" and not obj.isDestroyed() and fieldSeat(obj) then
+      local o = tostring(CardData.get(obj).oracle or ""):lower()
+      if o:find("the \"legend rule\" doesn't apply", 1, true) or o:find("legend rule doesn't apply", 1, true) then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+function Effects.legendCheck(card, seat)
+  if card == nil or card.isDestroyed() or seat == nil or Faces.unknown(card) then
+    return
+  end
+  local d = CardData.get(card)
+  local tl = tostring(d.typeLine or "")
+  if not tl:find("Legendary", 1, true) or tl:find("Instant", 1, true) or tl:find("Sorcery", 1, true) then
+    return
+  end
+  local name = card.getName()
+  local same = {}
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" and not obj.isDestroyed() and obj.getName() == name and fieldSeat(obj) == seat
+        and not Faces.unknown(obj) then
+      table.insert(same, obj)
+    end
+  end
+  if #same < 2 or legendRuleOff() then
+    return
+  end
+  local keepAsk = function(keep)
+    for _, obj in ipairs(same) do
+      if obj ~= keep and not obj.isDestroyed() then
+        printToAll("MTG > Legend rule: " .. seat .. " keeps one " .. name .. "; the other goes to the graveyard.", { 1, 0.6, 0.2 })
+        Combat.removeCard(obj, "graveyard")
+      end
+    end
+  end
+  local picked = {}
+  for _, o in ipairs(same) do
+    picked[o.getGUID()] = true
+  end
+  ask(seat, "Legend rule: " .. name, "You control " .. #same .. " legendary permanents named " .. name
+    .. ". Click KEEP on the one that stays; the rest go to the graveyard.", { { label = "KEEP THE NEW ONE", value = false } },
+    function(obj)
+      keepAsk(obj or card)
+    end, { filter = function(obj) return picked[obj.getGUID()] == true end, label = "KEEP", noProtect = true })
+end
+
+Events.on("cardMoved", function(d)
+  if d.card == nil or d.to == nil or not GameState.data.started then
+    return
+  end
+  if (d.to.region == "battlefield" or d.to.region == "lands") and not (d.from and (d.from.region == "battlefield" or d.from.region == "lands")) then
+    local card, seat = d.card, d.to.seat
+    Wait.time(function()
+      pcall(Effects.legendCheck, card, seat)
+    end, 1.2)
+  end
+end)
+
+---------------------------------------------------------------------------
+-- Before the first turn (after mulligans):
+--   * Leylines and friends (CR 103.6): "If this card is in your opening hand, you may begin the game with it
+--     on the battlefield." Each such card in an opening hand is offered.
+--   * Color identity (CR 903.4-903.5): a warning for cards outside the commander's color identity.
+---------------------------------------------------------------------------
+
+local function handCardsOf(color)
+  local out = {}
+  pcall(function()
+    for _, h in ipairs(Player[color].getHandObjects() or {}) do
+      if h.type == "Card" and h.hasTag("MTGCard") then
+        table.insert(out, h)
+      end
+    end
+  end)
+  return out
+end
+
+function Effects.openingHandStarts(color)
+  local list = {}
+  for _, h in ipairs(handCardsOf(color)) do
+    local o = tostring(CardData.get(h).oracle or ""):lower()
+    if o:find("in your opening hand, you may begin the game with it on the battlefield", 1, true) then
+      table.insert(list, h)
+    end
+  end
+  local function step(i)
+    local card = list[i]
+    if card == nil then
+      return
+    end
+    ask(color, card.getName() .. ": opening hand", "It's in your opening hand: begin the game with it on the battlefield?",
+      { { label = "YES, ONTO THE BATTLEFIELD", value = true }, { label = "NO, KEEP IT IN HAND", value = false } }, function(yes)
+        if yes and not card.isDestroyed() then
+          local s = TableSetup.seat(color)
+          local tl = tostring(CardData.get(card).typeLine or "")
+          card.setRotation({ 0, s.yaw, 0 })
+          card.setPosition(TableSetup.slot(color, tl:find("Land", 1, true) and "lands" or "battlefield", 2))
+          Wait.time(function()
+            if not card.isDestroyed() then
+              Zones.refresh(card)
+            end
+          end, 0.8)
+          printToAll("MTG > " .. color .. " begins the game with " .. card.getName() .. " on the battlefield.", GOOD)
+        end
+        step(i + 1)
+      end)
+  end
+  step(1)
+end
+
+local function identityOf(d)
+  local out = {}
+  for _, c in ipairs(type(d) == "table" and type(d.colorIdentity) == "table" and d.colorIdentity or {}) do
+    out[tostring(c):upper()] = true
+  end
+  return out
+end
+
+function Effects.checkIdentity(color)
+  local allowed, commanders = {}, {}
+  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+    if o.type == "Card" and not o.isDestroyed() then
+      local okl, loc = pcall(function() return Zones.regionAt(o.getPosition()) end)
+      if okl and loc and loc.seat == color and (loc.region == "command1" or loc.region == "command2") then
+        local d = CardData.get(o)
+        if d.isCommander or tostring(d.typeLine or ""):find("Legendary", 1, true) or tostring(d.oracle or ""):lower():find("can be your commander", 1, true) then
+          table.insert(commanders, o.getName())
+          for c in pairs(identityOf(d)) do
+            allowed[c] = true
+          end
+        end
+      end
+    end
+  end
+  if #commanders == 0 then
+    return
+  end
+  local bad = {}
+  local function check(name, d)
+    for c in pairs(identityOf(d)) do
+      if not allowed[c] then
+        table.insert(bad, name)
+        return
+      end
+    end
+  end
+  local lib = Library and Library.find and Library.find(color)
+  if lib and lib.type == "Deck" then
+    for _, e in ipairs(lib.getObjects() or {}) do
+      local okd, d = pcall(JSON.decode, e.gm_notes or "")
+      if okd and type(d) == "table" then
+        check(e.name or "?", d)
+      end
+    end
+  end
+  for _, h in ipairs(handCardsOf(color)) do
+    check(h.getName(), CardData.get(h))
+  end
+  if #bad > 0 then
+    local shown = {}
+    for i = 1, math.min(#bad, 8) do
+      shown[i] = bad[i]
+    end
+    printToAll("MTG > Heads up: " .. color .. "'s deck has " .. #bad .. " card" .. (#bad == 1 and "" or "s")
+      .. " outside " .. table.concat(commanders, " + ") .. "'s color identity (CR 903.4): " .. table.concat(shown, ", ")
+      .. (#bad > 8 and ", ..." or "") .. ". Fine for a house game; not legal Commander.", { 1, 0.75, 0.3 })
+  end
+end
+
+Events.on("gameStarted", function(d)
+  for _, c in ipairs(d and d.players or {}) do
+    pcall(Effects.checkIdentity, c)
+  end
+  for _, c in ipairs(d and d.players or {}) do
+    pcall(Effects.openingHandStarts, c)
+  end
+end)

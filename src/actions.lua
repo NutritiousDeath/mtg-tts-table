@@ -1023,6 +1023,7 @@ local CONSOLE = {
   { key = "start", label = "START GAME", tip = "START GAME\nOpen the start / new game panel", fn = "ui_toggleStart" },
   { key = "turnopts", label = "TURN OPTIONS", tip = "TURN OPTIONS\nExtra turn, extra combat, skip a step, flip the table...", fn = "ui_turnOpts" },
   { key = "dice", label = "ROLL DICE", tip = "ROLL DICE\nOpen the dice roller (only you see it)", fn = "ui_diceToggle" },
+  { key = "rules", label = "RULES", tip = "RULES\nThe Commander rules book (only you see it)", fn = "ui_rulesOpen" },
 }
 local CONSOLE_RGB = { White = { 0.85, 0.88, 0.95 }, Red = { 1, 0.45, 0.5 }, Green = { 0.45, 1, 0.6 }, Blue = { 0.5, 0.75, 1 } }
 
@@ -1049,9 +1050,11 @@ local function renderConsole(color)
       end
     end
     -- Left to right as the seat's player sees it (negative x is their left).
+    -- One cell each, left to right (tools/make_console_art.py draws the same number of cells).
+    local n = #CONSOLE
     Trackers.tileButton(tile, { label = c.label, click_function = fn, tooltip = c.tip,
-      width = 1700, height = 820, font_size = 230, font_color = CONSOLE_RGB[color] or { 1, 1, 1 },
-      color = { 0, 0, 0, 0 }, hover_color = { 1, 1, 1, 0.1 }, press_color = { 1, 1, 1, 0.2 } }, (i - 2) * 11 / 3, 0)
+      width = math.floor(11 / n * 470), height = 820, font_size = n > 3 and 185 or 230, font_color = CONSOLE_RGB[color] or { 1, 1, 1 },
+      color = { 0, 0, 0, 0 }, hover_color = { 1, 1, 1, 0.1 }, press_color = { 1, 1, 1, 0.2 } }, (i - (n + 1) / 2) * 11 / n, 0)
   end
 end
 
@@ -1059,7 +1062,7 @@ function Actions.ensureConsole()
   local wanted = {}
   for _, color in ipairs(TableSetup.activeSeats()) do
     table.insert(wanted, { key = color, color = color, region = "console", name = "Console (" .. color .. ")",
-      url = ART_BASE .. "ui/console_" .. color .. ".png?v=2", width = 11,
+      url = ART_BASE .. "ui/console_" .. color .. ".png?v=3", width = 11,
       draw = function() renderConsole(color) end })
   end
   Trackers.syncTiles("ConsoleTile", { { registry = consoleTiles(), wanted = wanted } })

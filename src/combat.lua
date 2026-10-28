@@ -2011,6 +2011,10 @@ Events.on("cardMoved", function(d)
       local _, owner = commanderKey(d.card)
       local card = d.card
       Wait.time(function()
+        local asked = GameState.data.cmdAsked and GameState.data.cmdAsked[card.getGUID()]
+        if asked and os.time() - asked < 15 then
+          return   -- already asked before it moved (CR 903.9b)
+        end
         if not card.isDestroyed() and Combat.isCommander(card) then
           Effects.askChoice(owner, card.getName() .. " left the battlefield",
             "Put " .. card.getName() .. " into the command zone instead?",

@@ -717,6 +717,18 @@ function Trackers.render(color)
     return
   end
 
+  -- The monarch / the initiative (effects.lua), along the bottom edge.
+  if GameState.data.monarch == color then
+    button(tile, { label = "MONARCH", click_function = "trk_noop", tooltip = "The monarch: draws a card at the beginning of their end step."
+      .. " Combat damage to them makes the attacker's controller the monarch.", width = 0, height = 0, font_size = 170,
+      font_color = { 1, 0.82, 0.3 }, color = { 0, 0, 0, 0 } }, -2.6, 1.95)
+  end
+  if GameState.data.initiative == color then
+    button(tile, { label = "INITIATIVE", click_function = "trk_noop", tooltip = "The initiative: ventures into Undercity at the beginning of their upkeep."
+      .. " Combat damage to them passes it on.", width = 0, height = 0, font_size = 170,
+      font_color = { 0.4, 0.9, 1 }, color = { 0, 0, 0, 0 } }, 2.6, 1.95)
+  end
+
   -- Poison on the drop.
   outlined(tile, tostring(p.poison), POISON_SLOT.x, POISON_SLOT.z + POISON_NUMBER_DZ, 300,
     p.poison >= poisonLethal() - 3 and WARN or INK,
