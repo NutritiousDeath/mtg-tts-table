@@ -123,7 +123,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.49 (Talion, Bloodline Pretender, intervening if, living weapon, DFC keywords)"
+SCRIPT_VERSION = "2.50 (targets chosen on the stack, automatic priority, fizzling)"
 
 function onLoad(saved)
   GameLog.setup()

@@ -811,6 +811,11 @@ function Turns.ask(from, text, label, onAllPass)
   promptNext()
 end
 
+-- Is a round of answers going on (NEXT STEP, or responses to something)?
+function Turns.isWaiting()
+  return turn().pending ~= nil
+end
+
 -- The wait for answers can't be clicked through, in any step: whoever is
 -- being asked decides (or someone types !forcepass if they're away).
 function Turns.protected()
@@ -893,8 +898,8 @@ function Turns.respond(color, hasResponse)
     pendingAction = action
     rememberHeld(color, p, t)
     pendingAction = nil
-    broadcastToAll(color .. " has a response! Put it on the stack. " .. tostring(p.from)
-      .. " can try again when it's done.", WARN)
+    broadcastToAll(color .. " has a response! Put it on the stack (everyone gets to answer it)."
+      .. " If nothing gets added, click RESOLVE to ask again.", WARN)
     Turns.render()
     return
   end

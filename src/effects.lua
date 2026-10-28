@@ -4140,6 +4140,10 @@ end
 
 local queue = {}     -- questions waiting: { seat, title, text, choices = { {label, value} }, onPick }
 local current = nil
+-- The question being shown right now (for tests and !unstick).
+function Effects.currentQuestion()
+  return current
+end
 
 function Effects.isPending()
   return current ~= nil or #queue > 0
@@ -4198,6 +4202,7 @@ local function nextQuestion()
   -- (TTS's Lua errors on table.remove of an empty list.)
   current = #queue > 0 and table.remove(queue, 1) or nil
   if current == nil then
+    Effects.replay = nil   -- everything that was resolving has been answered
     -- All answered: a step that moves on by itself (draw, upkeep via END
     -- TURN...) can carry on now.
     Wait.time(function()
@@ -4227,6 +4232,14 @@ local function nextQuestion()
 end
 
 local function ask(seat, title, text, choices, onPick, pick, number)
+  -- Targets chosen as it went on the stack: the resolving code's target prompts answer themselves.
+  if not number and Effects.replay and Effects.replayAnswer then
+    local okr, hit, v = pcall(Effects.replayAnswer, seat, title, text, choices, pick)
+    if okr and hit then
+      onPick(v)
+      return
+    end
+  end
   table.insert(queue, { seat = seat, title = title, text = text, choices = choices, onPick = onPick, pick = pick,
     number = number, src = Effects.currentSource })
   if current == nil then
@@ -9884,4 +9897,516 @@ function Effects.forgeRegen(seat, a, it)
     printToAll("MTG > " .. obj.getName() .. " has a regeneration shield this turn: the next time it would be destroyed, instead"
       .. " tap it, remove it from combat and remove all damage from it (do that by hand).", GOOD)
   end)
+end
+
+---------------------------------------------------------------------------
+-- Targets (CR 115). A spell or ability's targets are chosen as it goes on the stack
+-- (Effects.chooseTargets, from stack.lua), so everyone can see what it's aimed at before they
+-- answer. As it resolves (Effects.checkTargets) each target is checked again: one that has left
+-- the battlefield (even if it came back: a new object), changed type, or gained hexproof, shroud
+-- or protection is no longer legal. With none legal, the spell or ability does nothing
+-- ("fizzles"); otherwise the resolving code's own target prompts are answered from the chosen
+-- targets (Effects.replayAnswer, called from ask), skipping the illegal ones. A target the reader
+-- below doesn't recognise is still asked for as it resolves, the way it always was.
+---------------------------------------------------------------------------
+
+-- Times each card has left the battlefield: a card that leaves and comes back is a new object.
+local zoneChanges = {}
+Events.on("cardMoved", function(d)
+  if d.card == nil or d.from == nil then
+    return
+  end
+  local fromField = d.from.region == "battlefield" or d.from.region == "lands"
+  local toField = d.to and (d.to.region == "battlefield" or d.to.region == "lands")
+  if fromField and not toField then
+    local ok, g = pcall(function() return d.card.getGUID() end)
+    if ok and g then
+      zoneChanges[g] = (zoneChanges[g] or 0) + 1
+    end
+  end
+end)
+
+local TARGET_TYPES = { creature = true, artifact = true, enchantment = true, planeswalker = true, land = true,
+  permanent = true, battle = true }
+local TARGET_COUNT = { ["up to one"] = { 1, true }, ["up to two"] = { 2, true }, ["up to three"] = { 3, true },
+  ["up to four"] = { 4, true }, ["one or two"] = { 2, true }, ["one, two, or three"] = { 3, true },
+  ["two"] = { 2, false }, ["three"] = { 3, false }, ["four"] = { 4, false }, ["any number of"] = { 9, true } }
+local TARGET_ADJ = { tapped = true, untapped = true, attacking = true, blocking = true, legendary = true,
+  nonlegendary = true, token = true, nontoken = true, white = true, blue = true, black = true, red = true, green = true,
+  colorless = true, multicolored = true, ["or"] = true, ["and/or"] = true }
+
+-- The targets a rules text asks for, in order. Each: { kind = "player" | "opponent" | "any" | "card",
+-- n = how many, upTo = may choose fewer, types = { creature = true, ... }, nots = { land = true },
+-- ctrl = "you" | "opp" | "notyou" | nil, other = not the source, tapped / untapped / attacking }.
+function Effects.targetSpecs(text)
+  local t = " " .. tostring(text or ""):lower() .. " "
+  t = t:gsub('"[^"]*"', ""):gsub("%b()", "")
+  local out = {}
+  local from = 1
+  while true do
+    local a, b = t:find("target", from, true)
+    if not a then
+      break
+    end
+    from = b + 1
+    local nextCh = t:sub(b + 1, b + 1)
+    local before = t:sub(math.max(1, a - 30), a - 1)
+    local after = t:sub(b + 2)
+    local sp
+    -- Not a target being chosen: "becomes the target of", "choose new targets", "change the target".
+    if (before:find("any $") or before:find("any other $")) and nextCh ~= "s" then
+      sp = { kind = "any", n = 1, other = before:find("other $") ~= nil }
+    elseif nextCh ~= " " or before:find("the $") or before:find("new $") or before:find("its $") or before:find("their $") then
+      sp = nil
+    else
+      local w1 = after:match("^(%a+)") or ""
+      if w1 == "player" or w1 == "players" then
+        sp = { kind = after:find("^players? or planeswalker") and "any" or "player" }
+        if sp.kind == "any" then
+          sp.pwOnly = true
+        end
+      elseif w1 == "opponent" or w1 == "opponents" then
+        sp = { kind = "opponent" }
+      else
+        -- Words that make up what it targets ("creature or planeswalker", "nonland permanent").
+        local types, nots, adj = {}, {}, {}
+        local rest = after
+        local any = false
+        while true do
+          local w = rest:match("^(%S+)")
+          if w == nil then
+            break
+          end
+          local bare = w:gsub("[%.,;:]$", "")
+          local stop = bare ~= w
+          if TARGET_TYPES[bare] or TARGET_TYPES[bare:gsub("s$", "")] then
+            types[bare:gsub("s$", "")] = true
+            any = true
+          elseif bare:sub(1, 3) == "non" and #bare > 3 and (TARGET_TYPES[bare:sub(4)] or TARGET_ADJ[bare]) then
+            if TARGET_TYPES[bare:sub(4)] then
+              nots[bare:sub(4)] = true
+            else
+              adj[bare] = true
+            end
+          elseif TARGET_ADJ[bare] then
+            adj[bare] = true
+          elseif bare == "another" or bare == "other" then
+            adj.other = true
+          else
+            break
+          end
+          rest = rest:sub(#w + 1):gsub("^%s+", "")
+          if stop then
+            rest = ""
+            break
+          end
+        end
+        local nextWord = rest:match("^(%a+)") or ""
+        if nextWord == "card" or nextWord == "cards" or nextWord == "spell" or nextWord == "spells" then
+          sp = nil
+        elseif any and adj["or"] and nextWord == "player" and types.creature then
+          -- Older wording: "target creature or player" is any target.
+          sp = { kind = "any" }
+        elseif any then
+          sp = { kind = "card", types = types, nots = nots, other = adj.other or before:find("another $") ~= nil,
+            tapped = adj.tapped, untapped = adj.untapped, attacking = adj.attacking, blocking = adj.blocking,
+            token = adj.token, nontoken = adj.nontoken }
+          if rest:find("^you control") then
+            sp.ctrl = "you"
+          elseif rest:find("^an opponent controls") or rest:find("^your opponents control") then
+            sp.ctrl = "opp"
+          elseif rest:find("^you don't control") then
+            sp.ctrl = "notyou"
+          end
+          sp.phrase = after:sub(1, #after - #rest):gsub("%s+$", ""):gsub("[%.,;:]$", "")
+        elseif nextWord ~= "" and not adj.other and (before:find("^.*%s$") ~= nil) then
+          -- "target Goblin", "target Elf you control": a creature type.
+          local stop = after:find("[%.,;]") or (#after + 1)
+          local chunk = after:sub(1, stop - 1)
+          local tw = chunk:match("^(%a+)")
+          if tw and tw ~= "spell" and tw ~= "card" and tw ~= "ability" and tw ~= "activated" and tw ~= "triggered"
+              and tw ~= "instant" and tw ~= "sorcery" and not chunk:find(" card", 1, true) and not chunk:find(" spell", 1, true)
+              and not chunk:find("graveyard", 1, true) and not chunk:find("library", 1, true) then
+            sp = { kind = "card", types = { creature = true }, nots = {}, sub = tw:gsub("s$", ""), phrase = tw }
+            if chunk:find(" you control", 1, true) then
+              sp.ctrl = "you"
+            elseif chunk:find(" an opponent controls", 1, true) then
+              sp.ctrl = "opp"
+            end
+          end
+        end
+      end
+    end
+    if sp then
+      sp.n, sp.upTo = 1, false
+      local best = 0
+      for k, v in pairs(TARGET_COUNT) do
+        if #k > best and before:sub(-(#k + 1)) == k .. " " then
+          sp.n, sp.upTo, best = v[1], v[2], #k
+        end
+      end
+      table.insert(out, sp)
+    end
+  end
+  return out
+end
+
+-- Can `obj` (controlled by `owner`) be this target for `seat`'s spell or ability from `srcGuid`?
+local function targetFits(sp, obj, owner, seat, srcGuid, taken)
+  if obj == nil or owner == nil then
+    return false
+  end
+  local g = obj.getGUID()
+  if taken and taken[g] then
+    return false
+  end
+  if sp.other and srcGuid and g == srcGuid then
+    return false
+  end
+  local ty = cardTypes(obj)
+  if sp.kind == "any" then
+    if not (ty.creature or ty.planeswalker or ty.battle) or (sp.pwOnly and not ty.planeswalker) then
+      return false
+    end
+  else
+    local okT = false
+    for k in pairs(sp.types or {}) do
+      if k == "permanent" or ty[k] then
+        okT = true
+      end
+    end
+    if not okT then
+      return false
+    end
+    for k in pairs(sp.nots or {}) do
+      if ty[k] then
+        return false
+      end
+    end
+    if sp.sub and Statics and Statics.typeMatches then
+      local d = CardData.get(obj)
+      if not Statics.typeMatches(d.typeLine, d.oracle, sp.sub) then
+        return false
+      end
+    end
+  end
+  if sp.ctrl == "you" and owner ~= seat then
+    return false
+  elseif sp.ctrl == "opp" and not TableSetup.isOpponent(owner, seat) then
+    return false
+  elseif sp.ctrl == "notyou" and owner == seat then
+    return false
+  end
+  if sp.tapped or sp.untapped then
+    local st = TableSetup.seat(owner)
+    local tapped = st ~= nil and math.abs(((obj.getRotation().y - st.yaw + 540) % 360) - 180) > 30
+    if (sp.tapped and not tapped) or (sp.untapped and tapped) then
+      return false
+    end
+  end
+  if (sp.attacking or sp.blocking) and Combat and Combat.isAttacking then
+    local att = Combat.isAttacking(obj)
+    local blk = Combat.isBlocking and Combat.isBlocking(obj) or false
+    if not ((sp.attacking and att) or (sp.blocking and blk)) then
+      return false
+    end
+  end
+  if sp.token and not obj.hasTag("Token") then
+    return false
+  elseif sp.nontoken and obj.hasTag("Token") then
+    return false
+  end
+  -- Shroud: nobody can target it. Hexproof: its controller's opponents can't. Protection: not by this source.
+  if hasKeyword(obj, "shroud") then
+    return false
+  end
+  if owner ~= seat and hasKeyword(obj, "hexproof") then
+    return false
+  end
+  if Equip and Equip.protectedFrom and srcGuid then
+    local okp, pro = pcall(Equip.protectedFrom, obj, srcGuid)
+    if okp and pro then
+      return false
+    end
+  end
+  return true
+end
+Effects.targetFits = targetFits
+
+local function seatRGB(seat)
+  local rgb = { 1, 1, 1 }
+  pcall(function()
+    local c = stringColorToRGB(seat)
+    if c then
+      rgb = { c.r or c[1], c.g or c[2], c.b or c[3] }
+    end
+  end)
+  return rgb
+end
+
+local function highlightTargets(it, on)
+  for _, e in ipairs(it.preTargets or {}) do
+    if e.kind == "card" then
+      local obj = getObjectFromGUID(e.guid)
+      if obj and not obj.isDestroyed() then
+        pcall(function()
+          if on then
+            obj.highlightOn(seatRGB(it.controller))
+          else
+            obj.highlightOff()
+          end
+        end)
+      end
+    end
+  end
+end
+
+function Effects.clearTargets(it)
+  if it then
+    highlightTargets(it, false)
+  end
+end
+
+-- What a stack item's targets read as ("Llanowar Elves (Green), Red").
+function Effects.targetSummary(it)
+  local parts = {}
+  for _, e in ipairs(it.preTargets or {}) do
+    if e.kind == "player" then
+      table.insert(parts, e.seat)
+    else
+      table.insert(parts, tostring(e.name) .. " (" .. tostring(e.owner) .. ")")
+    end
+  end
+  return table.concat(parts, ", ")
+end
+
+-- The rules text a stack item resolves with, minus the trigger ("When ~ enters, ") or the cost ("{T}: ").
+local function targetBody(text)
+  local t = tostring(text or "")
+  local low = t:lower()
+  local colon = low:find(": ", 1, true)
+  if colon and colon < 80 then
+    local head = low:sub(1, colon)
+    if head:find("{", 1, true) or head:find("^tap") or head:find("^sacrifice") or head:find("^pay")
+        or head:find("^discard") or head:find("^exile") or head:find("^remove") or head:find("^[%+%-−]%d") then
+      return low:sub(colon + 2)
+    end
+  end
+  return effectPart(low)
+end
+
+-- Choose the targets for a stack item now (as it goes on the stack). done() runs once they're chosen.
+function Effects.chooseTargets(it, done)
+  local function finish()
+    it.choosing = nil
+    if done then
+      done()
+    end
+  end
+  if not enabled() or not GameState.data.started or it == nil then
+    return finish()
+  end
+  if it.kind ~= "card" and (not it.auto or it.copyOf or it.planar or it.ninjutsu) then
+    return finish()
+  end
+  local text = it.kind == "card" and it.targetText or it.text
+  local low = tostring(text or ""):lower()
+  -- Modal spells and abilities pick their mode as they resolve (not yet moved to casting).
+  if low == "" or low:find("•", 1, true) or (low:find("spree", 1, true) and low:find("\n+ ", 1, true)) then
+    return finish()
+  end
+  local specs = Effects.targetSpecs(targetBody(text))
+  if #specs == 0 then
+    return finish()
+  end
+  local seat = it.controller
+  local src = it.source or it.guid
+  if not TableSetup.isActive(seat) then
+    return finish()
+  end
+  it.choosing = true
+  it.preTargets = {}
+  it.targetsChosen = true
+  local taken = {}
+  local si = 0
+  local nextSpec
+  local function pickCard(sp, k, cont)
+    local what = sp.kind == "any" and (sp.pwOnly and "planeswalker" or "creature or planeswalker") or tostring(sp.phrase or "permanent")
+    ask(seat, it.name .. ": target " .. what .. (sp.n > 1 and (" (" .. k .. " of " .. (sp.upTo and ("up to " .. sp.n) or sp.n) .. ")") or ""),
+      "Choose the target now, as it goes on the stack. Click TARGET on it" .. ((sp.upTo or k > 1) and ", or DONE." or ", or SKIP if there's no legal target."),
+      { { label = (sp.upTo or k > 1) and "DONE" or "SKIP", value = false } }, function(obj)
+        if obj then
+          local owner = fieldSeat(obj)
+          taken[obj.getGUID()] = true
+          table.insert(it.preTargets, { kind = "card", guid = obj.getGUID(), name = obj.getName(), owner = owner,
+            zc = zoneChanges[obj.getGUID()] or 0, spec = sp })
+          cont()
+        else
+          nextSpec()
+        end
+      end, { filter = function(obj, owner) return targetFits(sp, obj, owner, seat, src, taken) end, label = "TARGET", src = src,
+        choosing = true })
+  end
+  nextSpec = function()
+    si = si + 1
+    local sp = specs[si]
+    if sp == nil then
+      if #it.preTargets > 0 then
+        highlightTargets(it, true)
+        printToAll("MTG > " .. it.name .. " (" .. seat .. ") targets " .. Effects.targetSummary(it) .. ".", { 1, 0.85, 0.3 })
+      else
+        printToAll("MTG > " .. it.name .. " (" .. seat .. "): no target chosen.", INFO)
+      end
+      Stack.render()
+      return finish()
+    end
+    local k = 0
+    local function one()
+      k = k + 1
+      if k > sp.n then
+        return nextSpec()
+      end
+      if sp.kind == "card" then
+        return pickCard(sp, k, one)
+      end
+      local choices = {}
+      local pro = GameState.data.playerPro or {}
+      if not sp.pwOnly or sp.kind ~= "any" then
+        for _, c in ipairs(players()) do
+          local usedAlready = false
+          for _, e in ipairs(it.preTargets) do
+            usedAlready = usedAlready or (e.kind == "player" and e.seat == c)
+          end
+          if not usedAlready and not (pro[c] and c ~= seat) and not (sp.kind == "opponent" and not TableSetup.isOpponent(c, seat)) then
+            table.insert(choices, { label = string.upper(c), value = c })
+          end
+        end
+      end
+      if sp.kind == "any" then
+        table.insert(choices, { label = sp.pwOnly and "PLANESWALKER" or "CREATURE / PW", value = "card" })
+      end
+      table.insert(choices, { label = (sp.upTo or k > 1) and "DONE" or "SKIP", value = false })
+      ask(seat, it.name .. ": target " .. (sp.kind == "opponent" and "opponent" or (sp.kind == "any" and "(any target)" or "player")),
+        "Choose the target now, as it goes on the stack.\n" .. tostring(text), choices, function(v)
+          if v == false or v == nil then
+            return nextSpec()
+          end
+          if v == "card" then
+            return pickCard(sp, k, one)
+          end
+          table.insert(it.preTargets, { kind = "player", seat = v })
+          one()
+        end)
+    end
+    one()
+  end
+  nextSpec()
+end
+
+-- Just before it resolves: are its targets still legal? false = it fizzles (nothing happens).
+-- Otherwise the resolving code's target prompts are answered from them (Effects.replayAnswer).
+function Effects.checkTargets(it)
+  Effects.replay = nil
+  if it == nil or not it.targetsChosen then
+    return true
+  end
+  highlightTargets(it, false)
+  local legal = {}
+  local src = it.source or it.guid
+  for _, e in ipairs(it.preTargets or {}) do
+    local ok, why = true, nil
+    if e.kind == "player" then
+      local p = GameState.player(e.seat)
+      local pro = GameState.data.playerPro or {}
+      ok = p ~= nil and not p.eliminated and not (pro[e.seat] and e.seat ~= it.controller)
+      why = "out of the game or protected"
+    else
+      local obj = getObjectFromGUID(e.guid)
+      local owner = obj and not obj.isDestroyed() and fieldSeat(obj) or nil
+      if owner == nil or (zoneChanges[e.guid] or 0) ~= (e.zc or 0) then
+        ok, why = false, "it left the battlefield"
+      elseif not targetFits(e.spec or { kind = "any" }, obj, owner, it.controller, src, nil) then
+        ok, why = false, "it can't be targeted by this any more"
+      end
+    end
+    if ok then
+      table.insert(legal, { kind = e.kind, seat = e.seat, guid = e.guid })
+    else
+      printToAll("MTG > " .. it.name .. ": " .. tostring(e.name or e.seat) .. " is no longer a legal target (" .. why .. ").", { 1, 0.6, 0.2 })
+    end
+  end
+  if #(it.preTargets or {}) > 0 and #legal == 0 then
+    return false
+  end
+  Effects.replay = { seat = it.controller, entries = legal }
+  Wait.time(function()
+    if not Effects.busy() then
+      Effects.replay = nil
+    end
+  end, 0.5)
+  return true
+end
+
+-- A target prompt from the resolving code, answered from the targets chosen earlier.
+-- Returns true, value when it answers; nil to show the prompt as usual.
+local REPLAY_LABELS = { TARGET = true, DAMAGE = true, DESTROY = true, EXILE = true, RETURN = true, COUNTER = true,
+  TAP = true, UNTAP = true, GOAD = true, ["CHAOS WARP"] = true }
+function Effects.replayAnswer(seat, title, text, choices, pick)
+  local r = Effects.replay
+  if r == nil or seat ~= r.seat then
+    return nil
+  end
+  local lowT = (tostring(title) .. " " .. tostring(text)):lower()
+  local skip
+  for _, c in ipairs(choices or {}) do
+    if c.value == false then
+      skip = { false }
+    end
+  end
+  if pick and pick.filter then
+    if pick.choosing or pick.noProtect or not (lowT:find("target", 1, true) or REPLAY_LABELS[tostring(pick.label)]) then
+      return nil
+    end
+    for _, e in ipairs(r.entries) do
+      if e.kind == "card" and not e.used then
+        local obj = getObjectFromGUID(e.guid)
+        local owner = obj and not obj.isDestroyed() and fieldSeat(obj) or nil
+        if owner then
+          local okf, fits = pcall(pick.filter, obj, owner)
+          if okf and fits then
+            e.used = true
+            return true, obj
+          end
+        end
+      end
+    end
+    if skip then
+      return true, false
+    end
+    return nil
+  end
+  if lowT:find(": choose a player", 1, true) or lowT:find(": choose a target", 1, true) then
+    for _, e in ipairs(r.entries) do
+      if not e.used then
+        if e.kind == "player" then
+          for _, c in ipairs(choices or {}) do
+            if c.value == e.seat then
+              e.used = true
+              return true, e.seat
+            end
+          end
+        elseif e.kind == "card" then
+          for _, c in ipairs(choices or {}) do
+            if c.value == "other" then
+              return true, "other"
+            end
+          end
+        end
+      end
+    end
+    if skip then
+      return true, false
+    end
+  end
+  return nil
 end

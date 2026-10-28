@@ -29,6 +29,9 @@ local ART_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-tabl
 local ART_VERSION = "?v=1"
 local INFO = { 0.75, 0.8, 0.9 }
 local WARN = { 1, 0.6, 0.2 }
+-- Priority rounds (see Stack.offer): the item that last got its round of responses.
+local offerScheduled = false
+local lastOffered = nil
 
 -- The mat, in world coordinates (center of the table).
 local MAT = { x = 0, z = 0, w = 8, d = 11 }
@@ -159,7 +162,13 @@ function Stack.render()
     UI.setAttribute("stackRow_" .. r, "active", it and "true" or "false")
     if it then
       local tag = it.trigger and " (trigger)" or (it.kind == "ability" and " (ability)" or "")
-      UI.setValue("stackText_" .. r, (r == 1 and "TOP  " or (i .. ".  ")) .. it.name .. tag .. "  -  " .. it.controller)
+      local aim = ""
+      if it.preTargets and #it.preTargets > 0 and Effects and Effects.targetSummary then
+        aim = "  > " .. Effects.targetSummary(it)
+      elseif it.choosing then
+        aim = "  > choosing targets..."
+      end
+      UI.setValue("stackText_" .. r, (r == 1 and "TOP  " or (i .. ".  ")) .. it.name .. tag .. "  -  " .. it.controller .. aim)
     end
   end
   UI.setAttribute("stackPanel", "height", 130 + shown * 31)
@@ -194,8 +203,27 @@ function Stack.pushCard(obj, controller, from)
   if obj.is_face_down and not Faces.isFaceDown(obj) then
     Faces.hide(obj, nil, controller)
   end
-  table.insert(items(), { guid = obj.getGUID(), kind = "card", name = obj.getName(), controller = controller })
+  local item = { guid = obj.getGUID(), kind = "card", name = obj.getName(), controller = controller }
+  table.insert(items(), item)
   log(controller .. " casts " .. obj.getName() .. " (on the stack).")
+  -- Instants and sorceries choose their targets now (CR 601.2c), then everyone gets to respond.
+  local ty = typesOf(obj)
+  if (ty.Instant or ty.Sorcery) and not (ty.Creature or ty.Enchantment or ty.Artifact or ty.Planeswalker or ty.Battle or ty.Land)
+      and Effects and Effects.chooseTargets then
+    item.targetText = tostring(CardData.get(obj).oracle or "")
+    item.choosing = true
+    item.choosingAt = os.time()
+    Wait.time(function()
+      local okc, errc = pcall(Effects.chooseTargets, item, Stack.offer)
+      if not okc then
+        item.choosing = nil
+        Events.noteError("choosing targets for " .. tostring(item.name), errc)
+        Stack.offer()
+      end
+    end, 0.3)
+  else
+    Stack.offer()
+  end
   Events.emit("spellCast", { card = obj, controller = controller })
   -- A commander cast from its command zone: its tax goes up by 2.
   if from and from.region == "command" then
@@ -279,11 +307,27 @@ function Stack.pushAbility(controller, sourceName, text, image, opts)
     thickness = 0.1, merge_distance = 5, stackable = false })
   -- On the list right away (not when the picture has loaded), so the turn
   -- can't move on in the meantime.
-  table.insert(items(), { guid = obj.getGUID(), kind = "ability", name = sourceName, controller = controller,
+  local item = { guid = obj.getGUID(), kind = "ability", name = sourceName, controller = controller,
     text = text, trigger = opts.trigger, that = opts.that, source = opts.source, thatCard = opts.thatCard,
     amount = opts.amount, copyOf = opts.copyOf, ninjutsu = opts.ninjutsu, planar = opts.planar,
-    auto = (opts.trigger or opts.loyalty or opts.activated or opts.copyOf) and true or nil })
+    auto = (opts.trigger or opts.loyalty or opts.activated or opts.copyOf) and true or nil }
+  table.insert(items(), item)
   Stack.render()
+  -- Its targets are chosen now, as it goes on the stack (CR 602.2b / 603.3d); then everyone gets to respond.
+  if Effects and Effects.chooseTargets and item.auto and not opts.copyOf then
+    item.choosing = true
+    item.choosingAt = os.time()
+    Wait.time(function()
+      local okc, errc = pcall(Effects.chooseTargets, item, Stack.offer)
+      if not okc then
+        item.choosing = nil
+        Events.noteError("choosing targets for " .. tostring(sourceName), errc)
+        Stack.offer()
+      end
+    end, 0.3)
+  else
+    Stack.offer()
+  end
   if opts.copyOf then
     log(controller .. " puts a copy of " .. sourceName .. " on the stack.")
   elseif opts.trigger then
@@ -340,7 +384,14 @@ local function sendCard(obj, it, destination)
 end
 
 -- Resolve the top item (after everyone passed).
+local resolveTopNow
 function Stack.resolveTop()
+  resolveTopNow()
+  -- The next item down (if any) gets its own round of responses.
+  Stack.offer()
+end
+
+function resolveTopNow()
   local list = items()
   local it = list[#list]
   if it == nil then
@@ -364,6 +415,15 @@ function Stack.resolveTop()
       end
       return
     end
+    -- Its targets, checked again (CR 608.2b): with none of them legal any more it does nothing.
+    if Effects and Effects.checkTargets then
+      local okt, legal = pcall(Effects.checkTargets, it)
+      if okt and legal == false then
+        log(it.name .. "'s ability doesn't resolve: none of its targets are legal any more (it fizzles).", WARN)
+        Stack.offer()
+        return
+      end
+    end
     -- Carry out what it says, when the table can (effects.lua).
     if Effects then
       local okr, errr = pcall(Effects.resolve, it)
@@ -380,6 +440,16 @@ function Stack.resolveTop()
   local permanent = types.Creature or types.Enchantment or types.Artifact or types.Planeswalker or types.Battle
     or types.Land
   if (types.Instant or types.Sorcery) and not permanent then
+    -- Its targets, checked again (CR 608.2b): with none of them legal any more it does nothing.
+    if Effects and Effects.checkTargets then
+      local okt, legal = pcall(Effects.checkTargets, it)
+      if okt and legal == false then
+        log(it.name .. " doesn't resolve: none of its targets are legal any more (it fizzles, to the graveyard).", WARN)
+        sendCard(obj, it, "graveyard")
+        Stack.offer()
+        return
+      end
+    end
     log(it.name .. " resolves (to " .. it.controller .. "'s graveyard).")
     -- Read its text before it merges into the graveyard pile.
     local keep = false
@@ -438,6 +508,10 @@ function Stack.counterTop(byColor)
   end
   local obj = getObjectFromGUID(it.guid)
   removeAt(#list)
+  if Effects and Effects.clearTargets then
+    pcall(Effects.clearTargets, it)
+  end
+  Stack.offer()
   log(it.name .. (it.kind == "ability" and "'s ability" or "") .. " is countered (by " .. tostring(byColor) .. ").", WARN)
   if obj == nil then
     return
@@ -769,6 +843,10 @@ function ui_stackResolve(player)
     return
   end
   local what = it.name .. (it.kind == "ability" and "'s ability" or "")
+  lastOffered = it.guid
+  if it.preTargets and #it.preTargets > 0 and Effects and Effects.targetSummary then
+    what = what .. " (targeting " .. Effects.targetSummary(it) .. ")"
+  end
   if GameState.data.started and Turns.ask then
     Turns.ask(who, who .. " wants to resolve " .. what .. ".", "RESOLVE " .. string.upper(it.name), function()
       -- Still the same top item? (Something may have been added meanwhile.)
@@ -795,6 +873,58 @@ function ui_stackResolve(player)
   else
     Stack.resolveTop()
   end
+end
+
+---------------------------------------------------------------------------
+-- Priority: whenever something new is on top of the stack (and its targets are chosen), everyone
+-- else is asked for responses straight away, in turn order (the same pop-up as RESOLVE). When they
+-- all pass it resolves on its own (CR 117.4), and the next item down gets its own round. If someone
+-- has a response, their spell or ability goes on top and gets a round; if they end up not adding
+-- one, RESOLVE asks again. Solo test games keep the RESOLVE click (nobody else to ask).
+---------------------------------------------------------------------------
+
+local function tryOffer()
+  if not GameState.data or not GameState.data.started or GameState.solo() then
+    return
+  end
+  local list = items()
+  local top = list[#list]
+  if top == nil then
+    lastOffered = nil
+    return
+  end
+  if top.guid == lastOffered or Stack.autoResolve then
+    return
+  end
+  -- Wait while anything is still being decided: targets, trigger order, a pop-up, a waiting step.
+  -- (A "choosing" left over from before a reload doesn't count once nothing is being asked.)
+  local busy = (top.choosing and os.time() - (top.choosingAt or 0) < 5)
+    or (Triggers and Triggers.isOrdering and Triggers.isOrdering())
+    or (Effects and Effects.busy and Effects.busy())
+    or (Turns and Turns.isWaiting and Turns.isWaiting())
+  if busy then
+    Stack.offer()
+    return
+  end
+  if not TableSetup.isActive(top.controller) or Player[top.controller] == nil then
+    return
+  end
+  lastOffered = top.guid
+  ui_stackResolve(Player[top.controller])
+end
+
+function Stack.offer()
+  if offerScheduled then
+    return
+  end
+  offerScheduled = true
+  Wait.time(function()
+    offerScheduled = false
+    local ok, err = pcall(tryOffer)
+    if not ok then
+      Events.noteError("asking for responses", err)
+    end
+  end, 0.6)
 end
 
 -- YIELD: pass on everything until the stack is empty.
