@@ -585,6 +585,36 @@ end
 -- Who let go of each card last (cards cast from the table have no seat).
 local dropper = {}
 
+-- A player left the game (leave.lua): their spells and abilities come off the stack. Returns the
+-- removed entries (the caller deals with the objects).
+function Stack.dropControlledBy(color)
+  local list = items()
+  local out = {}
+  for i = #list, 1, -1 do
+    local it = list[i]
+    if it.controller == color then
+      table.remove(list, i)
+      if Effects and Effects.clearTargets then
+        pcall(Effects.clearTargets, it)
+      end
+      log(it.name .. (it.kind == "ability" and "'s ability" or "") .. " leaves the stack: " .. color .. " left the game.", WARN)
+      table.insert(out, it)
+    end
+  end
+  if #out > 0 then
+    Stack.layout()
+    Stack.offer()
+    if #list == 0 and Turns and Turns.onStackEmpty then
+      Wait.time(function()
+        if Stack.isEmpty() then
+          Turns.onStackEmpty()
+        end
+      end, 0.3)
+    end
+  end
+  return out
+end
+
 function Stack.has(guid)
   return indexOf(guid) ~= nil
 end
@@ -596,6 +626,10 @@ end
 local CAST_FROM = { hand = true, command = true }
 function Stack.onDrop(color, obj)
   if obj == nil or color == nil then
+    return
+  end
+  -- A player who has left the game casts nothing (leave.lua).
+  if Leave and Leave.isOut(color) then
     return
   end
   dropper[obj.getGUID()] = color
@@ -839,7 +873,7 @@ function ui_stackResolve(player)
     return
   end
   local who = player.color
-  if not TableSetup.isActive(who) then
+  if not TableSetup.isActive(who) or (Leave and Leave.isOut(who)) then
     return
   end
   local what = it.name .. (it.kind == "ability" and "'s ability" or "")
@@ -930,7 +964,7 @@ end
 -- YIELD: pass on everything until the stack is empty.
 function ui_stackYield(player)
   local c = player.color
-  if not TableSetup.isActive(c) then
+  if not TableSetup.isActive(c) or (Leave and Leave.isOut(c)) then
     return
   end
   GameState.data.yield = GameState.data.yield or {}
@@ -944,7 +978,7 @@ end
 -- RESOLVE ALL: resolve the top item, then the next, until the stack is empty or someone responds.
 function ui_stackResolveAll(player)
   local c = player.color
-  if not TableSetup.isActive(c) or Stack.isEmpty() then
+  if not TableSetup.isActive(c) or Stack.isEmpty() or (Leave and Leave.isOut(c)) then
     return
   end
   Stack.autoResolve = c
@@ -953,7 +987,7 @@ function ui_stackResolveAll(player)
 end
 
 function ui_stackCounter(player)
-  if TableSetup.isActive(player.color) then
+  if TableSetup.isActive(player.color) and not (Leave and Leave.isOut(player.color)) then
     Stack.counterTop(player.color)
   end
 end

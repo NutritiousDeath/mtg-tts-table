@@ -90,7 +90,7 @@ function Turns.xml()
   return [[
 <Button id="turnOptsToggle" onClick="ui_turnOpts" rectAlignment="UpperLeft" offsetXY="20 -120"
         width="150" height="40" fontStyle="Bold" color="#2A3346" textColor="#E6F1FF">Turn Options</Button>
-<Panel id="turnOpts" active="false" rectAlignment="UpperLeft" offsetXY="180 -120" width="260" height="344"
+<Panel id="turnOpts" active="false" rectAlignment="UpperLeft" offsetXY="180 -120" width="260" height="392"
        color="#0B0F17F2" outline="#5AF0FF" outlineSize="2 2">
   <VerticalLayout padding="12 12 12 12" spacing="8">
     <Text fontSize="15" fontStyle="Bold" color="#5AF0FF" preferredHeight="22">TURN OPTIONS</Text>]]
@@ -100,6 +100,7 @@ function Turns.xml()
     .. opt("reverse", "Reverse turn order", "Flip between clockwise and counter-clockwise")
     .. '<Button id="fireVolumeBtn" onClick="ui_turnOpt(fireVolume)" color="#3A2414" textColor="#FFD9A8" fontStyle="Bold" tooltip="The fireplace crackle for the whole table: Off, Low, Medium, High">Fire sound: '
       .. ((Fires and Fires.volumeName and Fires.volumeName()) or "Low") .. '</Button>'
+    .. '<Button onClick="ui_turnOpt(concede)" color="#3A1418" textColor="#FF9AA6" fontStyle="Bold" tooltip="Leave the game (asks first)">Concede</Button>'
     .. '<Button onClick="ui_flipTable" color="#5A1F2B" textColor="#FFD0D8" fontStyle="Bold" tooltip="Just for fun">Flip the table!</Button>'
     .. [[
   </VerticalLayout>
@@ -143,6 +144,12 @@ local function renderStrip(color)
   end
   tile.clearButtons()
   local d, t = GameState.data, turn()
+  -- A player who has left the game: their strip just says so (leave.lua).
+  if Leave and Leave.isOut(color) then
+    Trackers.tileButton(tile, { label = "OUT OF THE GAME", click_function = "trk_noop", width = 0, height = 0, font_size = 300,
+      font_color = { 0.55, 0.3, 0.3 }, color = { 0, 0, 0, 0 } }, 0, 0.02)
+    return
+  end
   local running = d.started and t.activeSeat ~= nil
   local rgb = running and (SEAT_RGB[t.activeSeat] or NEUTRAL) or NEUTRAL
   local line = { rgb[1], rgb[2], rgb[3], 1 }
@@ -811,6 +818,45 @@ function Turns.ask(from, text, label, onAllPass)
   promptNext()
 end
 
+-- A player left the game (leave.lua): nobody waits on them, and if it was their turn it passes on
+-- (CR 800.4: the rest of that turn has nothing for anyone to do).
+function Turns.playerLeft(color)
+  local t = turn()
+  if not GameState.data.started then
+    return
+  end
+  local p = t.pending
+  if p and p.queue then
+    if p.queue[p.at] == color then
+      Turns.respond(color, false)
+    end
+    p = t.pending
+    if p and p.queue then
+      for i = #p.queue, 1, -1 do
+        if i > p.at and p.queue[i] == color then
+          table.remove(p.queue, i)
+        end
+      end
+    end
+  end
+  showPrompt(color, false)
+  if t.activeSeat == color then
+    local teamLeft = false
+    for _, c in ipairs(Turns.activeTeam()) do
+      local q = GameState.player(c)
+      if c ~= color and q and not q.eliminated then
+        teamLeft = true
+      end
+    end
+    if not teamLeft then
+      t.pending = nil
+      hideAllPrompts()
+      broadcastToAll(color .. " left the game on their turn: the turn passes on.", WARN)
+      nextTurn()
+    end
+  end
+end
+
 -- Is a round of answers going on (NEXT STEP, or responses to something)?
 function Turns.isWaiting()
   return turn().pending ~= nil
@@ -1091,6 +1137,12 @@ end
 
 function ui_turnOpt(player, which)
   local c = player.color
+  if which == "concede" then
+    if Leave and Leave.concede then
+      Leave.concede(c)
+    end
+    return
+  end
   if which == "fireVolume" then
     -- Anyone can change it, game or no game.
     if Fires and Fires.cycleVolume then

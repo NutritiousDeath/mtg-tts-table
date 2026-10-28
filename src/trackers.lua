@@ -336,7 +336,8 @@ function Trackers.confirmLoss(color, byColor)
   if p == nil or p.lossFlag == nil then
     return
   end
-  local throne = lifeSupport(color)
+  -- Conceding can't be stopped (CR 104.3a), not even by The Golden Throne.
+  local throne = not p.conceded and lifeSupport(color) or nil
   if throne then
     local nm = throne.getName()
     if Combat and Combat.removeCard then
@@ -367,6 +368,18 @@ function Trackers.confirmLoss(color, byColor)
   p.lossFlag = nil
   p.lossForced = nil
   Trackers.render(color)
+  -- They leave the game (CR 800.4a): their cards go, their seat goes dark (leave.lua).
+  if Leave and Leave.run then
+    local okl, errl = pcall(Leave.run, color)
+    if not okl then
+      Events.noteError("taking " .. color .. " out of the game", errl)
+    end
+    for _, c in ipairs(sharing(color)) do
+      if c ~= color then
+        pcall(Leave.run, c)
+      end
+    end
+  end
   -- Last player standing: the game is over; save the log.
   local left = {}
   for _, c in ipairs(TableSetup.activeSeats()) do
@@ -405,7 +418,9 @@ function Trackers.revive(color, byColor)
     return
   end
   p.eliminated = false
+  p.conceded = nil
   log(byColor, color .. " is back in the game")
+  broadcastToAll(color .. " is back in the game. Their cards are in the bag at their seat: lay them out again.", { 0.55, 0.9, 0.6 })
   Trackers.render(color)
   for _, c in ipairs(sharing(color)) do
     local q = player(c)

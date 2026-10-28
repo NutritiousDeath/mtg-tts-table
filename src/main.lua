@@ -20,6 +20,7 @@
     !zones       count the cards tracked in each of your areas
     !fire <color> [roar|woosh]  set the turn fires to a colour by hand (Purple, White, Red, Green, Blue)
     !firevolume off|low|medium|high  the fireplace crackle for the whole table (also in TURN OPTIONS)
+    !concede     leave the game (asks first; your cards go into a bag at your seat)
     !errors         list the last script errors (copy them and send them over)
     !unstick        clear stuck pop-ups / search panels / triggers (!unstick stack also empties the stack)
     !seat <Color>   take a free seat (after a disconnect); !resync refreshes your panels
@@ -103,6 +104,7 @@ require("src/music_tracks")
 require("src/music")
 require("src/planechase_data")
 require("src/planechase")
+require("src/leave")
 Pile.install()
 
 local SAMPLE_DECK = [[
@@ -123,7 +125,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.50 (targets chosen on the stack, automatic priority, fizzling)"
+SCRIPT_VERSION = "2.51 (players leaving the game: bag, dark seat, !concede)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -938,6 +940,12 @@ function onChat(message, sender)
     return false
   end
 
+  if message == "!concede" then
+    if Leave and Leave.concede then
+      Leave.concede(sender.color)
+    end
+    return false
+  end
   if Fires and Fires.chat(message, sender.color) then
     return false
   end

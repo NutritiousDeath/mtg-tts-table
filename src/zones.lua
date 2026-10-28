@@ -181,6 +181,10 @@ local function moveTo(obj, name, guid, to)
   if showMoves then
     print("MTG > " .. name .. ": " .. describe(from) .. " -> " .. describe(to))
   end
+  -- A seat whose player has left the game is dark: nothing moving in or out of it counts (leave.lua).
+  if Leave and ((from and Leave.isOut(from.seat)) or (to and Leave.isOut(to.seat))) then
+    return
+  end
   Events.emit("cardMoved", { card = obj, name = name, from = from, to = to })
 end
 
