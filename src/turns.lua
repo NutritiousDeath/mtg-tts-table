@@ -90,7 +90,7 @@ function Turns.xml()
   return [[
 <Button id="turnOptsToggle" onClick="ui_turnOpts" rectAlignment="UpperLeft" offsetXY="20 -120"
         width="150" height="40" fontStyle="Bold" color="#2A3346" textColor="#E6F1FF">Turn Options</Button>
-<Panel id="turnOpts" active="false" rectAlignment="UpperLeft" offsetXY="180 -120" width="260" height="296"
+<Panel id="turnOpts" active="false" rectAlignment="UpperLeft" offsetXY="180 -120" width="260" height="344"
        color="#0B0F17F2" outline="#5AF0FF" outlineSize="2 2">
   <VerticalLayout padding="12 12 12 12" spacing="8">
     <Text fontSize="15" fontStyle="Bold" color="#5AF0FF" preferredHeight="22">TURN OPTIONS</Text>]]
@@ -98,6 +98,8 @@ function Turns.xml()
     .. opt("extraCombat", "Extra combat", "Active player: one more combat phase this turn")
     .. opt("skip", "Skip this step", "Active player: move on now, no hold window")
     .. opt("reverse", "Reverse turn order", "Flip between clockwise and counter-clockwise")
+    .. '<Button id="fireVolumeBtn" onClick="ui_turnOpt(fireVolume)" color="#3A2414" textColor="#FFD9A8" fontStyle="Bold" tooltip="The fireplace crackle for the whole table: Off, Low, Medium, High">Fire sound: '
+      .. ((Fires and Fires.volumeName and Fires.volumeName()) or "Low") .. '</Button>'
     .. '<Button onClick="ui_flipTable" color="#5A1F2B" textColor="#FFD0D8" fontStyle="Bold" tooltip="Just for fun">Flip the table!</Button>'
     .. [[
   </VerticalLayout>
@@ -1077,8 +1079,20 @@ function ui_turnOpts(player)
   end
 end
 
+-- The FIRE SOUND button's label (Fires.setVolume calls this).
+function Turns.showFireVolume(name)
+  pcall(function() UI.setValue("fireVolumeBtn", "Fire sound: " .. tostring(name)) end)
+end
+
 function ui_turnOpt(player, which)
   local c = player.color
+  if which == "fireVolume" then
+    -- Anyone can change it, game or no game.
+    if Fires and Fires.cycleVolume then
+      Fires.cycleVolume(c)
+    end
+    return
+  end
   if not TableSetup.isActive(c) then
     return
   end

@@ -13,16 +13,23 @@
   The fires are Unity AssetBundles (tools/unity/MTGTorchBuilder.cs) with one looping effect per colour
   and roar / woosh trigger effects; the stone fireplaces are plain TTS models (tools/make_hearth.py).
   !fire <color> [roar|woosh] tries a colour by hand (Purple, White, Red, Green, Blue).
+  Fire sound: each fireplace / fire pit has its own crackle object (mtg_crackle.unity3d) with four levels,
+  Off / Low / Medium / High (default Low), one setting for the whole table, saved with the game:
+  !firevolume off|low|medium|high (or 0-3), or the FIRE SOUND button in TURN OPTIONS.
 --]]
 
 Fires = {}
 
 local BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/"
 local HEARTH_VERSION = "?v=4"
-local HEARTH_FIRE_URL = BASE .. "torch/mtg_hearth.unity3d?v=12"
+local HEARTH_FIRE_URL = BASE .. "torch/mtg_hearth.unity3d?v=13"
 -- The roar / woosh sounds on their own invisible object (trigger 0 roar, 1 woosh), so every fire can
 -- change colour the moment the wave reaches it without cutting the sound off.
 local SFX_URL = BASE .. "torch/mtg_sfx.unity3d?v=4"
+-- The fireplace crackle, one object at each fireplace / fire pit: looping effects 0 Off, 1 Low, 2 Medium, 3 High.
+local CRACKLE_URL = BASE .. "torch/mtg_crackle.unity3d?v=1"
+local VOLUME_NAMES = { [0] = "Off", [1] = "Low", [2] = "Medium", [3] = "High" }
+local DEFAULT_VOLUME = 1
 local STONE_URL = BASE .. "table/stone.png?v=3"
 local FLOOR_Y = -31
 
@@ -95,6 +102,12 @@ function Fires.place()
       f.setPosition(fire)
       f.setRotation({ 0, yaw, 0 })
     end
+    local c = st.crackles and st.crackles[i] and getObjectFromGUID(st.crackles[i])
+    if c then
+      c.setLock(true)
+      c.setPosition(fire)
+      c.setRotation({ 0, yaw, 0 })
+    end
   end
 end
 
@@ -118,10 +131,58 @@ local function spawnLocked(kind, pos, yaw, name, tag, custom, onReady)
   obj.setCustomObject(custom)
 end
 
+-- The fire sound level: 0 Off, 1 Low, 2 Medium, 3 High.
+function Fires.volume()
+  local v = tonumber(state().fireVolume)
+  if v == nil or VOLUME_NAMES[v] == nil then
+    return DEFAULT_VOLUME
+  end
+  return v
+end
+
+function Fires.volumeName()
+  return VOLUME_NAMES[Fires.volume()]
+end
+
+local whenLoaded
+
+-- Put every crackle object on the current level.
+local function applyVolume()
+  local level = Fires.volume()
+  for _, g in ipairs(state().crackles or {}) do
+    local o = getObjectFromGUID(g)
+    if o and not o.isDestroyed() then
+      whenLoaded(o, function(obj)
+        pcall(function() obj.AssetBundle.playLoopingEffect(level) end)
+      end)
+    end
+  end
+  if Turns and Turns.showFireVolume then
+    pcall(Turns.showFireVolume, VOLUME_NAMES[level])
+  end
+end
+
+function Fires.setVolume(level, who)
+  level = tonumber(level)
+  if level == nil or VOLUME_NAMES[level] == nil then
+    return
+  end
+  state().fireVolume = level
+  applyVolume()
+  broadcastToAll("MTG > " .. (who and (who .. " set the") or "The") .. " fire sound " .. (who and "to " or "is ")
+    .. VOLUME_NAMES[level] .. ".", { 0.95, 0.65, 0.3 })
+end
+
+-- Next level up, wrapping High -> Off (the TURN OPTIONS button).
+function Fires.cycleVolume(who)
+  Fires.setVolume((Fires.volume() + 1) % 4, who)
+end
+
 function Fires.ensure()
   local st = state()
   st.hearths = st.hearths or {}
   st.hearthFires = st.hearthFires or {}
+  st.crackles = st.crackles or {}
   local spots = hearthSpots()
   for i, sp in ipairs(spots) do
     local yaw, fire = spotFrame(sp)
@@ -149,9 +210,24 @@ function Fires.ensure()
           Wait.time(function() Fires.refresh() end, 1)
         end)
     end
+    local c = st.crackles[i] and getObjectFromGUID(st.crackles[i])
+    local cco = c and c.getCustomObject()
+    if not (c and cco and cco.assetbundle == CRACKLE_URL) then
+      if c then
+        c.destruct()
+      end
+      spawnLocked("Custom_AssetBundle", fire, yaw, "Fire Sound", "FireCrackle",
+        { assetbundle = CRACKLE_URL, type = 0 },
+        function(o)
+          st.crackles[i] = o.getGUID()
+          whenLoaded(o, function(obj)
+            pcall(function() obj.AssetBundle.playLoopingEffect(Fires.volume()) end)
+          end)
+        end)
+    end
   end
   -- Fireplaces / pits the current layout doesn't use (the 2HG table has no fire pits).
-  for _, list in ipairs({ st.hearths, st.hearthFires }) do
+  for _, list in ipairs({ st.hearths, st.hearthFires, st.crackles }) do
     for i = #list, #spots + 1, -1 do
       local o = getObjectFromGUID(list[i])
       if o then
@@ -161,16 +237,17 @@ function Fires.ensure()
     end
   end
   -- Strays from an older layout / version.
-  for _, tag in ipairs({ "TableHearth", "HearthFire" }) do
+  local listFor = { TableHearth = st.hearths, HearthFire = st.hearthFires, FireCrackle = st.crackles }
+  for _, tag in ipairs({ "TableHearth", "HearthFire", "FireCrackle" }) do
     for _, o in ipairs(getObjectsWithTag(tag)) do
       local keep = false
-      for _, g in ipairs(tag == "TableHearth" and st.hearths or st.hearthFires) do
+      for _, g in ipairs(listFor[tag]) do
         keep = keep or g == o.getGUID()
       end
       if not keep and o.getGUID() ~= nil then
         Wait.time(function()
           local still = false
-          for _, g in ipairs(tag == "TableHearth" and st.hearths or st.hearthFires) do
+          for _, g in ipairs(listFor[tag]) do
             still = still or g == o.getGUID()
           end
           if not still and not o.isDestroyed() then
@@ -213,7 +290,7 @@ local function fireObjects()
 end
 
 -- Run fn(o) once the bundle has loaded.
-local function whenLoaded(o, fn)
+function whenLoaded(o, fn)
   Wait.condition(function()
     if not o.isDestroyed() then
       pcall(fn, o)
@@ -337,6 +414,7 @@ end
 
 function Fires.refresh()
   Fires.set(Fires.current(), nil)
+  applyVolume()
 end
 
 -- Hooks into the game flow.
@@ -368,7 +446,19 @@ Events.on("gameOver", function(d)
   pcall(Fires.set, (w and INDEX[w]) and w or "Purple", "roar")
 end)
 
-function Fires.chat(message)
+function Fires.chat(message, sender)
+  local lvl = tostring(message):match("^!firevolume%s*(%w*)$") or tostring(message):match("^!fire%s+volume%s*(%w*)$")
+    or tostring(message):match("^!fire%s+sound%s*(%w*)$")
+  if lvl then
+    lvl = lvl:lower()
+    local pick = ({ off = 0, low = 1, medium = 2, med = 2, high = 3, ["0"] = 0, ["1"] = 1, ["2"] = 2, ["3"] = 3 })[lvl]
+    if pick == nil then
+      printToAll("MTG > Fire sound is " .. Fires.volumeName() .. ". Use !firevolume off, low, medium or high.", { 0.95, 0.65, 0.3 })
+    else
+      Fires.setVolume(pick, sender)
+    end
+    return true
+  end
   local c, mode = tostring(message):match("^!fire%s+(%a+)%s*(%a*)$")
   if not c then
     return false

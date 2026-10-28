@@ -19,6 +19,7 @@
     !hover       show what is under your mouse (for alt-zoom problems)
     !zones       count the cards tracked in each of your areas
     !fire <color> [roar|woosh]  set the turn fires to a colour by hand (Purple, White, Red, Green, Blue)
+    !firevolume off|low|medium|high  the fireplace crackle for the whole table (also in TURN OPTIONS)
     !errors         list the last script errors (copy them and send them over)
     !unstick        clear stuck pop-ups / search panels / triggers (!unstick stack also empties the stack)
     !seat <Color>   take a free seat (after a disconnect); !resync refreshes your panels
@@ -122,7 +123,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.47 (fix: NEXT STEP error from a broken seat entry)"
+SCRIPT_VERSION = "2.48 (fire sound volume: !firevolume / TURN OPTIONS)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -723,7 +724,7 @@ function onChat(message, sender)
   -- the lag is the lighting. On puts them back.
   if message == "!fires off" or message == "!fires on" then
     if message == "!fires off" then
-      for _, tag in ipairs({ "HearthFire", "TableTorch", "TableGlass" }) do
+      for _, tag in ipairs({ "HearthFire", "FireCrackle", "TableTorch", "TableGlass" }) do
         for _, o in ipairs(getObjectsWithTag(tag)) do
           o.destruct()
         end
@@ -937,7 +938,7 @@ function onChat(message, sender)
     return false
   end
 
-  if Fires and Fires.chat(message) then
+  if Fires and Fires.chat(message, sender.color) then
     return false
   end
   if Flip and Flip.chat(message, sender.color) then
