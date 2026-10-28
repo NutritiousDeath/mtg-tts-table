@@ -126,7 +126,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.53 (rules book XML fix)"
+SCRIPT_VERSION = "2.54 (dice numbers; 2HG: chest and rules book clear of the importers)"
 
 function onLoad(saved)
   GameLog.setup()

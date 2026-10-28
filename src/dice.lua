@@ -86,6 +86,32 @@ local function clear(color)
   rolled[color] = {}
 end
 
+-- A big number floating over the table, lying flat and readable from the roller's seat.
+function Dice.label(color, pos, text, scale)
+  local s = TableSetup.seat(color)
+  local yaw = s and s.angle or 0
+  local tint = SEAT_TINT[color] or { 1, 1, 1 }
+  spawnObject({
+    type = "3DText",
+    position = pos,
+    rotation = { 90, yaw, 0 },
+    scale = { scale, scale, scale },
+    sound = false,
+    callback_function = function(o)
+      pcall(function()
+        o.TextTool.setValue(text)
+        o.TextTool.setFontSize(90)
+        o.TextTool.setFontColor(tint)
+      end)
+      o.setLock(true)
+      o.interactable = false
+      o.addTag("DiceLabel")
+      rolled[color] = rolled[color] or {}
+      table.insert(rolled[color], o.getGUID())
+    end,
+  })
+end
+
 function Dice.roll(color, count, sides)
   clear(color)
   local dice = {}
@@ -131,6 +157,18 @@ function Dice.roll(color, count, sides)
       msg = msg .. " = " .. total
     end
     broadcastToAll(msg, tint or INFO)
+    -- The numbers float over the dice (and the total over the middle of them) until the next roll or CLEAR.
+    local cx, cz, n = 0, 0, 0
+    for _, d in ipairs(dice) do
+      if not d.isDestroyed() then
+        local p = d.getPosition()
+        Dice.label(color, { p.x, p.y + 1.6, p.z }, tostring(d.getValue()), 1.2)
+        cx, cz, n = cx + p.x, cz + p.z, n + 1
+      end
+    end
+    if count > 1 and n > 0 then
+      Dice.label(color, { cx / n, TableSetup.SURFACE_TOP + 4.2, cz / n }, "= " .. total, 1.8)
+    end
   end, function()
     for _, d in ipairs(dice) do
       if not d.isDestroyed() and not d.resting then

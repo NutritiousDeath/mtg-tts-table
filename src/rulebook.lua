@@ -453,11 +453,12 @@ local function state()
   return GameState.data.table
 end
 
--- An open corner of the table (the Planechase chest has the White/Blue one); 2HG: the west end of the middle band.
+-- An open corner of the table (the Planechase chest has the White/Blue one); 2HG: the west part of the middle band,
+-- clear of the deck importer card at the very end (x = -50) and the planar mats near the middle.
 -- The book's title reads with its top toward the corner, so it's upright from the middle of the table.
 local function spot()
   if TableSetup.layout and TableSetup.layout() == "twohg" then
-    return { x = -46, z = 0, yaw = 270 }
+    return { x = -32, z = 0, yaw = 270 }
   end
   return { x = -38, z = 38, yaw = 315 }
 end

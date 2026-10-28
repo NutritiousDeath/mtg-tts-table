@@ -52,7 +52,8 @@ local DIE_IMAGE = "https://i.imgur.com/ptrUeHV.jpg"
 local CHEST = { x = 38, z = -38, yaw = 135 }       -- between White (south) and Blue (east)
 -- Two-Headed Giant: the corners are seats' battlefields, so the chest goes at the east end of the
 -- open band down the middle of the table (between the two teams).
-local CHEST_2HG = { x = 46, z = 0, yaw = 90 }
+-- (The deck importer cards sit at the very ends, x = +/-50: the chest stays clear of them.)
+local CHEST_2HG = { x = 32, z = 0, yaw = 90 }
 
 local function chestSpot()
   if TableSetup.layout and TableSetup.layout() == "twohg" then
