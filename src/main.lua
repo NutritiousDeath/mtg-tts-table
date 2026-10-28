@@ -126,7 +126,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.52 (rules batches 1-3, plane triggers, rules book)"
+SCRIPT_VERSION = "2.53 (rules book XML fix)"
 
 function onLoad(saved)
   GameLog.setup()

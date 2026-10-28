@@ -83,7 +83,7 @@ local CHAPTERS = {
       .. "<b>Extra turns</b>: the most recently created one is taken first. "
       .. "TURN OPTIONS has extra turn, extra combat, skip a step and reverse turn order.",
   } },
-  { title = "Casting & the stack", pages = {
+  { title = "Casting and the stack", pages = {
     "<b>Casting a spell</b>\n\n"
       .. "1. Drop it on your battlefield: it goes on the stack.\n"
       .. "2. If it has modes (\"choose one\"), choose them now.\n"
@@ -148,7 +148,7 @@ local CHAPTERS = {
       .. "<b>Commander damage</b>\n\n"
       .. "21 or more " .. C .. "combat" .. E .. " damage from a single commander and you lose. Each commander counts separately; it's the crowns on your tracker.",
   } },
-  { title = "Winning & losing", pages = {
+  { title = "Winning and losing", pages = {
     "<b>You lose when</b>\n\n"
       .. "- your life is 0 or less,\n"
       .. "- you'd draw from an empty library,\n"
@@ -412,7 +412,7 @@ function Rulebook.xml()
     local chs = {}
     for i, ch in ipairs(CHAPTERS) do
       table.insert(chs, ('<Button id="rbCh_%s_%d" onClick="ui_rulesChapter(%s_%d)" preferredHeight="32" color="#141B26" textColor="#E6F1FF" fontSize="14">%s</Button>')
-        :format(c, i, c, i, ch.title))
+        :format(c, i, c, i, (ch.title:gsub("&", "and"))))
     end
     table.insert(parts, ([[
 <Panel id="rulebook_%s" visibility="%s" active="false" width="880" height="600" color="#0B0F17F7" outline="#5AF0FF" outlineSize="2 2"
