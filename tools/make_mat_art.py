@@ -118,6 +118,7 @@ ACTIONS = {
     "draw": ("DRAW", "CLICK 1  /  RIGHT 3"),
     "scry": ("SCRY", "CLICK PER CARD"),
     "mill": ("MILL", "CLICK 1  /  RIGHT 3"),
+    "exile": ("EXILE", "CLICK 1  /  RIGHT: UNTIL NONLAND"),
     "untap": ("UNTAP", "ALL PERMANENTS"),
     "tokens": ("TOKENS", "SEARCH & CREATE"),
     "next": ("NEXT STEP", "YOUR TURN ONLY"),
@@ -150,7 +151,10 @@ def build_action(name, color):
     img.alpha_composite(glow)
     img.alpha_composite(glow)
     img.alpha_composite(border)
-    ic = Image.open(os.path.join(ICONS, "action_%s.png" % name)).convert("RGBA")
+    icon = os.path.join(ICONS, "action_%s.png" % name)
+    if not os.path.exists(icon):
+        icon = os.path.join(ICONS, "%s.png" % name)      # the exile tile uses the exile area's icon
+    ic = Image.open(icon).convert("RGBA")
     s = int(W * 0.72)
     ic = ic.resize((s, s), Image.LANCZOS)
     img.alpha_composite(ic, ((W - s) // 2, int(H * 0.10)))
@@ -162,7 +166,8 @@ def build_action(name, color):
     ImageDraw.Draw(layer).text((W // 2, ty), title, font=f, fill=rgb + (255,), anchor="mm")
     img.alpha_composite(layer.filter(ImageFilter.GaussianBlur(9)))
     ImageDraw.Draw(img).text((W // 2, ty), title, font=f, fill=(235, 245, 255, 255), anchor="mm")
-    ImageDraw.Draw(img).text((W // 2, int(H * 0.88)), hint, font=font(40, 600), fill=rgb + (230,), anchor="mm")
+    hsize = min(40, (W - 70) / (len(hint) * 0.62))   # long hints shrink to fit
+    ImageDraw.Draw(img).text((W // 2, int(H * 0.88)), hint, font=font(hsize, 600), fill=rgb + (230,), anchor="mm")
     os.makedirs(OUT, exist_ok=True)
     out = os.path.join(OUT, "action_%s_%s.png" % (name, color))
     img.save(out)
@@ -206,6 +211,6 @@ if __name__ == "__main__":
         for area in AREAS:
             if not only or area in only:
                 print(build(area, color))
-        if not only:
-            for name in ACTIONS:
+        for name in ACTIONS:
+            if not only or ("action:" + name) in only:
                 print(build_action(name, color))

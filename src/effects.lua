@@ -7360,6 +7360,25 @@ function Effects.resolve(it)
     Effects.resolveWard(it)
     return
   end
+  -- Kalia of the Vast, Preeminent Captain...: "you may put an Angel, Demon, or Dragon creature card from your hand onto
+  -- the battlefield tapped and attacking (that opponent)".
+  do
+    local lowA = tostring(it.text or ""):lower()
+    local kinds = lowA:match("put an? ([%a%s,%-]-) card from your hand onto the battlefield tapped and attacking")
+    if kinds and Effects.handToAttack then
+      Effects.handToAttack(it, kinds)
+      return
+    end
+  end
+  -- Imprint (Chrome Mox): "you may exile a nonartifact, nonland card from your hand".
+  do
+    local lowI = tostring(it.text or ""):lower()
+    local what = lowI:match("you may exile an? ([%a%s,%-]-) card from your hand")
+    if what and it.source and Effects.imprint then
+      Effects.imprint(it, what)
+      return
+    end
+  end
   -- Modes chosen as it was cast (CR 601.2b): each chosen mode resolves in printed order.
   if it.modesChosen and not it.modePicked then
     if #it.modesChosen == 0 then
@@ -11237,3 +11256,184 @@ Events.on("gameStarted", function(d)
     pcall(Effects.openingHandStarts, c)
   end
 end)
+
+---------------------------------------------------------------------------
+-- Imprint (Chrome Mox and friends): "you may exile a nonartifact, nonland card from your hand". The player
+-- picks the card from a list of the ones that fit; it goes to their exile and is remembered for the source
+-- (GameState.data.imprint[source] = { guid, name, colors }), so "the exiled card's colors" works (mana.lua).
+---------------------------------------------------------------------------
+
+function Effects.imprint(it, what)
+  local seat = it.controller
+  local words = {}
+  for w in tostring(what):gmatch("[%a%-]+") do
+    words[w] = true
+  end
+  local list = {}
+  pcall(function()
+    for _, h in ipairs(Player[seat].getHandObjects() or {}) do
+      if h.type == "Card" and h.hasTag("MTGCard") then
+        local d = CardData.get(h)
+        local tl = tostring(d.typeLine or ""):lower()
+        local ok = true
+        for w in pairs(words) do
+          if w:sub(1, 3) == "non" and #w > 3 then
+            ok = ok and not tl:find(w:sub(4), 1, true)
+          elseif w ~= "a" and w ~= "an" and w ~= "and" and w ~= "or" and w ~= "card" then
+            ok = ok and tl:find(w, 1, true) ~= nil
+          end
+        end
+        if ok then
+          table.insert(list, h)
+        end
+      end
+    end
+  end)
+  if #list == 0 then
+    printToAll("MTG > " .. it.name .. ": " .. seat .. " has no " .. what .. " card in hand to exile.", INFO)
+    return
+  end
+  local page = 0
+  local function show()
+    local per = MAX_CHOICES - 2
+    local lines, choices = {}, {}
+    for i = page * per + 1, math.min(#list, page * per + per) do
+      table.insert(lines, (#choices + 1) .. ") " .. list[i].getName())
+      table.insert(choices, { label = tostring(#choices + 1), value = i })
+    end
+    if #list > (page + 1) * per then
+      table.insert(choices, { label = "MORE", value = "more" })
+    elseif page > 0 then
+      table.insert(choices, { label = "BACK", value = "first" })
+    end
+    table.insert(choices, { label = "NONE", value = false })
+    ask(seat, it.name .. ": exile a card from your hand?", "You may exile a " .. what .. " card from your hand.\n"
+      .. table.concat(lines, "\n"), choices, function(v)
+        if v == "more" then
+          page = page + 1
+          return show()
+        elseif v == "first" then
+          page = 0
+          return show()
+        elseif not v then
+          printToAll("MTG > " .. it.name .. ": " .. seat .. " exiles nothing.", INFO)
+          return
+        end
+        local card = list[v]
+        if card == nil or card.isDestroyed() then
+          return
+        end
+        local d = CardData.get(card)
+        local cols = {}
+        for _, c in ipairs(type(d.colors) == "table" and d.colors or {}) do
+          table.insert(cols, tostring(c):upper())
+        end
+        GameState.data.imprint = GameState.data.imprint or {}
+        GameState.data.imprint[it.source] = { guid = card.getGUID(), name = card.getName(), colors = cols }
+        local s = TableSetup.seat(seat)
+        card.setRotation({ 0, s.yaw, 0 })
+        card.setPosition(TableSetup.slot(seat, "exile", 2))
+        Wait.time(function()
+          if not card.isDestroyed() then
+            Zones.refresh(card)
+          end
+        end, 1)
+        printToAll("MTG > " .. it.name .. ": " .. seat .. " exiles " .. card.getName()
+          .. (#cols > 0 and (" (taps for " .. table.concat(cols, " or ") .. ")") or " (colorless: it makes no mana)") .. ".", GOOD)
+      end)
+  end
+  show()
+end
+
+---------------------------------------------------------------------------
+-- Pick a card from your own hand that fits (a list a few at a time, NONE allowed). cb(card or nil).
+---------------------------------------------------------------------------
+
+function Effects.pickFromHand(seat, title, text, fits, cb)
+  local list = {}
+  pcall(function()
+    for _, h in ipairs(Player[seat].getHandObjects() or {}) do
+      if h.type == "Card" and h.hasTag("MTGCard") and fits(h, CardData.get(h)) then
+        table.insert(list, h)
+      end
+    end
+  end)
+  if #list == 0 then
+    cb(nil, true)
+    return
+  end
+  local page = 0
+  local function show()
+    local per = MAX_CHOICES - 2
+    local lines, choices = {}, {}
+    for i = page * per + 1, math.min(#list, page * per + per) do
+      table.insert(lines, (#choices + 1) .. ") " .. list[i].getName())
+      table.insert(choices, { label = tostring(#choices + 1), value = i })
+    end
+    if #list > (page + 1) * per then
+      table.insert(choices, { label = "MORE", value = "more" })
+    elseif page > 0 then
+      table.insert(choices, { label = "BACK", value = "first" })
+    end
+    table.insert(choices, { label = "NONE", value = false })
+    ask(seat, title, text .. "\n" .. table.concat(lines, "\n"), choices, function(v)
+      if v == "more" then
+        page = page + 1
+        return show()
+      elseif v == "first" then
+        page = 0
+        return show()
+      end
+      local card = v and list[v] or nil
+      cb(card and not card.isDestroyed() and card or nil, false)
+    end)
+  end
+  show()
+end
+
+-- "You may put an Angel, Demon, or Dragon creature card from your hand onto the battlefield tapped and attacking
+-- that opponent" (Kalia of the Vast): it attacks whoever the source is attacking (combat.lua).
+function Effects.handToAttack(it, kinds)
+  local seat = it.controller
+  local words = {}
+  for w in tostring(kinds):gmatch("%a+") do
+    if w ~= "or" and w ~= "and" and w ~= "creature" then
+      table.insert(words, (w:gsub("s$", "")))
+    end
+  end
+  local function fits(_, d)
+    local tl = tostring(d.typeLine or ""):lower()
+    if not tl:find("creature", 1, true) then
+      return false
+    end
+    if #words == 0 then
+      return true
+    end
+    for _, w in ipairs(words) do
+      if tl:find(w, 1, true) then
+        return true
+      end
+    end
+    return tostring(d.oracle or ""):lower():find("changeling", 1, true) ~= nil
+  end
+  Effects.pickFromHand(seat, it.name .. ": put a creature onto the battlefield attacking?",
+    "You may put a " .. kinds .. " card from your hand onto the battlefield tapped and attacking.", fits, function(card, none)
+      if card == nil then
+        printToAll("MTG > " .. it.name .. ": " .. seat .. (none and (" has no " .. kinds .. " card in hand.") or " puts nothing in."), INFO)
+        return
+      end
+      local s = TableSetup.seat(seat)
+      card.setRotation({ 0, s.yaw, 0 })   -- entering attacking taps it (combat.lua)
+      card.setPosition(TableSetup.slot(seat, "battlefield", 2))
+      Wait.time(function()
+        if card.isDestroyed() then
+          return
+        end
+        Zones.refresh(card)
+        if Combat and Combat.enterAttacking then
+          Combat.enterAttacking(card, seat, it.source)
+        end
+      end, 0.8)
+      printToAll("MTG > " .. it.name .. ": " .. seat .. " puts " .. card.getName() .. " onto the battlefield tapped and attacking.", GOOD)
+    end)
+end

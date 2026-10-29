@@ -192,6 +192,17 @@ local function oracleOf(obj)
   if nm ~= "" then
     text = text:gsub(nm:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "~")
   end
+  -- Chrome Mox ("Add one mana of any of the exiled card's colors"): the colors of the card it imprinted
+  -- (effects.lua Effects.imprint); nothing imprinted, no mana.
+  if text:find("of the exiled card's colors", 1, true) then
+    local imp = GameState.data and GameState.data.imprint and GameState.data.imprint[obj.getGUID()]
+    local syms = {}
+    for _, c in ipairs(imp and imp.colors or {}) do
+      table.insert(syms, "{" .. tostring(c):lower() .. "}")
+    end
+    local add = #syms > 0 and ("add " .. table.concat(syms, " or ") .. ".") or "add nothing (no card is exiled with it)."
+    text = text:gsub("add one mana of any of the exiled card's colors%.", add)
+  end
   -- Leyline of the Guildpact: lands are every basic land type, so they tap for any color.
   if Statics and Statics.landsEveryType and tostring(d.typeLine or ""):lower():find("land", 1, true) then
     local okl, loc = pcall(function() return Zones.regionAt(obj.getPosition()) end)

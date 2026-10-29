@@ -1541,7 +1541,26 @@ Events.on("stepStarted", function(d)
           local host = Equip.hostOf(p.obj)
           hostOk = host ~= nil and not host.isDestroyed() and Zones.regionAt(host.getPosition()).seat == d.seat
         end
-        if t.who == "each" or (t.who == "you" and mine) or (t.who == "opp" and TableSetup.isOpponent(p.controller, oppOf)) or hostOk then
+        -- 2HG: both teammates are in their draw step (upkeep...) at once, so "each player's draw step" (Howling
+        -- Mine) and "each opponent's upkeep" happen once for each player on the active team, "that player" each.
+        local team = { d.seat }
+        if (t.who == "each" or t.who == "opp") and TableSetup.isTeamGame and TableSetup.isTeamGame() and Turns and Turns.activeTeam then
+          team = Turns.activeTeam()
+          if #team == 0 then
+            team = { d.seat }
+          end
+        end
+        if t.who == "each" then
+          for _, who in ipairs(team) do
+            table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, that = who })
+          end
+        elseif t.who == "opp" then
+          for _, who in ipairs(team) do
+            if TableSetup.isOpponent(p.controller, who) then
+              table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, that = who })
+            end
+          end
+        elseif (t.who == "you" and mine) or hostOk then
           table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
         end
       end

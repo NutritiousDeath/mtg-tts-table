@@ -152,14 +152,32 @@ local function renderStrip(color)
   end
   local running = d.started and t.activeSeat ~= nil
   local rgb = running and (SEAT_RGB[t.activeSeat] or NEUTRAL) or NEUTRAL
-  local line = { rgb[1], rgb[2], rgb[3], 1 }
+  -- Two-Headed Giant: a team's turn shows both teammates' colours, split down the middle.
+  local rgbA, rgbB = rgb, rgb
+  if running then
+    local team = Turns.activeTeam()
+    if #team >= 2 and SEAT_RGB[team[1]] and SEAT_RGB[team[2]] then
+      rgbA, rgbB = SEAT_RGB[team[1]], SEAT_RGB[team[2]]
+      rgb = { (rgbA[1] + rgbB[1]) / 2, (rgbA[2] + rgbB[2]) / 2, (rgbA[3] + rgbB[3]) / 2 }
+    end
+  end
+  local split = rgbA ~= rgbB
+  local lineA = { rgbA[1], rgbA[2], rgbA[3], 1 }
+  local lineB = { rgbB[1], rgbB[2], rgbB[3], 1 }
   local B = function(params, x, z) params.click_function = "trk_noop"; Trackers.tileButton(tile, params, x, z) end
-  -- Border in the active player's color.
+  -- Border in the active player's color (a team: one half each).
   local hw, hd, th = STRIP_W / 2 - 0.05, STRIP_D / 2 - 0.05, 0.07
-  B({ label = "", width = math.floor(STRIP_W * U), height = math.floor(th * U), color = line }, 0, -hd)
-  B({ label = "", width = math.floor(STRIP_W * U), height = math.floor(th * U), color = line }, 0, hd)
-  B({ label = "", width = math.floor(th * U), height = math.floor(STRIP_D * U), color = line }, -hw, 0)
-  B({ label = "", width = math.floor(th * U), height = math.floor(STRIP_D * U), color = line }, hw, 0)
+  if split then
+    for _, z in ipairs({ -hd, hd }) do
+      B({ label = "", width = math.floor(STRIP_W / 2 * U), height = math.floor(th * U), color = lineA }, -STRIP_W / 4, z)
+      B({ label = "", width = math.floor(STRIP_W / 2 * U), height = math.floor(th * U), color = lineB }, STRIP_W / 4, z)
+    end
+  else
+    B({ label = "", width = math.floor(STRIP_W * U), height = math.floor(th * U), color = lineA }, 0, -hd)
+    B({ label = "", width = math.floor(STRIP_W * U), height = math.floor(th * U), color = lineA }, 0, hd)
+  end
+  B({ label = "", width = math.floor(th * U), height = math.floor(STRIP_D * U), color = lineA }, -hw, 0)
+  B({ label = "", width = math.floor(th * U), height = math.floor(STRIP_D * U), color = lineB }, hw, 0)
   -- Title.
   local title = running and ("TURN " .. t.number .. " · " .. string.upper(table.concat(Turns.activeTeam(), " + "))) or "NO GAME RUNNING"
   local pendingTo, waitingOn
@@ -182,7 +200,13 @@ local function renderStrip(color)
     local x = STEPS_X0 + CHIP_W * (i - 0.5)
     local on = running and i == t.stepIndex
     local done = running and i < (t.stepIndex or 1)
-    if on then
+    if on and split then
+      -- The lit step in both teammates' colours, half each, with the label on top.
+      local hwid = (CHIP_W - 0.12) / 2
+      B({ label = "", width = math.floor(hwid * U), height = math.floor(1.1 * U), color = { rgbA[1], rgbA[2], rgbA[3], 0.6 } }, x - hwid / 2, 0)
+      B({ label = "", width = math.floor(hwid * U), height = math.floor(1.1 * U), color = { rgbB[1], rgbB[2], rgbB[3], 0.6 } }, x + hwid / 2, 0)
+      B({ label = label, width = 0, height = 0, font_size = 150, font_color = { 1, 1, 1 }, color = { 0, 0, 0, 0 } }, x, 0.03)
+    elseif on then
       B({ label = label, width = math.floor((CHIP_W - 0.12) * U), height = math.floor(1.1 * U), font_size = 150,
         font_color = { 1, 1, 1 }, color = { rgb[1], rgb[2], rgb[3], 0.6 } }, x, 0)
     else

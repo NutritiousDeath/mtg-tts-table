@@ -103,11 +103,13 @@ local REGIONS = {
   -- lands row; the Attraction deck sits at its left end (attractions, below)
   lands = { side = -0.5, depth = 6.75, w = 33, d = 5.5 },
   -- action tiles in a strip beside the library column (actions.lua)
-  act_draw = { side = 25.3, depth = 24.6, w = 3, d = 4.2 },
-  act_scry = { side = 25.3, depth = 19.9, w = 3, d = 4.2 },
-  act_mill = { side = 25.3, depth = 15.2, w = 3, d = 4.2 },
-  act_untap = { side = 25.3, depth = 10.5, w = 3, d = 4.2 },
-  act_tokens = { side = 25.3, depth = 5.8, w = 3, d = 4.2 },
+  -- (six tiles, a little smaller than the turn tiles so they fit the column: 2.6 x 3.64)
+  act_draw = { side = 25.3, depth = 24.9, w = 2.6, d = 3.64 },
+  act_scry = { side = 25.3, depth = 21.1, w = 2.6, d = 3.64 },
+  act_mill = { side = 25.3, depth = 17.3, w = 2.6, d = 3.64 },
+  act_exile = { side = 25.3, depth = 13.5, w = 2.6, d = 3.64 },
+  act_untap = { side = 25.3, depth = 9.7, w = 2.6, d = 3.64 },
+  act_tokens = { side = 25.3, depth = 5.9, w = 2.6, d = 3.64 },
   -- Attraction deck (attractions.lua), at the left end of the lands row.
   attractions = { side = -20.25, depth = 6.75, w = 5, d = 5.5 },
   -- Mana chip dispenser (mana.lua), left of the command zones.
@@ -792,7 +794,7 @@ Wait.time(function() pcall(watchRoom) end, 0.5, -1)
 -- Stained glass in the chapel windows: translucent, glowing jewel-tone glass you can still see through;
 -- the window behind each seat leans to that seat's colour (sun, drop, flame, leaf) and the two big
 -- corner windows hold all five colours. A Unity AssetBundle (tools/unity/MTGGlassBuilder.cs).
-local GLASS_VERSION = "?v=3"
+local GLASS_VERSION = "?v=4"
 
 function TableSetup.ensureGlass()
   local state = GameState.data.table
@@ -998,10 +1000,27 @@ end
 
 -- Make sure the table exists and matches the current layout. Safe to call
 -- every load: the surface is only created once.
+-- Two-Headed Giant: teammates see each other's hands. TTS shares hands between players on the same team,
+-- so White + Red go on one team (Hearts) and Green + Blue on the other (Spades); other layouts: no teams.
+function TableSetup.applyTeams()
+  local names = { A = "Hearts", B = "Spades" }
+  local map = TEAMS[TableSetup.layout()]
+  for _, c in ipairs({ "White", "Red", "Green", "Blue" }) do
+    local want = map and map[c] and names[map[c]] or "None"
+    pcall(function()
+      local p = Player[c]
+      if p and p.seated and p.team ~= want then
+        p.team = want
+      end
+    end)
+  end
+end
+
 function TableSetup.ensure()
   local d = GameState.data
   d.table = d.table or { layout = "four" }
   local state = d.table
+  pcall(TableSetup.applyTeams)
 
   TableSetup.ensureNative()
 
@@ -1180,6 +1199,7 @@ function TableSetup.setLayout(layout)
   end
   GameState.data.table = GameState.data.table or {}
   GameState.data.table.layout = layout
+  Wait.time(function() pcall(TableSetup.applyTeams) end, 0.5)
   TableSetup.fitSurface()
   TableSetup.ensureFrame()
   pcall(TableSetup.ensureFloor)

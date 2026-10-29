@@ -371,11 +371,16 @@ function Fires.set(color, mode)
     return math.acos(dot) / math.pi * wave
   end
   local glass = st.glass and getObjectFromGUID(st.glass)
+  -- Two-Headed Giant: on a team's turn both teammates' windows glow (the 2HG glass has 5 = White + Red, 6 = Green + Blue).
+  local gidx = idx
+  if #shared > 1 and TableSetup.layout() == "twohg" then
+    gidx = (shared[1] == "White" or shared[1] == "Red") and 5 or 6
+  end
   if glass then
     whenLoaded(glass, function(obj)
       Wait.time(function()
         if not obj.isDestroyed() then
-          pcall(function() obj.AssetBundle.playLoopingEffect(idx) end)
+          pcall(function() obj.AssetBundle.playLoopingEffect(gidx) end)
         end
       end, wave and wave * 0.5 or 0)
     end)

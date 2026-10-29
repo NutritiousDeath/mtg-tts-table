@@ -24,6 +24,9 @@ Actions = {}
 local ART_BASE = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/"
 local ART_VERSION = "?v=6"
 local TILE_W = 3
+-- The six tiles in the column beside the library (draw ... tokens) are a little narrower so they all fit.
+local COLUMN = { draw = true, scry = true, mill = true, exile = true, untap = true, tokens = true }
+local COLUMN_W = 2.6
 local INFO = { 0.75, 0.8, 0.9 }
 local WARN = { 1, 0.6, 0.2 }
 
@@ -31,6 +34,8 @@ local ACTIONS = {
   { name = "draw", label = "Draw", tip = "DRAW\nClick: draw 1 card\nRight-click: draw 3 cards" },
   { name = "scry", label = "Scry", tip = "SCRY / SURVEIL\nClick once per card to look at (2 clicks = scry 2).\nOnly you see them. Choose for each card to finish." },
   { name = "mill", label = "Mill", tip = "MILL\nClick: mill 1 card\nRight-click: mill 3 cards" },
+  { name = "exile", label = "Exile", column = true,
+    tip = "EXILE\nClick: exile the top card of your library face up\nRight-click: exile cards from the top until a nonland card" },
   { name = "untap", label = "Untap", tip = "UNTAP\nClick: untap all your tapped permanents" },
   { name = "tokens", label = "Tokens", tip = "TOKENS\nClick: open token search (only you see it).\nFind a token and click it to put it onto your battlefield." },
   { name = "next", label = "Next step", tip = "NEXT STEP\nYour turn: move to the next step of the turn" },
@@ -997,6 +1002,20 @@ local function renderTile(color, a)
       Actions.draw(color, alt and 3 or 1)
     elseif a.name == "mill" then
       Actions.mill(color, alt and 3 or 1)
+    elseif a.name == "exile" then
+      -- "Exile the top card", "exile cards until you exile a nonland card" (cascade-like effects, Light Up the Stage...).
+      Library.exileUntilNonland(color, not alt, function(found, exiled)
+        local names = {}
+        for _, c in ipairs(exiled or {}) do
+          table.insert(names, c.getName())
+        end
+        if #names == 0 then
+          log(color .. "'s library is empty: nothing to exile.")
+        else
+          log(color .. " exiles " .. table.concat(names, ", ") .. " from the top of their library"
+            .. ((alt and found) and (" (first nonland: " .. found.getName() .. ")") or "") .. ".")
+        end
+      end)
     elseif a.name == "scry" then
       Actions.openScry(color)
     elseif a.name == "untap" then
@@ -1083,7 +1102,8 @@ function Actions.ensure()
     for _, a in ipairs(ACTIONS) do
       table.insert(wanted, { key = color .. "|" .. a.name, color = color, region = "act_" .. a.name,
         name = a.label .. " (" .. color .. ")",
-        url = ART_BASE .. "mats/action_" .. a.name .. "_" .. color .. ".png" .. ART_VERSION, width = TILE_W,
+        url = ART_BASE .. "mats/action_" .. a.name .. "_" .. color .. ".png" .. ART_VERSION,
+        width = COLUMN[a.name] and COLUMN_W or TILE_W,
         draw = function() renderTile(color, a) end })
     end
   end

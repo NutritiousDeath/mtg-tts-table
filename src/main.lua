@@ -126,7 +126,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.54 (dice numbers; 2HG: chest and rules book clear of the importers)"
+SCRIPT_VERSION = "2.56 (2HG split turn strip, EXILE tile, Kalia of the Vast)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -345,6 +345,8 @@ function onPlayerChangeColor(color)
   end
   -- Seat-only panels (import etc.) for someone who just sat down.
   Wait.time(function() TableUI.refreshVisibility() end, 0.5)
+  -- 2HG: whoever sits down joins their seat's team (teammates see each other's hands).
+  Wait.time(function() pcall(TableSetup.applyTeams) end, 0.6)
   if color == "Grey" or color == "Black" then
     return
   end
