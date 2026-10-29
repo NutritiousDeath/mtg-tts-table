@@ -538,7 +538,7 @@ function Statics.compute()
             subj = subj:sub(5)
           end
           for _, q in ipairs(list) do
-            local sideOk = (scope == "all") or (scope == "mine" and q.seat == p.seat) or (scope == "opps" and q.seat ~= p.seat)
+            local sideOk = (scope == "all") or (scope == "mine" and q.seat == p.seat) or (scope == "opps" and q.seat ~= p.seat and TableSetup.isOpponent(q.seat, p.seat))
             if sideOk and subjectMatches(subj, q, p) then
               add(q, tonumber(x), tonumber(y))
             end
@@ -1149,7 +1149,9 @@ end
 
 function Statics.drawReplacer(seat)
   for _, p in ipairs(perms()) do
-    if p.seat ~= seat and p.oracle:find("except the first one they draw in each of their draw steps", 1, true) then
+    -- Only an OPPONENT's Notion Thief (in 2HG a teammate's doesn't take your draws).
+    if p.seat ~= seat and TableSetup.isOpponent(p.seat, seat)
+        and p.oracle:find("except the first one they draw in each of their draw steps", 1, true) then
       return p.seat, p.obj
     end
   end

@@ -126,7 +126,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.56 (2HG split turn strip, EXILE tile, Kalia of the Vast)"
+SCRIPT_VERSION = "2.57 (2HG Notion Thief, RESOLVE ALL loop)"
 
 function onLoad(saved)
   GameLog.setup()

@@ -998,21 +998,7 @@ function ui_stackResolve(player)
       if now[#now] and now[#now].guid == it.guid then
         Stack.resolveTop()
       end
-      -- RESOLVE ALL: on to the next item once this one has finished (pop-ups it opened come first).
-      if Stack.autoResolve == who then
-        local function nextOne()
-          if Stack.autoResolve ~= who or Stack.isEmpty() then
-            return
-          end
-          -- Wait while a pop-up from the last item (a target, a choice) is still open.
-          if (Effects and Effects.busy and Effects.busy()) or (LibSearch and LibSearch.isOpen and LibSearch.isOpen(who)) then
-            Wait.time(nextOne, 1.0)
-            return
-          end
-          ui_stackResolve(Player[who])
-        end
-        Wait.time(nextOne, 1.5)
-      end
+      -- RESOLVE ALL carries on by itself (Stack.autoStep), once this item has finished.
     end)
   else
     Stack.resolveTop()
@@ -1093,7 +1079,49 @@ function ui_stackResolveAll(player)
   end
   Stack.autoResolve = c
   broadcastToAll(c .. " resolves the whole stack (one item at a time; I HAVE A RESPONSE stops it).", INFO)
-  ui_stackResolve(player)
+  Stack.autoStep(true)
+end
+
+-- RESOLVE ALL's loop. Every second: if nothing is being decided (a pop-up, a search, trigger order,
+-- targets, a round of answers), ask to resolve the top item. It doesn't depend on the last answer's
+-- callback any more, so a question that was already up when RESOLVE ALL was clicked, or a trigger that
+-- landed mid-way, no longer stops it (that used to leave the stack stuck with no pop-ups at all).
+local autoToken = 0
+function Stack.autoStep(fresh)
+  if fresh then
+    autoToken = autoToken + 1
+  end
+  local token = autoToken
+  local function step()
+    if token ~= autoToken then
+      return
+    end
+    local who = Stack.autoResolve
+    if who == nil then
+      return
+    end
+    if Stack.isEmpty() or not TableSetup.isActive(who) or (Leave and Leave.isOut(who)) then
+      Stack.autoResolve = nil
+      Stack.offer()
+      return
+    end
+    local list = items()
+    local top = list[#list]
+    local busy = (Effects and Effects.busy and Effects.busy())
+      or (LibSearch and LibSearch.isOpen and LibSearch.isOpen(who))
+      or (Triggers and Triggers.isOrdering and Triggers.isOrdering())
+      or (top and top.choosing and os.time() - (top.choosingAt or 0) < 30)
+      or (Turns and Turns.isWaiting and Turns.isWaiting())
+    if not busy then
+      ui_stackResolve(Player[who])
+    end
+    Wait.time(step, busy and 1.0 or 1.5)
+  end
+  if fresh then
+    step()
+  else
+    Wait.time(step, 1.0)
+  end
 end
 
 function ui_stackCounter(player)

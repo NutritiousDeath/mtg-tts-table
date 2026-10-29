@@ -10242,7 +10242,7 @@ local function targetFits(sp, obj, owner, seat, srcGuid, taken)
   if hasKeyword(obj, "shroud") then
     return false
   end
-  if owner ~= seat and hasKeyword(obj, "hexproof") then
+  if owner ~= seat and TableSetup.isOpponent(owner, seat) and hasKeyword(obj, "hexproof") then
     return false
   end
   if Equip and Equip.protectedFrom and srcGuid then
@@ -10473,6 +10473,7 @@ function Effects.chooseTargets(it, done)
   local info = Effects.modeInfo(text)
   if info and not it.modesChosen then
     it.choosing = true
+    it.choosingAt = os.time()
     return chooseModes(it, info, function(chosen)
       it.modesChosen = chosen
       local body = table.concat(chosen, " ")
@@ -10538,6 +10539,7 @@ function pickAll(it, text, specs, done)
     return finish()
   end
   it.choosing = true
+  it.choosingAt = os.time()
   it.preTargets = {}
   it.targetsChosen = true
   local taken = {}
