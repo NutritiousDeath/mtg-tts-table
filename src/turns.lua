@@ -961,6 +961,9 @@ function Turns.respond(color, hasResponse)
   if p == nil then
     return
   end
+  if hasResponse and Stack then
+    Stack.autoResolve = nil   -- RESOLVE ALL stops for a response (also on a "resolve this?" pop-up)
+  end
   if hasResponse and p.kind == "ask" then
     local action = pendingAction
     t.pending = nil

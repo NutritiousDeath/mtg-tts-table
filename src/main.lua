@@ -126,7 +126,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.57 (2HG Notion Thief, RESOLVE ALL loop)"
+SCRIPT_VERSION = "2.58 (RESOLVE ALL stops for a response)"
 
 function onLoad(saved)
   GameLog.setup()
