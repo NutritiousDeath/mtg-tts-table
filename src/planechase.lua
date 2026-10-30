@@ -1281,8 +1281,8 @@ towerRoll = function(die, color, byHand, chute)
       roll = nil
       towerRolling = false
       Planechase.towerColor(Fires and Fires.current and Fires.current() or nil)
-      -- The dragons roar in the result's colour.
-      towerFlash((v == 1 and TOWER_WALK) or ((v == 6 or st.aether) and TOWER_CHAOS) or idx)
+      -- The dragons roar in the result's colour: purple for a planeswalk or chaos, the roller's colour for a blank.
+      towerFlash(((v == 1 or v == 6 or st.aether) and TOWER_CHAOS) or idx)
     end)
     Wait.time(function() Planechase.onRolled(die, color, true) end, 0.4)
     -- Never leave the tower stuck mid-roll.

@@ -169,7 +169,8 @@ function GameFlow.xml()
     <Text fontSize="15" alignment="MiddleLeft" preferredHeight="22">First player</Text>
     <HorizontalLayout spacing="8" preferredHeight="36">]] .. table.concat(seatButtons) .. [[</HorizontalLayout>
     <HorizontalLayout spacing="10" preferredHeight="44">
-      <Button onClick="ui_startGame" color="#3B5BDB" fontStyle="Bold">Start</Button>
+      <Button onClick="ui_startGame" color="#3B5BDB" fontStyle="Bold" tooltip="Start (or restart) with the decks on the table: every card goes back into its owner's library">START</Button>
+      <Button onClick="ui_newDecks" color="#7A3B1B" fontStyle="Bold" tooltip="End the game and clear every seat's deck so everyone can import a new one (click twice to confirm)">NEW DECKS</Button>
       <Button onClick="ui_toggleStart">Close</Button>
     </HorizontalLayout>
   </VerticalLayout>
@@ -715,6 +716,53 @@ function GameFlow.switchLayout(color, layout)
       .. " (" .. table.concat(TableSetup.activeSeats(), ", ") .. ")", { 0.7, 0.85, 1 })
   end
   return true
+end
+
+-- NEW DECKS: end the game and clear every seat's cards (decks, hands, battlefield, graveyards, exile,
+-- commanders, tokens, the stack) so everyone imports a fresh deck. A second click within 5 seconds confirms.
+local newDecksAsk = nil
+function ui_newDecks(player)
+  local c = player.color
+  if c == nil or c == "Grey" or c == "Black" or not TableSetup.isActive(c) then
+    broadcastToColor("Take a seat at the table first.", c, WARN)
+    return
+  end
+  local now = os.time()
+  if not (newDecksAsk and newDecksAsk.color == c and now - newDecksAsk.at <= 5) then
+    newDecksAsk = { color = c, at = now }
+    broadcastToColor("NEW DECKS removes EVERY seat's cards from the table (decks, hands, battlefield, graveyards, exile,"
+      .. " commanders) and ends the game. Click NEW DECKS again within 5 seconds to do it.", c, WARN)
+    return
+  end
+  newDecksAsk = nil
+  GameFlow.newDecks(c)
+end
+
+function GameFlow.newDecks(byColor)
+  -- The stack first (its cards go back to hands, which are cleared next).
+  if Stack and Stack.size and Stack.removeRow then
+    local guard = 0
+    while Stack.size() > 0 and guard < 80 do
+      guard = guard + 1
+      pcall(Stack.removeRow, 1, byColor)
+    end
+  end
+  Wait.time(function()
+    for _, c in ipairs(TableSetup.activeSeats()) do
+      pcall(Importer.clearSeat, c)
+    end
+    -- The game itself: the same as !reset (the table, its layout and surface stay).
+    local tableState = GameState.data and GameState.data.table
+    GameState.new("commander")
+    GameState.data.table = tableState
+    pcall(Importer.reset)
+    pcall(Trackers.ensureTableDisplay)
+    pcall(Stack.render)
+    pcall(Turns.render)
+    pcall(GameFlow.refreshUI)
+    broadcastToAll(byColor .. " started over with NEW DECKS: the table is cleared. Everyone import your deck (paste the link in"
+      .. " the box under a Deck Importer card, or type !import <link>), then click START GAME.", { 0.7, 0.85, 1 })
+  end, 1)
 end
 
 -- The layout buttons. During a game, a second click on the same layout within 5 seconds ends the game first.

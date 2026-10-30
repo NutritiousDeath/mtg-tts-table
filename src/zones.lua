@@ -254,6 +254,44 @@ function Zones.refresh(obj)
   moveTo(obj, obj.getName(), obj.getGUID(), Zones.regionAt(obj.getPosition()))
 end
 
+-- Where every card is right now, without any "moved" events: after a load (or Save & Play) the table knows
+-- nothing about where cards were, so a land picked up from a hand could look like it came from the lands mat
+-- next to it, and playing it wouldn't count as entering (landfall missed). Called on load.
+function Zones.seed()
+  handCache.at = -100
+  for _, color in ipairs(TableSetup.activeSeats()) do
+    local ok, list = pcall(function() return Player[color].getHandObjects() end)
+    for _, h in ipairs(ok and list or {}) do
+      if isCard(h) then
+        where[h.getGUID()] = { seat = color, region = "hand" }
+      end
+    end
+  end
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" and not obj.isDestroyed() and where[obj.getGUID()] == nil and obj.held_by_color == nil then
+      where[obj.getGUID()] = Zones.regionAt(obj.getPosition())
+    end
+  end
+end
+
+-- Is this point inside a seat's hand zone? Returns the seat, or nil.
+local function inHandZone(pos)
+  for _, color in ipairs(TableSetup.activeSeats()) do
+    local ok, tr = pcall(function() return Player[color].getHandTransform() end)
+    if ok and tr and tr.position and tr.scale then
+      local dx, dz = pos.x - tr.position.x, pos.z - tr.position.z
+      local yaw = math.rad(tr.rotation and tr.rotation.y or 0)
+      -- Into the zone's own frame (it's turned to face its seat).
+      local lx = dx * math.cos(yaw) - dz * math.sin(yaw)
+      local lz = dx * math.sin(yaw) + dz * math.cos(yaw)
+      if math.abs(lx) <= tr.scale.x / 2 + 0.5 and math.abs(lz) <= tr.scale.z / 2 + 0.5 then
+        return color
+      end
+    end
+  end
+  return nil
+end
+
 -- A player picked something up: note where it was, so the move that follows
 -- knows where it came from (cards placed by script, like commanders, are
 -- never "dropped" there, so they'd otherwise have no starting area).
@@ -270,6 +308,14 @@ function Zones.onPickUp(color, obj)
     -- (so playing a land counts as "played" for Horn of Greed and the land count).
     local was = where[obj.getGUID()]
     local here = Zones.regionAt(obj.getPosition())
+    -- Not tracked yet (after a load) but lifted from inside a hand zone: it comes from that hand.
+    if was == nil then
+      local hs = inHandZone(obj.getPosition())
+      if hs then
+        where[obj.getGUID()] = { seat = hs, region = "hand" }
+        return
+      end
+    end
     if not (was and was.region == "hand" and here.region == "table") then
       where[obj.getGUID()] = here
     end

@@ -126,7 +126,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.63 (cameras pointed at seats after joining / loading)"
+SCRIPT_VERSION = "2.64 (North Pole, purple planeswalk breath, enter-tapped statics, landfall after load, NEW DECKS)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -160,6 +160,9 @@ function onLoad(saved)
     TableSetup.lookAtAll(0.5)
     -- Players still loading the room miss the first one: again once everything has had time to arrive.
     TableSetup.lookAtAll(8)
+    -- Where every card is (nothing is known after a load: landfall and "enters" would miss lands played from hand).
+    pcall(Zones.seed)
+    Wait.time(function() pcall(Zones.seed) end, 5)
     GameFlow.restore()
     Combat.restore()
   end, 1)

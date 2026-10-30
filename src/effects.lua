@@ -925,6 +925,35 @@ function Effects.parse(text, sourceName)
           unlegend = t:find("isn't legendary", 1, true) ~= nil } } }
     end
   end
+  -- "Tap target creature an opponent controls. Put a stun counter on it." (North Pole Research Base's chaos,
+  -- after its "create a 2/2 Alien token. When you do,"): tap it and give it the stun counter(s).
+  do
+    local pre, seg, sw = t:match("^(.-)tap (target [^%.]+)%. put (%w+) stun counters? on it%.?%s*$")
+    if seg and num(sw) then
+      local sub = Effects.parse("tap " .. seg .. ".", sourceName)
+      local tap = sub and sub.actions and sub.actions[1]
+      if tap and tap.what == "tapX" and not tap.all and not tap.self then
+        tap.stun = num(sw)
+        local acts = {}
+        pre = pre:gsub("when you do,%s*$", ""):gsub("^%s+", ""):gsub("%s+$", "")
+        local okPre = true
+        if pre ~= "" then
+          local p2 = Effects.parse(pre, sourceName)
+          if p2 and p2.actions and #p2.actions > 0 then
+            for _, x in ipairs(p2.actions) do
+              table.insert(acts, x)
+            end
+          else
+            okPre = false
+          end
+        end
+        if okPre then
+          table.insert(acts, tap)
+          return { optional = false, notes = {}, conds = {}, actions = acts }
+        end
+      end
+    end
+  end
   -- Tap / untap: "Untap target artifact." / "Untap all nonland permanents you control." / "Tap all creatures your opponents control." / "untap ~".
   do
     local tt = t:gsub("^%s+", ""):gsub("%s+$", ""):gsub("^\226\128\162%s*", "")
@@ -1360,6 +1389,18 @@ function Effects.parse(text, sourceName)
     local ORD = { second = 2, third = 3, fourth = 4, fifth = 5, sixth = 6, seventh = 7, eighth = 8, ninth = 9, tenth = 10 }
     if ord and ORD[ord] then
       table.insert(actions, { what = "toLibrary", who = "you", n = ORD[ord] })
+    end
+  end
+  -- North Pole Research Base: "target opponent draws a card and creates a Treasure token."
+  do
+    local ow = t:match("target opponent draws (%w+) cards?")
+    if ow and num(ow) then
+      add("draw", "targetOpponent", num(ow))
+      local tw2 = t:match("target opponent draws %w+ cards? and creates (%w+) treasure tokens?")
+      if tw2 and num(tw2) then
+        table.insert(actions, { what = "token", who = "targetOpponent", n = num(tw2), phrase = "a treasure",
+          spec = { colors = {}, words = { "treasure" } }, tapped = false, attacking = false, haste = false, attachSelf = false })
+      end
     end
   end
   -- "Target player draws three cards and loses 3 life." (Insatiable Avarice)
@@ -6232,6 +6273,11 @@ function Effects.tapX(seat, a, it)
           done[obj.getGUID()] = true
           turnTapped(obj, Effects.fieldSeat(obj) or seat, want)
           printToAll("MTG > " .. it.name .. ": " .. obj.getName() .. (want and " is tapped." or " is untapped."), GOOD)
+          if a.stun and a.stun > 0 and Counters and Counters.change then
+            Counters.change(obj, "other", a.stun, seat)
+            printToAll("MTG > " .. obj.getName() .. " gets " .. a.stun .. " stun counter" .. (a.stun == 1 and "" or "s")
+              .. " (the next time it would untap, remove one instead).", GOOD)
+          end
           step(k + 1)
         end
       end, { filter = function(obj, owner)
@@ -8496,11 +8542,11 @@ Events.on("cardMoved", function(d)
     return
   end
   local how, clause = Effects.entersTapped(card)
-  -- The Doctor's Childhood Barn: "Creatures enter the battlefield tapped."
-  if how == nil and Statics and Statics.planeSays then
-    local tlc = ""
-    pcall(function() tlc = tostring(JSON.decode(card.getGMNotes()).typeLine or ""):lower() end)
-    if tlc:find("creature", 1, true) and Statics.planeSays("creatures enter the battlefield tapped") then
+  -- Another permanent (or the plane) says so: "Creatures your opponents control enter tapped" (Authority of the
+  -- Consuls), "Creatures enter the battlefield tapped" (The Doctor's Childhood Barn).
+  if how == nil and Statics and Statics.othersEnterTapped then
+    local okT, src = pcall(Statics.othersEnterTapped, card, seat)
+    if okT and src then
       how = "yes"
     end
   end

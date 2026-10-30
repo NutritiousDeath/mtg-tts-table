@@ -1219,6 +1219,52 @@ function Statics.drawReplacer(seat)
   return nil
 end
 
+-- "Creatures your opponents control enter tapped" (Authority of the Consuls, Kinjalli's Sunwing, Blind Obedience,
+-- Thalia, Heretic Cathar, Frozen Aether, Root Maze; The Doctor's Childhood Barn on a plane): does something on the
+-- table make this card, entering under `seat`'s control, enter tapped? Returns the source's name, or nil.
+function Statics.othersEnterTapped(card, seat)
+  local d = dataOf(card)
+  local tl = tostring(d.typeLine or ""):lower()
+  for _, p in ipairs(perms()) do
+    if p.obj ~= card and p.oracle:find(" enter", 1, true) and p.oracle:find("tapped", 1, true) then
+      for sent in p.oracle:gmatch("[^%.\n]+") do
+        local subj = sent:match("^%s*(.-) enter tapped%s*$") or sent:match("^%s*(.-) enter the battlefield tapped%s*$")
+        if subj and not subj:find("~", 1, true) and not subj:find(":", 1, true) and #subj < 70 then
+          local scopeOk = true
+          if subj:find("your opponents control", 1, true) or subj:find("an opponent controls", 1, true) then
+            scopeOk = seat ~= nil and TableSetup.isOpponent(seat, p.seat)
+          elseif subj:find("you control", 1, true) then
+            scopeOk = seat == p.seat
+          end
+          local typeOk = false
+          if subj:find("permanents", 1, true) then
+            typeOk = true
+          end
+          if subj:find("creatures", 1, true) and tl:find("creature", 1, true) then
+            typeOk = not (subj:find("nontoken creatures", 1, true) and card.hasTag("Token"))
+          end
+          if subj:find("artifacts", 1, true) and tl:find("artifact", 1, true) then
+            typeOk = true
+          end
+          if subj:find("nonbasic lands", 1, true) then
+            if tl:find("land", 1, true) and not tl:find("basic", 1, true) then
+              typeOk = true
+            end
+          elseif subj:find("lands", 1, true) and tl:find("land", 1, true) then
+            typeOk = true
+          end
+          if scopeOk and typeOk then
+            local nm = "a permanent"
+            pcall(function() nm = p.obj.getName() end)
+            return nm
+          end
+        end
+      end
+    end
+  end
+  return nil
+end
+
 -- Panharmonicon: how many of them this seat controls.
 function Statics.panharmonicons(seat)
   local n = 0
