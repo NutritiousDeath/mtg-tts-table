@@ -126,7 +126,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.62 (import box on the importer cards, screen UI rebuilt for joiners)"
+SCRIPT_VERSION = "2.63 (cameras pointed at seats after joining / loading)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -158,6 +158,8 @@ function onLoad(saved)
   Wait.time(function()
     TableSetup.enforceAllSeats()
     TableSetup.lookAtAll(0.5)
+    -- Players still loading the room miss the first one: again once everything has had time to arrive.
+    TableSetup.lookAtAll(8)
     GameFlow.restore()
     Combat.restore()
   end, 1)
@@ -218,6 +220,16 @@ end
 
 function onPlayerConnect(player)
   Wait.time(function() TableUI.refreshVisibility() end, 1)
+  -- Their camera starts where TTS puts it (inside the walls or under the floor of this table's room):
+  -- point it at their seat once they've had time to load, and again a little later.
+  for _, d in ipairs({ 5, 12 }) do
+    Wait.time(function()
+      local ok, color = pcall(function() return player.color end)
+      if ok and color and TableSetup.isActive(color) then
+        pcall(TableSetup.lookAtSeat, color)
+      end
+    end, d)
+  end
   -- A fresh copy of the screen UI for everyone, so the newcomer's panels take clicks.
   TableUI.rebuildSoon(4)
   -- A returning player lands as a spectator (Grey) and can't touch anything: sit them back down.
