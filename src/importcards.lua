@@ -35,6 +35,31 @@ function importcards_click(obj, playerColor)
   TableUI.openImport(playerColor)
 end
 
+-- The link box on the card itself: works for every player, even when the screen panel doesn't take
+-- clicks (TTS sometimes leaves a player's screen UI unclickable after they join).
+local typed = {}   -- [card guid] = text in its box
+
+function importcards_text(obj, playerColor, value, selected)
+  typed[obj.getGUID()] = value
+end
+
+function importcards_go(obj, playerColor)
+  local text = typed[obj.getGUID()] or ""
+  text = text:gsub("^%s+", ""):gsub("%s+$", "")
+  if playerColor == nil or playerColor == "Grey" or playerColor == "Black" or not TableSetup.isActive(playerColor) then
+    broadcastToColor("Take a seat first, then import.", playerColor or "Grey", { 1, 0.6, 0.2 })
+    return
+  end
+  if text == "" then
+    broadcastToColor("Paste your Archidekt or Moxfield deck link into the box under the Deck Importer card, then click IMPORT TO MY SEAT.",
+      playerColor, { 1, 0.6, 0.2 })
+    return
+  end
+  typed[obj.getGUID()] = nil
+  pcall(function() obj.editInput({ index = 0, value = "" }) end)
+  TableUI.importFor(playerColor, text, playerColor)
+end
+
 local function ready(obj)
   local b = obj.getBoundsNormalized()
   local w = b and b.size and b.size.x or 0
@@ -60,6 +85,37 @@ local function ready(obj)
     color = { 0, 0, 0, 0 },
     hover_color = { 0.35, 0.95, 1, 0.12 },
     press_color = { 0.35, 0.95, 1, 0.25 },
+  })
+  -- Under the card: a box for the deck link and a button that imports it to whoever clicks.
+  obj.clearInputs()
+  local half = 3.5   -- half the card's height (table units)
+  obj.createInput({
+    input_function = "importcards_text",
+    function_owner = Global,
+    label = "Paste deck link here",
+    tooltip = "Archidekt or Moxfield deck link (or a pasted list)",
+    position = { 0, 0.12, (half + 0.7) / k },
+    rotation = { 0, 0, 0 },
+    scale = { 1 / k, 1, 1 / k },
+    width = 2500, height = 300, font_size = 150,
+    alignment = 3,
+    color = { 0.08, 0.1, 0.14, 0.95 },
+    font_color = { 0.9, 0.95, 1 },
+    value = "",
+  })
+  obj.createButton({
+    click_function = "importcards_go",
+    function_owner = Global,
+    label = "IMPORT TO MY SEAT",
+    tooltip = "Import the deck in the box to your seat",
+    position = { 0, 0.12, (half + 1.6) / k },
+    rotation = { 0, 0, 0 },
+    scale = { 1 / k, 1, 1 / k },
+    width = 1800, height = 330, font_size = 170,
+    color = { 0, 0.7, 0.64, 1 },
+    font_color = { 0.02, 0.08, 0.05 },
+    hover_color = { 0.2, 0.85, 0.78, 1 },
+    press_color = { 0.1, 0.6, 0.55, 1 },
   })
 end
 

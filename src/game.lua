@@ -152,13 +152,20 @@ function GameFlow.xml()
 
 <Panel id="startPanel"
        active="false"
-       width="560" height="260"
+       width="560" height="350"
        color="#0D1117F2"
        outline="#3B5BDB" outlineSize="2 2"
        allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="16 16 16 16" spacing="10" childForceExpandHeight="false">
     <Text fontSize="22" fontStyle="Bold" alignment="MiddleLeft" preferredHeight="32">Start Game</Text>
     <Text fontSize="13" alignment="MiddleLeft" preferredHeight="36" color="#8B98A9">Every seated player with a deck joins. Cards in hands and on the battlefield, graveyard and exile go back into their owner's library; commanders return to the command zone. Life resets to 40.</Text>
+    <Text fontSize="15" alignment="MiddleLeft" preferredHeight="22">Table layout</Text>
+    <HorizontalLayout spacing="8" preferredHeight="40">
+      <Button id="layout_four" onClick="ui_setLayout(four)" fontStyle="Bold" tooltip="Four players, one per side: White, Red, Green, Blue">4 PLAYERS</Button>
+      <Button id="layout_three" onClick="ui_setLayout(three)" fontStyle="Bold" tooltip="Three players: White, Red, Green (the east side stays open)">3 PLAYERS</Button>
+      <Button id="layout_two" onClick="ui_setLayout(two)" fontStyle="Bold" tooltip="Two players facing each other: White, Green">2 PLAYERS</Button>
+      <Button id="layout_twohg" onClick="ui_setLayout(twohg)" fontStyle="Bold" tooltip="Two-Headed Giant: White + Red vs Green + Blue, 60 shared life per team">2HG</Button>
+    </HorizontalLayout>
     <Text fontSize="15" alignment="MiddleLeft" preferredHeight="22">First player</Text>
     <HorizontalLayout spacing="8" preferredHeight="36">]] .. table.concat(seatButtons) .. [[</HorizontalLayout>
     <HorizontalLayout spacing="10" preferredHeight="44">
@@ -173,6 +180,10 @@ end
 -- Bring the panels in line with the saved state (after the XML is (re)built).
 function GameFlow.refreshUI()
   local s = setup()
+  local cur = TableSetup.layout()
+  for _, l in ipairs({ "four", "three", "two", "twohg" }) do
+    UI.setAttribute("layout_" .. l, "color", l == cur and ON or OFF)
+  end
   for _, color in ipairs(TableSetup.activeSeats()) do
     UI.setAttribute("first_" .. color, "color", s.firstChoice == color and ON or OFF)
   end
@@ -662,6 +673,80 @@ end)
 ---------------------------------------------------------------------------
 
 local startOpen = false
+
+-- Switch the table layout ("four", "three", "two", "twohg"): the chat command (!layout) and the
+-- layout buttons in the Start Game panel both come here.
+function GameFlow.switchLayout(color, layout)
+  if GameState.data.started then
+    broadcastToColor("A game is running: the layout can't change mid-game. Click the layout again within 5 seconds to"
+      .. " END the game and switch (life, turns and mulligans reset; the cards stay where they are), or type !reset first.",
+      color, WARN)
+    return false
+  end
+  TableSetup.setLayout(layout)
+  -- Starting life for the layout (Start Game sets it again).
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    local p = GameState.player(c)
+    if p then
+      p.life = (layout == "twohg") and Trackers.TEAM_LIFE_2HG or GameState.format().startingLife
+      p.poison = 0
+    end
+  end
+  ImportCards.ensure()
+  Trackers.ensureTableDisplay()
+  Actions.ensure()
+  Turns.ensureStrips()
+  ManaChips.ensure()
+  Stack.ensure()
+  TableUI.build()
+  -- The panel was open: show it again on the new UI, with the new layout lit.
+  if startOpen then
+    Wait.time(function()
+      UI.show("startPanel")
+      GameFlow.refreshUI()
+    end, 0.8)
+  end
+  if layout == "twohg" then
+    broadcastToAll("Table layout: Two-Headed Giant. Team White + Red (south) vs team Green + Blue (north). Each team shares "
+      .. Trackers.TEAM_LIFE_2HG .. " life and 15 poison; 21 damage from one commander to one player still knocks out that player's team.",
+      { 0.7, 0.85, 1 })
+  else
+    broadcastToAll("Table layout: " .. (layout == "four" and "4 players" or layout == "three" and "3 players" or "2 players")
+      .. " (" .. table.concat(TableSetup.activeSeats(), ", ") .. ")", { 0.7, 0.85, 1 })
+  end
+  return true
+end
+
+-- The layout buttons. During a game, a second click on the same layout within 5 seconds ends the game first.
+local layoutConfirm = nil
+function ui_setLayout(player, layout)
+  local c = player.color
+  if c == nil or c == "Grey" or c == "Black" then
+    broadcastToColor("Take a seat at the table to change the layout.", c, WARN)
+    return
+  end
+  if layout ~= "four" and layout ~= "three" and layout ~= "two" and layout ~= "twohg" then
+    return
+  end
+  if layout == TableSetup.layout() and not GameState.data.started then
+    broadcastToColor("The table is already set up that way.", c, INFO)
+    return
+  end
+  if GameState.data.started then
+    local now = os.time()
+    if layoutConfirm and layoutConfirm.color == c and layoutConfirm.layout == layout and now - layoutConfirm.at <= 5 then
+      layoutConfirm = nil
+      -- The same as !reset: the game ends, the table (surface, layout) stays.
+      local tableState = GameState.data and GameState.data.table
+      GameState.new("commander")
+      GameState.data.table = tableState
+      broadcastToAll(c .. " ended the game to change the table layout.", WARN)
+    else
+      layoutConfirm = { color = c, layout = layout, at = now }
+    end
+  end
+  GameFlow.switchLayout(c, layout)
+end
 
 function ui_toggleStart(player)
   startOpen = not startOpen

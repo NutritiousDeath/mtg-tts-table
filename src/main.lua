@@ -126,7 +126,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.60 (plane statics, no-target triggers, 2HG shared priority, commander to library)"
+SCRIPT_VERSION = "2.62 (import box on the importer cards, screen UI rebuilt for joiners)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -218,6 +218,8 @@ end
 
 function onPlayerConnect(player)
   Wait.time(function() TableUI.refreshVisibility() end, 1)
+  -- A fresh copy of the screen UI for everyone, so the newcomer's panels take clicks.
+  TableUI.rebuildSoon(4)
   -- A returning player lands as a spectator (Grey) and can't touch anything: sit them back down.
   Wait.time(function()
     local ok, color = pcall(function() return player.color end)
@@ -343,8 +345,22 @@ function onPlayerChangeColor(color)
       seatMemory()[p.steam_id] = color
     end
   end
-  -- Seat-only panels (import etc.) for someone who just sat down.
+  -- Seat-only panels (import etc.) for someone who just sat down, then a fresh copy of the screen UI.
   Wait.time(function() TableUI.refreshVisibility() end, 0.5)
+  if color ~= "Grey" and color ~= "Black" then
+    TableUI.rebuildSoon(2)
+  else
+    -- A spectator: point their camera at the table from above (not under the floor or outside the room).
+    Wait.time(function()
+      for _, p in ipairs(Player.getPlayers()) do
+        if p.color == color then
+          pcall(function()
+            p.lookAt({ position = { x = 0, y = TableSetup.SURFACE_TOP, z = 0 }, pitch = 65, yaw = 0, distance = 70 })
+          end)
+        end
+      end
+    end, 1)
+  end
   -- 2HG: whoever sits down joins their seat's team (teammates see each other's hands).
   Wait.time(function() pcall(TableSetup.applyTeams) end, 0.6)
   if color == "Grey" or color == "Black" then
@@ -516,6 +532,7 @@ function onChat(message, sender)
 
   if message == "!resync" then
     TableUI.refreshVisibility()
+    TableUI.rebuildSoon(0.5)
     Counters.refreshMenus()
     local msg = "MTG > Resync (script version " .. tostring(SCRIPT_VERSION):match("^[%d%.]+") .. "): refreshed your panels. You are "
       .. tostring(sender.color) .. (TableSetup.isActive(sender.color)
@@ -796,35 +813,7 @@ function onChat(message, sender)
         sender.color, { 1, 0.6, 0.2 })
       return false
     end
-    if GameState.data.started then
-      broadcastToColor("A game is running: the layout can't change mid-game. Type !reset first (clears the game: life, turns,"
-        .. " mulligans; the cards stay where they are), then !layout " .. arg .. ".", sender.color, { 1, 0.6, 0.2 })
-      return false
-    end
-    TableSetup.setLayout(layout)
-    -- Starting life for the layout (Start Game sets it again).
-    for _, c in ipairs(TableSetup.activeSeats()) do
-      local p = GameState.player(c)
-      if p then
-        p.life = (layout == "twohg") and Trackers.TEAM_LIFE_2HG or GameState.format().startingLife
-        p.poison = 0
-      end
-    end
-    ImportCards.ensure()
-    Trackers.ensureTableDisplay()
-    Actions.ensure()
-    Turns.ensureStrips()
-    ManaChips.ensure()
-    Stack.ensure()
-    TableUI.build()
-    if layout == "twohg" then
-      broadcastToAll("Table layout: Two-Headed Giant. Team White + Red (south) vs team Green + Blue (north). Each team shares "
-        .. Trackers.TEAM_LIFE_2HG .. " life and 15 poison; 21 damage from one commander to one player still knocks out that player's team.",
-        { 0.7, 0.85, 1 })
-    else
-      broadcastToAll("Table layout: " .. (layout == "four" and "4 players" or layout == "three" and "3 players" or "2 players")
-        .. " (" .. table.concat(TableSetup.activeSeats(), ", ") .. ")", { 0.7, 0.85, 1 })
-    end
+    GameFlow.switchLayout(sender.color, layout)
     return false
   end
 

@@ -106,6 +106,57 @@ end
 -- get the seat-only panels (import, dice, tokens, scry...) until their
 -- visibility is set again, so the import panel never showed for them.
 -- Re-apply it for every seat-only element.
+-- Rebuild the whole screen UI (the same as Save & Play does for it): players who joined or changed
+-- seat after it was built sometimes see panels they can't click. Waits until nobody is in the middle of a
+-- question (rebuilding closes open pop-ups), for up to a minute.
+local rebuildToken = 0
+function TableUI.rebuildSoon(delay)
+  rebuildToken = rebuildToken + 1
+  local tok = rebuildToken
+  local tries = 0
+  local function busy()
+    if Effects and Effects.busy and Effects.busy() then
+      return true
+    end
+    if Triggers and Triggers.isOrdering and Triggers.isOrdering() then
+      return true
+    end
+    if Turns and Turns.isWaiting and Turns.isWaiting() then
+      return true
+    end
+    if LibSearch and LibSearch.isOpen then
+      for _, c in ipairs(TableSetup.activeSeats()) do
+        if LibSearch.isOpen(c) then
+          return true
+        end
+      end
+    end
+    return false
+  end
+  local function go()
+    if tok ~= rebuildToken then
+      return
+    end
+    tries = tries + 1
+    if busy() and tries < 30 then
+      Wait.time(go, 2)
+      return
+    end
+    local ok, err = pcall(TableUI.build)
+    if not ok then
+      print("MTG > rebuilding the screen UI: " .. tostring(err))
+      return
+    end
+    Wait.time(function()
+      pcall(TableUI.refreshVisibility)
+      if GameFlow and GameFlow.refreshUI then pcall(GameFlow.refreshUI) end
+      if Stack and Stack.render then pcall(Stack.render) end
+      if Turns and Turns.render then pcall(Turns.render) end
+    end, 1)
+  end
+  Wait.time(go, delay or 3)
+end
+
 function TableUI.refreshVisibility()
   for _, pair in ipairs(TableUI.privateIds or {}) do
     UI.setAttribute(pair[1], "visibility", pair[2])
