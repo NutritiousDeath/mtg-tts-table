@@ -229,6 +229,10 @@ function Actions.landsAllowed(seat)
       end
     end
   end
+  -- Two Streams Facility: green anchor's additional land.
+  if PlaneFx and PlaneFx.extraLands then
+    n = n + (PlaneFx.extraLands(seat) or 0)
+  end
   -- Naya: "You may play any number of lands on each of your turns" (the planar controller: the active player).
   if Statics and Statics.planeSays and Statics.planeSays("you may play any number of lands on each of your turns")
       and Turns and Turns.isActiveSeat and Turns.isActiveSeat(seat) then
@@ -637,6 +641,9 @@ function Actions.cleanupDiscard(color, onDone)
   end
   -- Planes: Stairs to Infinity, The Lux Foundation Library ("Players have no maximum hand size").
   local noMax = Statics and Statics.planeSays and Statics.planeSays("players have no maximum hand size")
+  if not noMax and PlaneFx and PlaneFx.noMaxHand and PlaneFx.noMaxHand(color) then
+    noMax = "Undercity Reaches"
+  end
   if noMax then
     log(color .. " keeps " .. #hand .. " cards (" .. noMax .. ": no maximum hand size)")
     onDone()

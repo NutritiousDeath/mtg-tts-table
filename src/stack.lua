@@ -283,6 +283,13 @@ end
 
 function Stack.pushAbility(controller, sourceName, text, image, opts)
   opts = opts or {}
+  -- A plane's or Phenomenon's ability (planefx.lua): reworded, or marked to run its own code as it resolves.
+  if PlaneFx and PlaneFx.adjust then
+    local okp, t2, o2 = pcall(PlaneFx.adjust, sourceName, text, opts)
+    if okp then
+      text, opts = t2, o2 or opts
+    end
+  end
   local label = opts.copyOf and "COPY" or (opts.trigger and "TRIGGER" or "ABILITY")
   if opts.planar == "chaos" then
     label = "CHAOS"
@@ -328,7 +335,7 @@ function Stack.pushAbility(controller, sourceName, text, image, opts)
   local item = { guid = obj.getGUID(), kind = "ability", name = sourceName, controller = controller,
     text = text, trigger = opts.trigger, that = opts.that, source = opts.source, thatCard = opts.thatCard,
     amount = opts.amount, copyOf = opts.copyOf, ninjutsu = opts.ninjutsu, planar = opts.planar,
-    ward = opts.ward, room = opts.room,
+    ward = opts.ward, room = opts.room, planeFx = opts.planeFx, owner = opts.owner, cards = opts.cards,
     auto = (opts.trigger or opts.loyalty or opts.activated or opts.copyOf) and true or nil }
   table.insert(items(), item)
   Stack.render()

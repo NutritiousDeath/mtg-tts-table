@@ -22,12 +22,25 @@ local function planeNow()
     return planeCache.obj, planeCache.text, planeCache.seat
   end
   local obj, text, seat
-  if Planechase and Planechase.currentPlane and GameState.data and GameState.data.started then
-    local okp, plane = pcall(Planechase.currentPlane)
+  if Planechase and Planechase.allPlanes and GameState.data and GameState.data.started then
+    local okp, planes = pcall(Planechase.allPlanes)
     local t = GameState.data.turn or {}
-    if okp and plane and t.activeSeat then
-      local okt, tx = pcall(Planechase.triggerText, plane.getName())
-      obj, text, seat = plane, (okt and tostring(tx or "") or ""):lower(), t.activeSeat
+    if okp and planes and planes[1] and t.activeSeat then
+      -- Two planes face up (Spatial Merging): both planes' always-on lines count (named after the first).
+      local parts = {}
+      for _, plane in ipairs(planes) do
+        local okt, tx = pcall(Planechase.triggerText, plane.getName())
+        -- "Low Gravity — All creatures have ..." -> "All creatures have ..." (an ability word is just a name).
+        for l0 in ((okt and tostring(tx or "") or "") .. "\n"):gmatch("([^\n]*)\n") do
+          local l = l0
+          local at = l:find(" \226\128\148 ", 1, true)
+          if at and at <= 45 and not l:sub(1, at):find(",", 1, true) then
+            l = l:sub(at + 5)
+          end
+          table.insert(parts, l)
+        end
+      end
+      obj, text, seat = planes[1], table.concat(parts, "\n"):lower(), t.activeSeat
     end
   end
   planeCache = { at = now, obj = obj, text = text, seat = seat }
@@ -229,6 +242,17 @@ local function subjectMatches(subj, q, p)
       local mv = tonumber(dataOf(q.obj).cmc) or 0
       return mv <= tonumber(mvMax)
     end
+  end
+  -- Towashi: "Modified creatures you control have ..." (counters, Equipment or an Aura of theirs).
+  if subj == "modified creatures" then
+    local c = Counters and Counters.get and Counters.get(q.obj) or {}
+    for k, v in pairs(c) do
+      if type(v) == "number" and v > 0 and k ~= "dmg" then
+        return true
+      end
+    end
+    local okA, atts = pcall(function() return Equip and Equip.attachments and Equip.attachments(q.obj) or {} end)
+    return okA and atts ~= nil and #atts > 0
   end
   if subj == "creatures" then
     return true
@@ -539,6 +563,7 @@ function Statics.compute()
       do
         local gat = line:find(" get ", 1, true)
         if gat and gat <= 40 and line:find(" for each other ", 1, true) and line:find(" on the battlefield", 1, true)
+            and not line:find("shares at least one creature type", 1, true)
             and not line:find(":", 1, true) and not line:find("until end of turn", 1, true) then
           local gx, gy, gw = line:sub(gat + 5):match("^([%+%-]%d+)/([%+%-]%d+) for each other (%a+) on the battlefield")
           if gx then
@@ -609,6 +634,17 @@ function Statics.compute()
           if Statics.forgeMatches(fe.f.f, q, p) then
             add(q, fp, ft)
           end
+        end
+      end
+    end
+  end
+  -- Planes (planefx.lua): Two Streams Facility's red waterfall, Velis Vel.
+  if PlaneFx and PlaneFx.bonus then
+    for _, q in ipairs(list) do
+      if not q.plane then
+        local okb, bp, bt = pcall(PlaneFx.bonus, q.obj, q.seat)
+        if okb and ((bp or 0) ~= 0 or (bt or 0) ~= 0) then
+          add(q, bp or 0, bt or 0)
         end
       end
     end
@@ -1053,6 +1089,16 @@ function Statics.grants(obj)
   local d = dataOf(obj)
   local q = { obj = obj, seat = loc.seat, tl = tostring(d.typeLine or ""):lower(), token = obj.hasTag("Token") }
   local seenK = {}
+  -- Planes (planefx.lua): Two Streams Facility's haste, Bant's divinity counters.
+  if PlaneFx and PlaneFx.keywords then
+    local okk, kws = pcall(PlaneFx.keywords, obj, loc.seat)
+    for _, k in ipairs(okk and kws or {}) do
+      if not seenK[k] then
+        seenK[k] = true
+        table.insert(out.kws, k)
+      end
+    end
+  end
   for _, g in ipairs(srcs) do
     local sideOk = g.scope == "all" or g.seat == loc.seat
     local fits

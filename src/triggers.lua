@@ -1124,11 +1124,13 @@ local function permanents()
     end
   end
   -- The face-up plane: its triggered abilities belong to the planar controller (the active player, CR 901.6).
-  if Planechase and Planechase.currentPlane and GameState.data.started then
-    local okp, plane = pcall(Planechase.currentPlane)
+  if Planechase and Planechase.allPlanes and GameState.data.started then
+    local okp, planes = pcall(Planechase.allPlanes)
     local t = GameState.data.turn or {}
-    if okp and plane and t.activeSeat then
-      table.insert(list, { obj = plane, controller = t.activeSeat, plane = true })
+    if okp and planes and t.activeSeat then
+      for _, plane in ipairs(planes) do
+        table.insert(list, { obj = plane, controller = t.activeSeat, plane = true })
+      end
     end
   end
   return list

@@ -104,6 +104,7 @@ require("src/music_tracks")
 require("src/music")
 require("src/planechase_data")
 require("src/planechase")
+require("src/planefx")
 require("src/leave")
 require("src/rulebook")
 Pile.install()
@@ -126,7 +127,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.65 (fix: pattern too complex when resolving)"
+SCRIPT_VERSION = "2.66 (Planechase: every plane and Phenomenon automated)"
 
 function onLoad(saved)
   GameLog.setup()

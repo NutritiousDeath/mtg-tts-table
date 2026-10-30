@@ -185,6 +185,27 @@ local function findGrave()
   return nearest(GRAVE_AT, "pile")
 end
 
+-- Spatial Merging / Norn's Seedcore: more than one plane face up at once. The first is at PLANE_AT; the others
+-- sit west of it, side by side (their GUIDs in data().extra).
+local EXTRA_AT = { x = -15.5, z = 0.1 }
+local EXTRA_STEP = 6.5
+local function extraPlanes()
+  local st = GameState.data.planechase or {}
+  local out, keep = {}, {}
+  for _, g in ipairs(st.extra or {}) do
+    local o = getObjectFromGUID(g)
+    if o and not o.isDestroyed() and o.type == "Card" and not o.is_face_down then
+      table.insert(out, o)
+      table.insert(keep, g)
+    end
+  end
+  st.extra = keep
+  return out
+end
+local function extraSpot(i)
+  return { x = EXTRA_AT.x - EXTRA_STEP * (i - 1), z = EXTRA_AT.z }
+end
+
 local function entryOf(obj)
   return obj and byName[obj.getName()] or nil
 end
@@ -300,27 +321,57 @@ local function lines(text)
   return out
 end
 
+-- "Praise Him — Whenever chaos ensues, ..." -> "Whenever chaos ensues, ..." (an ability word is just a name).
+local function stripWord(line)
+  local l = tostring(line or "")
+  local at = l:find(" \226\128\148 ", 1, true)
+  if at and at <= 45 and not l:sub(1, at):find(",", 1, true) then
+    return l:sub(at + 5)
+  end
+  return l
+end
+
 local function afterComma(line)
   local clean = Triggers and Triggers.stripReminder and Triggers.stripReminder(line) or line
+  clean = stripWord(clean)
   return clean:match("^[^,]+,%s*(.+)$")
+end
+
+-- Is this line a chaos ability? ("Whenever chaos ensues, ..." / "When chaos ensues, ...", with or without a name.)
+local function isChaosLine(l)
+  local low = stripWord(l):lower()
+  return low:find("^whenever chaos ensues") ~= nil or low:find("^when chaos ensues") ~= nil
 end
 
 -- The chaos ability of a plane card ("Whenever chaos ensues, ...").
 local function chaosOf(card)
-  local e = entryOf(card)
+  local e
+  if type(card) == "string" then
+    e = byName[card]
+  elseif card then
+    e = entryOf(card)
+  end
   for _, l in ipairs(lines(e and e.o)) do
-    if l:lower():find("^whenever chaos ensues") then
+    if isChaosLine(l) then
       return afterComma(l)
     end
   end
   return nil
 end
+Planechase.chaosOfName = function(name)
+  if next(byName) == nil then
+    buildIndex()
+  end
+  return chaosOf(name)
+end
 
 -- Lines of a plane card that the table puts on the stack itself (chaos, planeswalking to / away, rolling):
 -- left out of what the trigger reader watches for (triggers.lua treats the face-up plane as a permanent).
-local HANDLED = { "^whenever chaos ensues", "^when you planeswalk to", "^whenever you planeswalk to", "^when you encounter",
-  "^when you planeswalk away from", "^whenever you planeswalk away from", "^whenever you roll the planar die",
-  "^whenever you roll a blank on the planar die" }
+local HANDLED = { "^whenever chaos ensues", "^when chaos ensues", "^when you planeswalk to", "^whenever you planeswalk to",
+  "^when you encounter", "^when you planeswalk away from", "^whenever you planeswalk away from", "^whenever you roll the planar die",
+  "^whenever you roll a blank on the planar die",
+  -- "At the beginning of ..." lines go on the stack from here (PLANE_STEPS below), not from the trigger reader too.
+  "^at the beginning of", "^at beginning of", "^at end of combat" }
 
 -- The face-up plane (not a Phenomenon), or nil.
 function Planechase.currentPlane()
@@ -346,8 +397,8 @@ function Planechase.triggerText(name)
   end
   local keep = {}
   for _, l in ipairs(lines(e.o)) do
-    local low = l:lower()
-    local handled = false
+    local low = stripWord(l):lower()
+    local handled = PlaneFx and PlaneFx.handlesLine and PlaneFx.handlesLine(e.n, low) or false
     for _, pat in ipairs(HANDLED) do
       handled = handled or low:find(pat) ~= nil
     end
@@ -380,9 +431,19 @@ end
 
 local function push(seat, name, text, planar)
   if Stack and text and text ~= "" then
+    -- "... Then planeswalk." (Bad Wolf Bay, TARDIS Bay, Temple of Atropos, Grand Ossuary): the planeswalk goes
+    -- underneath, so it happens once the rest of the ability has resolved.
+    local low = text:lower()
+    local cut = low:find(" then planeswalk%.%s*$")
+    if cut then
+      Stack.pushAbility(seat, "Planeswalk", "Planeswalk: " .. name .. " leaves and the next plane turns face up.", nil,
+        { trigger = true, planar = "walk" })
+      text = text:sub(1, cut)
+    end
     Stack.pushAbility(seat, name, text, nil, { trigger = true, planar = planar })
   end
 end
+Planechase.push = push
 
 -- A plane or Phenomenon has just turned face up.
 local function arrived(card, color, started)
@@ -401,6 +462,13 @@ local function arrived(card, color, started)
   for _, l in ipairs(lines(e.o)) do
     printToAll("      " .. l, INFO)
   end
+  if PlaneFx and PlaneFx.arrived then
+    pcall(PlaneFx.arrived, name)
+  end
+  -- A plane that turns up again starts with no counters on it.
+  data().pc = data().pc or {}
+  data().pc[name] = nil
+  pcall(Planechase.showCounters)
   -- The new plane's always-on abilities (anthems, keywords) apply now; the old one's stop.
   if Statics and Statics.soon then
     Wait.time(function() pcall(Statics.soon) end, 0.6)
@@ -428,7 +496,9 @@ local function arrived(card, color, started)
         say("planeswalking away from " .. name .. ".", INFO)
         Planechase.planeswalk(color, true)
       end
-    end, function() return Stack.isEmpty() end, 300)
+    end, function()
+      return Stack.isEmpty() and not (Effects and Effects.busy and Effects.busy()) and not data().deckBusy
+    end, 300)
   end
 end
 
@@ -576,40 +646,268 @@ function Planechase.planeswalk(color, quiet)
   busy = true
   Wait.time(function() busy = false end, 20)
   local st = data()
-  local function reveal(d)
-    if d == nil then
-      busy = false
-      broadcastToColor("The planar deck is empty.", color, WARN)
-      return
-    end
-    turnTop(d, function(card)
-      busy = false
-      arrived(card, color, false)
-    end)
-  end
+  -- Spatial Merging: this planeswalk goes to the next TWO planes (Phenomena revealed on the way go to the bottom).
+  local want = st.mergeNext and 2 or 1
+  st.mergeNext = nil
   local function goNext()
-    local d = findDeck()
-    if d then
-      reveal(d)
-    else
-      reshuffle(reveal)
+    local found = 0
+    local function step()
+      local d = findDeck()
+      if d == nil then
+        reshuffle(function(nd)
+          if nd == nil then
+            busy = false
+            broadcastToColor("The planar deck is empty.", color, WARN)
+            return
+          end
+          step()
+        end)
+        return
+      end
+      turnTop(d, function(card)
+        local e = entryOf(card)
+        if want > 1 and e and e.t == "Phenomenon" then
+          -- Revealed on the way to two planes: to the bottom of the planar deck.
+          say(card.getName() .. " (a Phenomenon) goes to the bottom of the planar deck.", INFO)
+          local nd = findDeck()
+          if nd then
+            putBottom(nd, card, function() Wait.time(step, 0.4) end, "Planar Deck")
+          else
+            Wait.time(step, 0.4)
+          end
+          return
+        end
+        found = found + 1
+        if found >= 2 then
+          -- The second plane sits beside the first.
+          local i = #extraPlanes() + 1
+          local sp = extraSpot(i)
+          card.setPosition({ sp.x, TableSetup.SURFACE_TOP + 0.5, sp.z })
+          st.extra = st.extra or {}
+          table.insert(st.extra, card.getGUID())
+        end
+        arrived(card, color, false)
+        if found < want then
+          Wait.time(step, 0.6)
+        else
+          busy = false
+        end
+      end)
     end
+    step()
   end
+  -- Leave every face-up plane (two after Spatial Merging): "When you planeswalk away from ~" for each.
+  local leaving = {}
   if plane then
-    local e = entryOf(plane)
-    -- "When you planeswalk away from ~, ..." goes on the stack.
-    for _, l in ipairs(linesStarting(plane, { "^when you planeswalk away from", "^whenever you planeswalk away from" })) do
-      push(activeSeat(color), plane.getName(), afterComma(l))
+    table.insert(leaving, plane)
+  end
+  for _, x in ipairs(extraPlanes()) do
+    table.insert(leaving, x)
+  end
+  st.extra = {}
+  if #leaving == 0 then
+    goNext()
+    return
+  end
+  for _, pl in ipairs(leaving) do
+    for _, l in ipairs(linesStarting(pl, { "^when you planeswalk away from", "^whenever you planeswalk away from" })) do
+      push(activeSeat(color), pl.getName(), afterComma(l))
     end
+    local e = entryOf(pl)
     if e and e.t == "Plane" and st.aether then
       st.aether = false
       say("Chaotic Aether ends.", INFO)
     end
-    toGrave(plane, function()
+    -- "Until a player planeswalks" effects end.
+    if PlaneFx and PlaneFx.onPlaneswalk then
+      pcall(PlaneFx.onPlaneswalk, pl.getName())
+    end
+  end
+  local i = 0
+  local function nextLeave()
+    i = i + 1
+    local pl = leaving[i]
+    if pl == nil then
       Wait.time(goNext, 0.5)
+      return
+    end
+    toGrave(pl, function() Wait.time(nextLeave, 0.3) end)
+  end
+  nextLeave()
+end
+
+-- Every plane face up right now (one, or two or more after Spatial Merging / Norn's Seedcore). Phenomena not included.
+function Planechase.allPlanes()
+  local out = {}
+  local p = Planechase.currentPlane()
+  if p then
+    table.insert(out, p)
+  end
+  for _, x in ipairs(extraPlanes()) do
+    local e = entryOf(x)
+    if e and e.t == "Plane" then
+      table.insert(out, x)
+    end
+  end
+  return out
+end
+
+-- Norn's Seedcore: reveal until a plane and planeswalk to it WITHOUT leaving the current plane(s).
+function Planechase.addPlane(color, cb)
+  local st = data()
+  local function step()
+    local d = findDeck()
+    if d == nil then
+      reshuffle(function(nd)
+        if nd == nil then
+          broadcastToColor("The planar deck is empty.", color, WARN)
+          if cb then cb() end
+          return
+        end
+        step()
+      end)
+      return
+    end
+    turnTop(d, function(card)
+      local e = entryOf(card)
+      if e and e.t == "Phenomenon" then
+        say(card.getName() .. " (a Phenomenon) goes to the bottom of the planar deck.", INFO)
+        local nd = findDeck()
+        if nd then
+          putBottom(nd, card, function() Wait.time(step, 0.4) end, "Planar Deck")
+        else
+          Wait.time(step, 0.4)
+        end
+        return
+      end
+      local i = #extraPlanes() + 1
+      local sp = extraSpot(i)
+      card.setPosition({ sp.x, TableSetup.SURFACE_TOP + 0.5, sp.z })
+      st.extra = st.extra or {}
+      table.insert(st.extra, card.getGUID())
+      arrived(card, color, false)
+      if cb then cb(card) end
     end)
+  end
+  step()
+end
+
+-- Spatial Merging: the next planeswalk reveals two planes.
+function Planechase.mergeNext()
+  data().mergeNext = true
+end
+
+---------------------------------------------------------------------------
+-- The planar library as a list, top first: { { name, type } }. Reordering rebuilds the deck from its data
+-- (one respawn), so nothing is dealt out onto the table. data().deckBusy is set meanwhile (a Phenomenon
+-- waits for it before planeswalking away).
+---------------------------------------------------------------------------
+
+function Planechase.deckList()
+  local d = findDeck()
+  local out = {}
+  if d == nil then
+    return out
+  end
+  if next(byName) == nil then
+    buildIndex()
+  end
+  if d.type == "Card" then
+    local e = entryOf(d)
+    table.insert(out, { name = d.getName(), type = e and e.t or "Plane" })
+    return out
+  end
+  for _, c in ipairs(d.getObjects() or {}) do
+    local nm = c.name or c.nickname or "?"
+    local e = byName[nm]
+    table.insert(out, { name = nm, type = e and e.t or "Plane" })
+  end
+  return out
+end
+
+-- order: positions in the current list (top first), e.g. { 3, 1, 2, ... }; anything left out keeps its place after.
+function Planechase.reorderDeck(order, cb)
+  local d = findDeck()
+  if d == nil or d.type ~= "Deck" then
+    if cb then cb() end
+    return
+  end
+  local st = data()
+  st.deckBusy = true
+  local dd = d.getData()
+  local old = dd.ContainedObjects or {}
+  local used, newObjs, newIds = {}, {}, {}
+  for _, i in ipairs(order) do
+    if old[i] and not used[i] then
+      used[i] = true
+      table.insert(newObjs, old[i])
+      table.insert(newIds, old[i].CardID)
+    end
+  end
+  for i, o in ipairs(old) do
+    if not used[i] then
+      table.insert(newObjs, o)
+      table.insert(newIds, o.CardID)
+    end
+  end
+  dd.ContainedObjects, dd.DeckIDs = newObjs, newIds
+  local pos, rot = d.getPosition(), d.getRotation()
+  d.destruct()
+  spawnObjectData({ data = dd, position = pos, rotation = rot, callback_function = function(o)
+    finishDeck(o, "Planar Deck")
+    st.deckBusy = false
+    if cb then cb(o) end
+  end })
+end
+
+---------------------------------------------------------------------------
+-- Counters on planes (Aretopolis' scroll counters, Pompeii's eruption counters...): kept by plane name and
+-- shown as a label on the plane card.
+---------------------------------------------------------------------------
+
+function Planechase.counter(name)
+  local pc = data().pc or {}
+  return pc[name] and pc[name].n or 0, pc[name] and pc[name].kind or nil
+end
+
+function Planechase.addCounter(name, kind, n)
+  local st = data()
+  st.pc = st.pc or {}
+  local cur = st.pc[name] or { kind = kind, n = 0 }
+  cur.n = math.max(0, cur.n + (n or 1))
+  cur.kind = kind or cur.kind
+  st.pc[name] = cur
+  pcall(Planechase.showCounters)
+  say(name .. " now has " .. cur.n .. " " .. tostring(cur.kind) .. " counter" .. (cur.n == 1 and "" or "s") .. ".", CYAN)
+  return cur.n
+end
+
+function Planechase.showCounters()
+  local planes = { findPlane() }
+  for _, x in ipairs(extraPlanes()) do
+    table.insert(planes, x)
+  end
+  for _, pl in ipairs(planes) do
+    if pl and not pl.isDestroyed() then
+      pcall(function() pl.clearButtons() end)
+      local n, kind = Planechase.counter(pl.getName())
+      if n > 0 then
+        local sc = pl.getScale().x
+        pl.createButton({ click_function = "trk_noop", function_owner = Global, label = n .. " " .. string.upper(tostring(kind)),
+          position = { 0, 0.3, 0.9 / sc * 1.4 }, rotation = { 0, 0, 0 }, scale = { 1 / sc, 1, 1 / sc },
+          width = 1500, height = 300, font_size = 220, color = { 0.05, 0.07, 0.1, 0.9 }, font_color = { 1, 0.85, 0.35 } })
+      end
+    end
+  end
+end
+
+-- Chaos ensues on a plane by name (Pools of Becoming, The Fertile Lands of Saulvinia, Norn's Seedcore).
+function Planechase.chaosOn(seat, name)
+  local text = Planechase.chaosOfName(name)
+  if text then
+    push(seat, name, text, "chaos")
   else
-    goNext()
+    say(name .. " has no chaos ability.", INFO)
   end
 end
 
@@ -999,13 +1297,29 @@ function Planechase.onRolled(die, color, viaTower)
     local v = (tok and tok.r) or die.getValue()
     say(color .. " rolled: " .. dieValueText(v, st.aether), v == 1 and GOOD or (v == 6 and CYAN or INFO))
     local chaos = v == 6 or (st.aether and v ~= 1)
-    -- "Whenever you roll the planar die, ..." / "Whenever you roll a blank, ..." (the plane's own triggers).
-    for _, l in ipairs(linesStarting(plane, { "^whenever you roll the planar die" })) do
-      push(activeSeat(color), plane.getName(), afterComma(l))
+    -- Fixed Point in Time: until its encounterer's next turn, a planeswalk roll is chaos instead.
+    if v == 1 and st.fixedPoint and st.fixedPoint.untilTurn ~= nil then
+      local t2 = GameState.data.turn or {}
+      if (t2.taken or 0) < st.fixedPoint.untilTurn then
+        say("Fixed Point in Time: the planeswalk roll is CHAOS instead.", CYAN)
+        v, chaos = 6, true
+      else
+        st.fixedPoint = nil
+      end
     end
-    if v ~= 1 and v ~= 6 then
-      for _, l in ipairs(linesStarting(plane, { "^whenever you roll a blank on the planar die" })) do
-        push(activeSeat(color), plane.getName(), afterComma(l))
+    local planes = Planechase.allPlanes()
+    if #planes == 0 then
+      planes = { plane }
+    end
+    -- "Whenever you roll the planar die, ..." / "Whenever you roll a blank, ..." (the planes' own triggers).
+    for _, pl in ipairs(planes) do
+      for _, l in ipairs(linesStarting(pl, { "^whenever you roll the planar die" })) do
+        push(activeSeat(color), pl.getName(), afterComma(l))
+      end
+      if v ~= 1 and v ~= 6 then
+        for _, l in ipairs(linesStarting(pl, { "^whenever you roll a blank on the planar die" })) do
+          push(activeSeat(color), pl.getName(), afterComma(l))
+        end
       end
     end
     if v == 1 then
@@ -1013,11 +1327,14 @@ function Planechase.onRolled(die, color, viaTower)
       -- when everyone passes it resolves and the next plane turns face up (stack.lua).
       push(activeSeat(color), "Planeswalk", "Planeswalk: " .. plane.getName() .. " leaves and the next plane turns face up.", "walk")
     elseif chaos then
-      local text = chaosOf(plane)
-      if text then
-        push(activeSeat(color), plane.getName(), text, "chaos")
-      else
-        say(plane.getName() .. " has no chaos ability.", INFO)
+      -- With two planes face up (Spatial Merging), chaos ensues on each of them.
+      for _, pl in ipairs(planes) do
+        local text = chaosOf(pl)
+        if text then
+          push(activeSeat(color), pl.getName(), text, "chaos")
+        else
+          say(pl.getName() .. " has no chaos ability.", INFO)
+        end
       end
     end
   end, function()
@@ -1485,6 +1802,9 @@ end
 -- create a 2/2 blue Shapeshifter ...").
 local PLANE_STEPS = {
   { "at the beginning of your upkeep", "upkeep" },
+  { "at beginning of your upkeep", "upkeep" },
+  { "at the beginning of your postcombat main phase", "main2" },
+  { "at end of combat", "endcombat" },
   { "at the beginning of each upkeep", "upkeep" },
   { "at the beginning of your draw step", "draw" },
   { "at the beginning of your precombat main phase", "main1" },
@@ -1497,17 +1817,27 @@ Events.on("stepStarted", function(d)
   if not GameState.data.started or d == nil or d.seat == nil then
     return
   end
-  local plane = findPlane()
-  local e = plane and entryOf(plane)
-  if e == nil or e.t == "Phenomenon" then
-    return
-  end
-  for _, l in ipairs(lines(e.o)) do
-    local low = l:lower()
-    for _, ps in ipairs(PLANE_STEPS) do
-      if ps[2] == d.step and low:find(ps[1], 1, true) then
-        push(d.seat, plane.getName(), afterComma(l))
-        break
+  for _, plane in ipairs(Planechase.allPlanes()) do
+    local e = entryOf(plane)
+    if e and e.t ~= "Phenomenon" then
+      for _, l in ipairs(lines(e.o)) do
+        local low = l:lower()
+        for _, ps in ipairs(PLANE_STEPS) do
+          local at0 = low:find(ps[1], 1, true)
+          local comma0 = low:find(",", 1, true) or #low
+          -- Only when it's the trigger itself (before the first comma), not text inside a token (The Pit's Demon).
+          if ps[2] == d.step and at0 and at0 < comma0 then
+            local body = afterComma(l)
+            -- "When you planeswalk to ~ and at the beginning of your upkeep, ..." has its own comma after "upkeep".
+            local at = low:find(ps[1], 1, true)
+            local c2 = l:find(",", at, true)
+            if c2 then
+              body = l:sub(c2 + 1):gsub("^%s+", "")
+            end
+            push(d.seat, plane.getName(), body)
+            break
+          end
+        end
       end
     end
   end

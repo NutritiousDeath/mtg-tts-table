@@ -7416,6 +7416,10 @@ function Effects.resolve(it)
     Effects.resolveCopy(it)
     return
   end
+  -- A plane's or Phenomenon's own code (planefx.lua).
+  if it.planeFx and PlaneFx and PlaneFx.run and PlaneFx.run(it) then
+    return
+  end
   if it.ward then
     Effects.resolveWard(it)
     return
@@ -10524,7 +10528,7 @@ function Effects.chooseTargets(it, done)
   if not enabled() or not GameState.data.started or it == nil then
     return finish()
   end
-  if it.kind ~= "card" and (not it.auto or it.copyOf or it.planar or it.ninjutsu) then
+  if it.kind ~= "card" and (not it.auto or it.copyOf or it.planar or it.ninjutsu or it.planeFx) then
     return finish()
   end
   if not TableSetup.isActive(it.controller) then
