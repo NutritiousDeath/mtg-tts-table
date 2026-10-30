@@ -229,6 +229,11 @@ function Actions.landsAllowed(seat)
       end
     end
   end
+  -- Naya: "You may play any number of lands on each of your turns" (the planar controller: the active player).
+  if Statics and Statics.planeSays and Statics.planeSays("you may play any number of lands on each of your turns")
+      and Turns and Turns.isActiveSeat and Turns.isActiveSeat(seat) then
+    n = n + 99
+  end
   local t = GameState.data.turn or {}
   local b = GameState.data.landBonus and GameState.data.landBonus[seat]
   if b and b.turn == t.taken then
@@ -627,6 +632,13 @@ function Actions.cleanupDiscard(color, onDone)
   local hand = handCards(color)
   local need = #hand - MAX_HAND
   if need <= 0 or (GameState.solo() and not Player[color].seated) then
+    onDone()
+    return
+  end
+  -- Planes: Stairs to Infinity, The Lux Foundation Library ("Players have no maximum hand size").
+  local noMax = Statics and Statics.planeSays and Statics.planeSays("players have no maximum hand size")
+  if noMax then
+    log(color .. " keeps " .. #hand .. " cards (" .. noMax .. ": no maximum hand size)")
     onDone()
     return
   end

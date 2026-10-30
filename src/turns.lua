@@ -329,6 +329,7 @@ end
 -- play gets back to the player who went first (newRound = true).
 function Turns.beginTurn(seat, number, newRound)
   local t = turn()
+  GameState.data.responding = nil
   t.activeSeat = seat
   if number then
     t.number = number
@@ -447,10 +448,25 @@ enterStep = function()
 
   local team = Turns.activeTeam()
   if step.id == "untap" then
-    for _, c in ipairs(team) do
-      Actions.untapAll(c, true)
+    -- Planes: The Eon Fog ("Players skip their untap steps"), Horizon Boughs ("All permanents untap during
+    -- each player's untap step").
+    local fog = Statics and Statics.planeSays and Statics.planeSays("players skip their untap steps")
+    local boughs = Statics and Statics.planeSays and Statics.planeSays("all permanents untap during each player's untap step")
+    if fog then
+      broadcastToAll(table.concat(team, " + ") .. " skip the untap step (" .. fog .. ").", INFO)
+    else
+      local who = team
+      if boughs then
+        who = TableSetup.activeSeats()
+        printToAll("MTG > Everyone's permanents untap (" .. boughs .. ").", INFO)
+      end
+      for _, c in ipairs(who) do
+        if not (Leave and Leave.isOut(c)) then
+          Actions.untapAll(c, true)
+        end
+      end
     end
-    if Actions.othersUntap then
+    if Actions.othersUntap and not fog then
       pcall(Actions.othersUntap, seat)
     end
     -- No one gets priority in the untap step.
@@ -544,6 +560,10 @@ end
 function Turns.pendingLabel()
   local t = turn()
   if not t.pending then
+    local who = Turns.responder and Turns.responder()
+    if who then
+      return "RESPONSE", who
+    end
     return nil
   end
   if t.pending.kind == "ask" then
@@ -649,6 +669,39 @@ function Turns.setAfk(color, arg)
   end
 end
 
+-- Two-Headed Giant: a team shares priority (CR 805.4). Who is asked: one entry per team (both teammates see
+-- the pop-up and either one answers for both), and never the asking player's own teammate.
+local function teamOnly(queue, from)
+  if not (TableSetup.isTeamGame and TableSetup.isTeamGame()) then
+    return queue
+  end
+  local fromMate = from and TableSetup.teammate(from)
+  local out, seen = {}, {}
+  for _, c in ipairs(queue) do
+    local mate = TableSetup.teammate(c)
+    if c ~= fromMate and not seen[c] then
+      table.insert(out, c)
+      seen[c] = true
+      if mate then
+        seen[mate] = true
+      end
+    end
+  end
+  return out
+end
+
+-- The teammate who also sees this pop-up (2HG), or nil.
+local function promptMate(who)
+  if not (TableSetup.isTeamGame and TableSetup.isTeamGame()) then
+    return nil
+  end
+  local mate = TableSetup.teammate(who)
+  if mate and Player[mate] and not (Leave and Leave.isOut(mate)) then
+    return mate
+  end
+  return nil
+end
+
 local function promptNext()
   local t = turn()
   local p = t.pending
@@ -656,7 +709,11 @@ local function promptNext()
   -- YIELD: players who yielded pass on their own (while something is on the stack).
   local yielded = GameState.data.yield or {}
   local skipped = {}
-  while p.queue[p.at] and yielded[p.queue[p.at]] and (p.kind == "ask" or not (Stack and Stack.isEmpty and Stack.isEmpty())) do
+  local function teamYielded(c)
+    local m = promptMate(c)
+    return yielded[c] and (m == nil or yielded[m])
+  end
+  while p.queue[p.at] and teamYielded(p.queue[p.at]) and (p.kind == "ask" or not (Stack and Stack.isEmpty and Stack.isEmpty())) do
     table.insert(skipped, p.queue[p.at])
     p.at = p.at + 1
   end
@@ -668,15 +725,23 @@ local function promptNext()
     return
   end
   local who = p.queue[p.at]
+  local msg
   if p.kind == "ask" then
-    UI.setValue("respondText_" .. who, tostring(p.text) .. "\nAny responses?")
+    msg = tostring(p.text) .. "\nAny responses?"
   else
     local to = Turns.pendingLabel()
     local note = Combat and Combat.promptNote and Combat.promptNote()
-    UI.setValue("respondText_" .. who, t.activeSeat .. " wants to move to " .. to .. "."
-      .. (note and ("\n" .. note) or "") .. "\nAny responses?")
+    msg = t.activeSeat .. " wants to move to " .. to .. "."
+      .. (note and ("\n" .. note) or "") .. "\nAny responses?"
   end
+  UI.setValue("respondText_" .. who, msg)
   showPrompt(who, true)
+  -- 2HG: the teammate sees the same question and can answer for the team.
+  local mate = promptMate(who)
+  if mate then
+    UI.setValue("respondText_" .. mate, msg .. "\n(Your team answers together: either of you.)")
+    showPrompt(mate, true)
+  end
   startAfkTimer(who)
   Turns.render()
 end
@@ -767,6 +832,7 @@ local function requestMove(kind)
       table.insert(queue, c)
     end
   end
+  queue = teamOnly(queue, t.activeSeat)
   if #queue == 0 then
     commit(kind)
     return
@@ -834,6 +900,7 @@ function Turns.ask(from, text, label, onAllPass)
   if #skipped > 0 then
     printToAll("MTG > " .. table.concat(skipped, ", ") .. " yielded: no response.", INFO)
   end
+  queue = teamOnly(queue, from)
   pendingAction = onAllPass
   if #queue == 0 then
     commit("ask")
@@ -898,6 +965,11 @@ end
 function Turns.forcePass(color)
   local t = turn()
   if not t.pending then
+    local who = Turns.responder()
+    if who then
+      releaseResponse(color .. " forced a pass (" .. who .. " didn't add a response).", true)
+      return
+    end
     broadcastToColor("Nobody is being waited on.", color, INFO)
     return
   end
@@ -914,18 +986,104 @@ local function rememberHeld(color, p, t)
   showUndo(color, true)
   Wait.time(function()
     if held and held.tok == tok then
+      local keep = held.color
       dropHeld()
+      -- Still holding priority: the button stays, and now just ends the hold.
+      if Turns.responder() == keep then
+        showUndo(keep, true)
+      end
     end
   end, 20)
+end
+
+---------------------------------------------------------------------------
+-- Holding priority: I HAVE A RESPONSE locks the stack and the turn to that
+-- player (and their 2HG teammate) until they put something on the stack,
+-- click NO RESPONSE AFTER ALL, or someone types !forcepass. It also lets go
+-- by itself after RESPOND_LIMIT seconds, in case they've wandered off.
+---------------------------------------------------------------------------
+
+local RESPOND_LIMIT = 90
+local respondToken = 0
+
+function Turns.responder()
+  local r = GameState.data.responding
+  if r == nil then
+    return nil
+  end
+  if not GameState.data.started or (Leave and Leave.isOut(r.color)) or os.time() - (r.at or 0) > RESPOND_LIMIT + 5 then
+    GameState.data.responding = nil
+    return nil
+  end
+  return r.color
+end
+
+local function releaseResponse(msg, reask)
+  local r = GameState.data.responding
+  if r == nil then
+    return
+  end
+  GameState.data.responding = nil
+  respondToken = respondToken + 1
+  showUndo(r.color, false)
+  if msg then
+    broadcastToAll(msg, INFO)
+  end
+  Turns.render()
+  -- Nothing was added: ask about the top of the stack again.
+  if reask and Stack and Stack.offerAgain then
+    Stack.offerAgain()
+  end
+end
+
+local function startResponse(color)
+  GameState.data.responding = { color = color, at = os.time(), size = (Stack and Stack.size) and Stack.size() or 0 }
+  respondToken = respondToken + 1
+  local tok = respondToken
+  Wait.time(function()
+    if tok == respondToken and GameState.data.responding then
+      releaseResponse(color .. " didn't add a response in time, so the game carries on.", true)
+    end
+  end, RESPOND_LIMIT)
+end
+
+-- The stack changed size (stack.lua): the response is on it, so the hold is over.
+function Turns.onStackSize(n)
+  local r = GameState.data.responding
+  if r and n > (r.size or 0) then
+    releaseResponse(nil, false)
+  end
+end
+
+-- Someone wants to RESOLVE / NEXT STEP / END TURN. While a player holds priority, only they (or their
+-- teammate) may, and doing so ends the hold. Returns true when the action is blocked.
+function Turns.blockedByResponse(color)
+  local who = Turns.responder()
+  if who == nil then
+    return false
+  end
+  local mate = TableSetup.teammate and TableSetup.teammate(who)
+  if color == who or color == mate then
+    releaseResponse(nil, false)
+    return false
+  end
+  broadcastToColor("Waiting on " .. who .. "'s response (" .. who .. " holds priority)."
+    .. " Type !forcepass if they're away.", color, WARN)
+  return true
 end
 
 -- NO RESPONSE AFTER ALL: put the question back where it was and count this player as passing.
 function Turns.undoRespond(color)
   local h = held
   if h == nil or h.color ~= color then
+    if Turns.responder() == color then
+      releaseResponse(color .. " has no response after all.", true)
+    end
     return
   end
   dropHeld()
+  GameState.data.responding = nil
+  respondToken = respondToken + 1
   local t = turn()
   if t.pending ~= nil or t.stepIndex ~= h.step or t.taken ~= h.taken or t.activeSeat ~= h.active then
     broadcastToColor("Too late to take it back: the game has moved on.", color, WARN)
@@ -964,6 +1122,9 @@ function Turns.respond(color, hasResponse)
   if hasResponse and Stack then
     Stack.autoResolve = nil   -- RESOLVE ALL stops for a response (also on a "resolve this?" pop-up)
   end
+  if hasResponse then
+    startResponse(color)
+  end
   if hasResponse and p.kind == "ask" then
     local action = pendingAction
     t.pending = nil
@@ -972,8 +1133,8 @@ function Turns.respond(color, hasResponse)
     pendingAction = action
     rememberHeld(color, p, t)
     pendingAction = nil
-    broadcastToAll(color .. " has a response! Put it on the stack (everyone gets to answer it)."
-      .. " If nothing gets added, click RESOLVE to ask again.", WARN)
+    broadcastToAll(color .. " has a response and holds priority: nothing resolves until they put it on the stack"
+      .. " (or click NO RESPONSE AFTER ALL).", WARN)
     Turns.render()
     return
   end
@@ -991,12 +1152,16 @@ function Turns.respond(color, hasResponse)
     rememberHeld(color, p, t)
     t.resume = p.kind
     local again = p.kind == "end" and "END TURN" or (p.kind == "endstep" and "END STEP") or "NEXT STEP"
-    broadcastToAll(color .. " has a response! " .. t.activeSeat .. ": click " .. again .. " when it's done.", WARN)
+    broadcastToAll(color .. " has a response and holds priority. " .. t.activeSeat .. ": click " .. again .. " when it's done.", WARN)
     Turns.render()
     return
   end
-  if p.queue[p.at] ~= color then
+  local asked = p.queue[p.at]
+  if asked ~= color and not (asked and promptMate(asked) == color) then
     return
+  end
+  if asked ~= color then
+    printToAll("MTG > " .. color .. " passes for the team (" .. color .. " + " .. tostring(asked) .. ").", INFO)
   end
   p.at = p.at + 1
   if p.at > #p.queue then
@@ -1042,8 +1207,8 @@ function Turns.respondXml()
 <Panel id="undoRespond_%s" visibility="%s" active="false" rectAlignment="UpperCenter" offsetXY="0 -20" width="460" height="120"
        color="#0B0F17F0" outline="#FFB347" outlineSize="2 2" allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="14 14 10 10" spacing="8" childForceExpandHeight="false">
-    <Text fontSize="15" color="#E6F1FF" preferredHeight="40">You clicked I HAVE A RESPONSE.
-Misclick? Take it back (only until something happens).</Text>
+    <Text fontSize="15" color="#E6F1FF" preferredHeight="40">You hold priority: everyone waits for your response.
+Put it on the stack, or click below if you've changed your mind.</Text>
     <Button onClick="ui_undoRespond(%s)" color="#00B3A4" textColor="#06130B" fontStyle="Bold" fontSize="16" preferredHeight="44">NO RESPONSE AFTER ALL</Button>
   </VerticalLayout>
 </Panel>
@@ -1053,7 +1218,7 @@ Misclick? Take it back (only until something happens).</Text>
 end
 
 function Turns.next(color)
-  if not isActive(color) or stackBusy(color) then
+  if not isActive(color) or Turns.blockedByResponse(color) or stackBusy(color) then
     return
   end
   local id = Turns.STEPS[turn().stepIndex].id
@@ -1072,7 +1237,7 @@ end
 
 -- END STEP tile: go to the end step (after responses) and stop there.
 function Turns.toEndStep(color)
-  if not isActive(color) or stackBusy(color) then
+  if not isActive(color) or Turns.blockedByResponse(color) or stackBusy(color) then
     return
   end
   local t = turn()
@@ -1088,7 +1253,7 @@ function Turns.toEndStep(color)
 end
 
 function Turns.endTurn(color)
-  if not isActive(color) or stackBusy(color) then
+  if not isActive(color) or Turns.blockedByResponse(color) or stackBusy(color) then
     return
   end
   local id = Turns.STEPS[turn().stepIndex].id

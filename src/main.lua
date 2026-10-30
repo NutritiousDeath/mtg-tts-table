@@ -126,7 +126,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.58 (RESOLVE ALL stops for a response)"
+SCRIPT_VERSION = "2.60 (plane statics, no-target triggers, 2HG shared priority, commander to library)"
 
 function onLoad(saved)
   GameLog.setup()

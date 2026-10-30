@@ -8496,6 +8496,14 @@ Events.on("cardMoved", function(d)
     return
   end
   local how, clause = Effects.entersTapped(card)
+  -- The Doctor's Childhood Barn: "Creatures enter the battlefield tapped."
+  if how == nil and Statics and Statics.planeSays then
+    local tlc = ""
+    pcall(function() tlc = tostring(JSON.decode(card.getGMNotes()).typeLine or ""):lower() end)
+    if tlc:find("creature", 1, true) and Statics.planeSays("creatures enter the battlefield tapped") then
+      how = "yes"
+    end
+  end
   if how == nil then
     return
   end
@@ -10546,6 +10554,35 @@ function pickAll(it, text, specs, done)
   local si = 0
   local nextSpec
   local function pickCard(sp, k, cont)
+    -- A triggered ability with no legal target for a target it needs is taken off the stack (CR 603.3d).
+    if k == 1 and not sp.upTo and sp.kind == "card" and it.kind == "ability" and it.trigger then
+      local any = false
+      for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+        if not obj.isDestroyed() and obj.held_by_color == nil then
+          local okf, fits = pcall(function()
+            local owner = fieldSeat(obj)
+            return owner ~= nil and targetFits(sp, obj, owner, seat, src, taken)
+          end)
+          if okf and fits then
+            any = true
+            break
+          end
+        end
+      end
+      if not any then
+        printToAll("MTG > " .. it.name .. "'s trigger has no legal " .. tostring(sp.phrase or "target")
+          .. " to target, so it's removed from the stack.", INFO)
+        it.choosing = nil
+        it.preTargets = {}
+        if Stack.removeGuid then
+          Stack.removeGuid(it.guid)
+        end
+        if done then
+          done()
+        end
+        return
+      end
+    end
     local what = sp.kind == "any" and (sp.pwOnly and "planeswalker" or "creature or planeswalker") or tostring(sp.phrase or "permanent")
     ask(seat, it.name .. ": target " .. what .. (sp.n > 1 and (" (" .. k .. " of " .. (sp.upTo and ("up to " .. sp.n) or sp.n) .. ")") or ""),
       "Choose the target now, as it goes on the stack. Click TARGET on it" .. ((sp.upTo or k > 1) and ", or DONE." or ", or SKIP if there's no legal target."),

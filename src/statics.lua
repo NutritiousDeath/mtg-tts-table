@@ -13,6 +13,38 @@ end
 local IN = { battlefield = true, lands = true }
 
 -- Everything face-up on a battlefield: { obj, seat, d, tl, oracle }.
+-- The face-up plane (Planechase): its always-on lines, lower case, and the planar controller (the active
+-- player, CR 901.6). Lines the table carries out itself (chaos, planeswalking, rolling) are left out.
+local planeCache = { at = -100 }
+local function planeNow()
+  local now = (Time and Time.time) or os.time()
+  if now - planeCache.at < 0.5 then
+    return planeCache.obj, planeCache.text, planeCache.seat
+  end
+  local obj, text, seat
+  if Planechase and Planechase.currentPlane and GameState.data and GameState.data.started then
+    local okp, plane = pcall(Planechase.currentPlane)
+    local t = GameState.data.turn or {}
+    if okp and plane and t.activeSeat then
+      local okt, tx = pcall(Planechase.triggerText, plane.getName())
+      obj, text, seat = plane, (okt and tostring(tx or "") or ""):lower(), t.activeSeat
+    end
+  end
+  planeCache = { at = now, obj = obj, text = text, seat = seat }
+  return obj, text, seat
+end
+
+-- Does the plane in play say this (lower case, plain text)? Returns the plane's name, or nil.
+function Statics.planeSays(phrase)
+  local obj, text = planeNow()
+  if obj and text and text:find(phrase, 1, true) then
+    local nm = "the plane"
+    pcall(function() nm = obj.getName() end)
+    return nm
+  end
+  return nil
+end
+
 local function perms()
   local list = {}
   for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
@@ -24,6 +56,12 @@ local function perms()
           oracle = tostring(d.oracle or ""):lower(), token = obj.hasTag("Token") })
       end
     end
+  end
+  -- The plane in play counts as a source of always-on abilities ("All creatures get +2/+2", "All creatures
+  -- have vigilance"): not a permanent, so nothing is counted on it and it gets nothing itself.
+  local pobj, ptext, pseat = planeNow()
+  if pobj and ptext and ptext ~= "" then
+    table.insert(list, { obj = pobj, seat = pseat, d = {}, tl = "plane", oracle = ptext, token = false, plane = true })
   end
   return list
 end
@@ -124,6 +162,8 @@ local function subjectMatches(subj, q, p)
   -- "each other creature" / "each creature": same as "other creatures" / "creatures".
   if subj:sub(1, 5) == "each " then
     subj = subj:sub(6)
+  elseif subj:sub(1, 4) == "all " then
+    subj = subj:sub(5)   -- "All creatures have vigilance" (Gavony), "All Slivers have ..."
   end
   if subj:sub(-9) == " creature" or subj == "creature" then
     subj = subj .. "s"
@@ -174,6 +214,21 @@ local function subjectMatches(subj, q, p)
   if changeling and subj ~= "creatures" and subj ~= "creature tokens" and subj ~= "nontoken creatures"
       and not subj:find("artifact", 1, true) and not subj:find("legendary", 1, true) then
     return true
+  end
+  -- Planes: "Creatures with flying get +2/+0" / "Creatures without flying get -2/-0" (The Zephyr Maze),
+  -- "Each creature with mana value 2 or less gets +2/+2" (Megaflora Jungle).
+  do
+    local fw = subj:match("^creatures? with (%a+)$")
+    local nw = subj:match("^creatures? without (%a+)$")
+    if fw or nw then
+      local has = Effects ~= nil and Effects.hasKeyword ~= nil and Effects.hasKeyword(q.obj, fw or nw) == true
+      return (fw ~= nil) == has
+    end
+    local mvMax = subj:match("^creatures? with mana value (%d+) or less$")
+    if mvMax then
+      local mv = tonumber(dataOf(q.obj).cmc) or 0
+      return mv <= tonumber(mvMax)
+    end
   end
   if subj == "creatures" then
     return true
@@ -397,7 +452,7 @@ end
 local function checkAscend(list)
   local counts, ascenders = {}, {}
   for _, p in ipairs(list) do
-    counts[p.seat] = (counts[p.seat] or 0) + (Pile and Pile.count(p.obj) or 1)
+    counts[p.seat] = (counts[p.seat] or 0) + (p.plane and 0 or (Pile and Pile.count(p.obj) or 1))
     if p.oracle:find("ascend", 1, true) == 1 or p.oracle:find("\nascend", 1, true) then
       ascenders[p.seat] = p.obj.getName()
     end
@@ -618,6 +673,9 @@ function Statics.tokenMultiplier(seat)
   local m = 1
   for _, p in ipairs(perms()) do
     if p.seat == seat and p.oracle:find("twice that many", 1, true) and p.oracle:find("token", 1, true) then
+      m = m * 2
+    elseif p.plane and p.seat ~= seat and p.oracle:find("if an effect would create one or more tokens, it creates twice that many", 1, true) then
+      -- Selesnya Loft Gardens: every player's tokens, not only the planar controller's.
       m = m * 2
     end
   end
@@ -865,6 +923,9 @@ local function parseGrantLine(line)
       if subj:find(":", 1, true) or subj:find('"', 1, true) then
         return nil
       end
+      -- "All creatures get +1/+1 and have haste" (Sokenzan), "All creatures are black and have deathtouch"
+      -- (Onakke Catacomb): the subject is what comes before "get" / "are".
+      subj = subj:gsub(" gets? [%+%-]%d+/[%+%-]%d+ and$", ""):gsub(" are %a+ and$", "")
       local rest = line:sub(at + #f[1])
       -- "~ and enchantment creatures": the card itself as well as the others.
       local selfToo = false
@@ -1207,7 +1268,43 @@ local function asQ(obj)
 end
 
 -- Why `card` can't attack (Forge static), or nil.
+-- The plane's combat restrictions: Tazeem ("Creatures can't block"), Celestine Reef ("Creatures without
+-- flying or islandwalk can't attack"), Hedron Fields of Agadeem ("Creatures with power 7 or greater can't
+-- attack or block"). what: "attack" or "block". Returns the plane's name, or nil.
+local function planeForbids(card, what)
+  local obj, text = planeNow()
+  if obj == nil or text == nil or text == "" then
+    return nil
+  end
+  local nm = "the plane"
+  pcall(function() nm = obj.getName() end)
+  local function kw(k)
+    return Effects ~= nil and Effects.hasKeyword ~= nil and Effects.hasKeyword(card, k) == true
+  end
+  if text:find("creatures can't " .. what, 1, true) and not text:find("creatures can't " .. what .. " you", 1, true) then
+    local before = text:sub(1, (text:find("creatures can't " .. what, 1, true)) - 1)
+    if before == "" or before:sub(-1) == "\n" then
+      return nm
+    end
+  end
+  if what == "attack" and text:find("creatures without flying or islandwalk can't attack", 1, true)
+      and not kw("flying") and not kw("islandwalk") then
+    return nm
+  end
+  if text:find("creatures with power 7 or greater can't attack or block", 1, true) then
+    local pw = tonumber(Counters and Counters.stats and Counters.stats(card).power or "") or 0
+    if pw >= 7 then
+      return nm
+    end
+  end
+  return nil
+end
+
 function Statics.cantAttack(card)
+  local pf = planeForbids(card, "attack")
+  if pf then
+    return pf
+  end
   local q = asQ(card)
   for _, s in ipairs(combatStatics()) do
     if (s.kind == "CA" or s.kind == "CAB") and Statics.forgeMatches(s.f.f, q, s.src) then
@@ -1219,6 +1316,10 @@ end
 
 -- Why `blocker` can't block `attacker` (Forge static), or nil.
 function Statics.cantBlock(blocker, attacker)
+  local pf = planeForbids(blocker, "block")
+  if pf then
+    return blocker.getName() .. " can't block (" .. pf .. ")"
+  end
   local b = asQ(blocker)
   local a = attacker and asQ(attacker)
   for _, s in ipairs(combatStatics()) do
@@ -1254,6 +1355,21 @@ function Statics.costChange(card, caster)
     for _, e in pairs(Statics.forgeLines(p.obj.getName(), p.oracle)) do
       if e.kind == "RC" and not tostring(e.f.f):find("self", 1, true) then
         use(e, { obj = p.obj, seat = p.seat })
+      end
+    end
+  end
+  -- The plane: "Creature spells cost {2} less to cast" (Turri Island), "Red spells cost {1} less to cast"
+  -- (Feeding Grounds), "Artifact spells cost {1} less to cast" (Esper).
+  local pobj, ptext = planeNow()
+  if pobj and ptext then
+    local d0 = dataOf(card)
+    local tl0 = tostring(d0.typeLine or ""):lower()
+    local cols = Statics.colorsOf(card, caster)
+    for w, k in ptext:gmatch("(%a+) spells cost {(%d+)} less to cast") do
+      local fits = (COLOR_WORD[w] and cols[COLOR_WORD[w]] == true) or (not COLOR_WORD[w] and tl0:find(w, 1, true) ~= nil)
+      if fits then
+        n = n + tonumber(k)
+        table.insert(from, pobj.getName() .. " -" .. k)
       end
     end
   end
@@ -1365,7 +1481,13 @@ function Statics.hasFlash(card, caster)
   end
   -- The table's own reading: a permanent of the caster's that says "as though they had flash".
   for _, p in ipairs(perms()) do
-    if p.seat == caster and (p.oracle:find("as though they had flash", 1, true) or p.oracle:find("as though it had flash", 1, true)) then
+    if p.plane then
+      -- Akoum: "Players may cast enchantment spells as though they had flash."
+      local ty = p.oracle:match("players may cast (%a+) spells as though they had flash")
+      if ty and tostring(d.typeLine or ""):lower():find(ty, 1, true) then
+        return true
+      end
+    elseif p.seat == caster and (p.oracle:find("as though they had flash", 1, true) or p.oracle:find("as though it had flash", 1, true)) then
       return true
     end
   end

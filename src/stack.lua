@@ -180,6 +180,9 @@ function Stack.render()
     Stack.autoResolve = nil
   end
   Stack.lastCount = #list
+  if Turns and Turns.onStackSize then
+    pcall(Turns.onStackSize, #list)
+  end
   if Turns and Turns.render then
     Turns.render()
   end
@@ -660,6 +663,25 @@ function Stack.counterGuid(guid, byName)
 end
 
 -- Take row r of the panel (1 = top) off the stack.
+-- Take an item off the stack without it resolving (a trigger with no legal target, CR 603.3d).
+function Stack.removeGuid(guid)
+  local i = indexOf(guid)
+  if i == nil then
+    return
+  end
+  local it = items()[i]
+  local obj = getObjectFromGUID(it.guid)
+  removeAt(i)
+  if obj then
+    if it.kind == "ability" then
+      obj.destruct()
+    else
+      sendCard(obj, it, "graveyard")
+    end
+  end
+  Stack.render()
+end
+
 function Stack.removeRow(r, byColor)
   local list = items()
   local i = #list - r + 1
@@ -986,6 +1008,9 @@ function ui_stackResolve(player)
   if not TableSetup.isActive(who) or (Leave and Leave.isOut(who)) then
     return
   end
+  if Turns and Turns.blockedByResponse and Turns.blockedByResponse(who) then
+    return
+  end
   local what = it.name .. (it.kind == "ability" and "'s ability" or "")
   lastOffered = it.guid
   if it.preTargets and #it.preTargets > 0 and Effects and Effects.targetSummary then
@@ -1026,6 +1051,10 @@ local function tryOffer()
   if top.guid == lastOffered or Stack.autoResolve then
     return
   end
+  -- Someone holds priority for a response: nobody is asked until it's on the stack.
+  if Turns and Turns.responder and Turns.responder() then
+    return
+  end
   -- Wait while anything is still being decided: targets, trigger order, a pop-up, a waiting step.
   -- (A "choosing" left over from before a reload doesn't count once nothing is being asked.)
   local busy = (top.choosing and os.time() - (top.choosingAt or 0) < 5)
@@ -1041,6 +1070,12 @@ local function tryOffer()
   end
   lastOffered = top.guid
   ui_stackResolve(Player[top.controller])
+end
+
+-- Ask about the top item again (a hold for a response ended with nothing added).
+function Stack.offerAgain()
+  lastOffered = nil
+  Stack.offer()
 end
 
 function Stack.offer()
@@ -1075,6 +1110,9 @@ end
 function ui_stackResolveAll(player)
   local c = player.color
   if not TableSetup.isActive(c) or Stack.isEmpty() or (Leave and Leave.isOut(c)) then
+    return
+  end
+  if Turns and Turns.blockedByResponse and Turns.blockedByResponse(c) then
     return
   end
   Stack.autoResolve = c

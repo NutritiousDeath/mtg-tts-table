@@ -901,3 +901,75 @@ Events.on("cardMoved", function(d)
     end
   end
 end)
+
+---------------------------------------------------------------------------
+-- A commander that would be put into its owner's library may go to the command zone instead
+-- (CR 903.9b). Asked BEFORE it moves: once it's inside the library deck it can't be picked out.
+-- Applies to every effect that puts a card into a library (tuck, "put on top", Brainstorm...).
+---------------------------------------------------------------------------
+
+local rawPutAt, rawPutOnBottom = Library.putAt, Library.putOnBottom
+
+local function askedLately(card)
+  local a = GameState.data.cmdAsked and GameState.data.cmdAsked[card.getGUID()]
+  return a ~= nil and os.time() - a < 15
+end
+
+-- go(true): carry on into the library; go(false): it went to the command zone.
+local function commanderCheck(color, card, go)
+  if not (GameState.data and GameState.data.started) or card == nil or card.isDestroyed()
+      or not (Combat and Combat.isCommander and Combat.isCommander(card)) or askedLately(card)
+      or not (Effects and Effects.askChoice) then
+    return go(true)
+  end
+  local owner = (Effects.ownerOf and Effects.ownerOf(card)) or color
+  local name = card.getName()
+  Effects.askChoice(owner, name .. " would go into your library", "It's your commander: put it into the command zone instead?",
+    { { label = "COMMAND ZONE", value = true }, { label = "LIBRARY", value = false } }, function(yes)
+      GameState.data.cmdAsked = GameState.data.cmdAsked or {}
+      if not card.isDestroyed() then
+        GameState.data.cmdAsked[card.getGUID()] = os.time()
+      end
+      if yes and not card.isDestroyed() and Combat.toCommandZone(card, owner) then
+        return go(false)
+      end
+      go(true)
+    end)
+end
+
+function Library.putAt(color, card, depth, onDone)
+  commanderCheck(color, card, function(ok)
+    if ok then
+      rawPutAt(color, card, depth, onDone)
+    elseif onDone then
+      onDone(Library.find(color))
+    end
+  end)
+end
+
+function Library.putOnBottom(color, cards, onDone)
+  local list = {}
+  for _, c in ipairs(cards or {}) do
+    table.insert(list, c)
+  end
+  local i = 0
+  local keep = {}
+  local function nextCard()
+    i = i + 1
+    local c = list[i]
+    if c == nil then
+      if #keep == 0 then
+        if onDone then onDone(Library.find(color)) end
+        return
+      end
+      return rawPutOnBottom(color, keep, onDone)
+    end
+    commanderCheck(color, c, function(ok)
+      if ok then
+        table.insert(keep, c)
+      end
+      nextCard()
+    end)
+  end
+  nextCard()
+end

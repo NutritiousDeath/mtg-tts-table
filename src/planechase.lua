@@ -401,6 +401,10 @@ local function arrived(card, color, started)
   for _, l in ipairs(lines(e.o)) do
     printToAll("      " .. l, INFO)
   end
+  -- The new plane's always-on abilities (anthems, keywords) apply now; the old one's stop.
+  if Statics and Statics.soon then
+    Wait.time(function() pcall(Statics.soon) end, 0.6)
+  end
   if started then
     return
   end
