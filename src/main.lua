@@ -126,7 +126,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.64 (North Pole, purple planeswalk breath, enter-tapped statics, landfall after load, NEW DECKS)"
+SCRIPT_VERSION = "2.65 (fix: pattern too complex when resolving)"
 
 function onLoad(saved)
   GameLog.setup()

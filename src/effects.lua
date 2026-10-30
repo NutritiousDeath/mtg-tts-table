@@ -928,8 +928,22 @@ function Effects.parse(text, sourceName)
   -- "Tap target creature an opponent controls. Put a stun counter on it." (North Pole Research Base's chaos,
   -- after its "create a 2/2 Alien token. When you do,"): tap it and give it the stun counter(s).
   do
-    local pre, seg, sw = t:match("^(.-)tap (target [^%.]+)%. put (%w+) stun counters? on it%.?%s*$")
-    if seg and num(sw) then
+    -- Plain searches only: MoonSharp gives up ("pattern too complex") on a lazy pattern over long rules text.
+    local pre, seg, sw
+    local at = t:find("stun counter", 1, true) and t:find("tap target ", 1, true)
+    if at then
+      pre = t:sub(1, at - 1)
+      local rest = t:sub(at + 4)
+      local dot = rest:find(".", 1, true)
+      if dot then
+        seg = rest:sub(1, dot - 1)
+        sw = rest:sub(dot + 1):match("^%s*put (%w+) stun counters? on it%.?%s*$")
+        if not sw then
+          seg = nil
+        end
+      end
+    end
+    if seg and sw and num(sw) then
       local sub = Effects.parse("tap " .. seg .. ".", sourceName)
       local tap = sub and sub.actions and sub.actions[1]
       if tap and tap.what == "tapX" and not tap.all and not tap.self then

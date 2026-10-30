@@ -1228,7 +1228,14 @@ function Statics.othersEnterTapped(card, seat)
   for _, p in ipairs(perms()) do
     if p.obj ~= card and p.oracle:find(" enter", 1, true) and p.oracle:find("tapped", 1, true) then
       for sent in p.oracle:gmatch("[^%.\n]+") do
-        local subj = sent:match("^%s*(.-) enter tapped%s*$") or sent:match("^%s*(.-) enter the battlefield tapped%s*$")
+        -- Plain searches (no lazy pattern: MoonSharp says "pattern too complex" on long text).
+        local subj
+        local body = sent:gsub("^%s+", ""):gsub("%s+$", "")
+        for _, tail in ipairs({ " enter tapped", " enter the battlefield tapped" }) do
+          if subj == nil and #body > #tail and body:sub(-#tail) == tail then
+            subj = body:sub(1, #body - #tail)
+          end
+        end
         if subj and not subj:find("~", 1, true) and not subj:find(":", 1, true) and #subj < 70 then
           local scopeOk = true
           if subj:find("your opponents control", 1, true) or subj:find("an opponent controls", 1, true) then
