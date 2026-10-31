@@ -86,6 +86,64 @@ function GameLog.write()
   return ok
 end
 
+---------------------------------------------------------------------------
+-- Errors only: a second Notebook tab, "MTG Errors", with every script error the table caught (not just the
+-- last 15 that !errors shows), each with the time and the script version. Written the moment it happens and
+-- saved with the game, so it survives a crash or a reload. !errorsclear empties it.
+---------------------------------------------------------------------------
+
+local ERR_TITLE = "MTG Errors"
+local MAX_ERRORS = 500
+local errLines = nil
+
+local function readTab(title)
+  local out = {}
+  pcall(function()
+    for _, tab in ipairs(Notes.getNotebookTabs() or {}) do
+      if tab.title == title and tab.body and tab.body ~= "" then
+        local body, i = tab.body, 1
+        while i <= #body do
+          local j = body:find("\n", i, true) or (#body + 1)
+          table.insert(out, body:sub(i, j - 1))
+          i = j + 1
+        end
+      end
+    end
+  end)
+  return out
+end
+
+local function writeErrors()
+  local body = table.concat(errLines or {}, "\n")
+  pcall(function()
+    for _, tab in ipairs(Notes.getNotebookTabs() or {}) do
+      if tab.title == ERR_TITLE then
+        Notes.editNotebookTab({ index = tab.index, title = ERR_TITLE, body = body, color = "Red" })
+        return
+      end
+    end
+    Notes.addNotebookTab({ title = ERR_TITLE, body = body, color = "Red" })
+  end)
+end
+
+function GameLog.error(line)
+  if errLines == nil then
+    errLines = readTab(ERR_TITLE)
+  end
+  local t = GameState and GameState.data and GameState.data.turn or {}
+  table.insert(errLines, stamp() .. " v" .. tostring(SCRIPT_VERSION or "?"):match("^[%d%.]+") .. " turn "
+    .. tostring(t.number or "-") .. " " .. tostring(t.activeSeat or "-") .. ": " .. tostring(line))
+  while #errLines > MAX_ERRORS do
+    table.remove(errLines, 1)
+  end
+  writeErrors()
+end
+
+function GameLog.clearErrors()
+  errLines = {}
+  writeErrors()
+end
+
 function GameLog.clear()
   lines = {}
   GameLog.add("LOG", "log cleared")

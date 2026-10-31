@@ -4,3 +4,6 @@ __pycache__/
 
 # Unity project for the torches (huge; only the exported bundles go in assets/)
 unity/
+
+# Game logs and error lists pulled out of TTS saves (tools/extract_log.py)
+logs/

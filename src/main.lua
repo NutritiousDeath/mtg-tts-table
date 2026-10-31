@@ -127,7 +127,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.70 (rules book updated; Pauper Commander format)"
+SCRIPT_VERSION = "2.71 (MTG Errors notebook tab)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -555,6 +555,14 @@ function onChat(message, sender)
       and ", a seat in this game." or ", NOT a seat: pick a free color or type !seat <Color>.")
     printToColor(msg, sender.color, { 0.75, 0.8, 0.9 })
     broadcastToColor(msg, sender.color, { 0.75, 0.8, 0.9 })
+    return false
+  end
+
+  if message == "!errorsclear" then
+    if GameLog and GameLog.clearErrors then
+      GameLog.clearErrors()
+    end
+    broadcastToColor("The \"MTG Errors\" Notebook tab is empty again.", sender.color, { 0.7, 0.85, 1 })
     return false
   end
 

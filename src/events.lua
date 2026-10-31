@@ -37,6 +37,10 @@ function Events.noteError(where, err)
     table.remove(Events.errors, 1)
   end
   printToAll("MTG > SCRIPT ERROR in " .. line:sub(1, 300) .. "  (type !errors to list the last ones)", { 1, 0.45, 0.35 })
+  -- Also kept in full in the "MTG Errors" Notebook tab (gamelog.lua), saved with the game.
+  if GameLog and GameLog.error then
+    pcall(GameLog.error, line)
+  end
 end
 
 Events.epoch = 0     -- bumped whenever cards move or a step starts: caches that depend on the board check it
