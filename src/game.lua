@@ -793,6 +793,10 @@ function GameFlow.newDecks(byColor)
     for _, c in ipairs(TableSetup.activeSeats()) do
       pcall(Importer.clearSeat, c)
     end
+    -- Players who left last game had their cards put in a bag at their seat: those go too.
+    if Leave and Leave.clearBags then
+      pcall(Leave.clearBags)
+    end
     -- The game itself: the same as !reset (the table, its layout and surface stay).
     local tableState = GameState.data and GameState.data.table
     GameState.new("commander")

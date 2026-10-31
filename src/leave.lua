@@ -69,6 +69,22 @@ local function withBag(color, fn)
   })
 end
 
+-- NEW DECKS: the "out of the game" bags from the last game go away with everything in them.
+function Leave.clearBags()
+  local n = 0
+  for _, obj in ipairs(getObjects()) do
+    if obj.type == "Bag" and not obj.isDestroyed() and (obj.hasTag("OutBag") or (obj.getName() or ""):find(" - out of the game", 1, true)) then
+      n = n + 1
+      obj.setLock(false)
+      obj.destruct()
+    end
+  end
+  if GameState.data then
+    GameState.data.outBags = {}
+  end
+  return n
+end
+
 local function isMtg(obj)
   if obj == nil or obj.isDestroyed() then
     return false

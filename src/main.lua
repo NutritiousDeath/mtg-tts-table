@@ -128,7 +128,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.73 (MTG By Hand notebook tab)"
+SCRIPT_VERSION = "2.74 (NEW DECKS clears out-of-game bags)"
 
 function onLoad(saved)
   GameLog.setup()
