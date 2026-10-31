@@ -7465,6 +7465,37 @@ function Effects.resolve(it)
     Effects.resolveWard(it)
     return
   end
+  -- Battlebond "For each player, choose friend or foe" (planefx.lua).
+  if PlaneFx and PlaneFx.friendOrFoe and tostring(it.text or ""):lower():find("choose friend or foe", 1, true) then
+    local okf, did = pcall(PlaneFx.friendOrFoe, it)
+    if okf and did then
+      return
+    end
+  end
+  -- 2HG: "each other player" includes your teammate. The reader treats it as "each opponent", so while this
+  -- resolves (and its questions are open) a teammate counts as an opponent too.
+  if TableSetup.allOthers then
+    TableSetup.allOthers = false
+  end
+  if TableSetup.isTeamGame and TableSetup.isTeamGame() and tostring(it.text or ""):lower():find("each other player", 1, true) then
+    TableSetup.allOthers = true
+    local token = {}
+    TableSetup.allOthersToken = token
+    local started = os.time()
+    local function clearLater()
+      Wait.time(function()
+        if TableSetup.allOthersToken ~= token then
+          return
+        end
+        if Effects.busy() and os.time() - started < 120 then
+          clearLater()
+        else
+          TableSetup.allOthers = false
+        end
+      end, 1)
+    end
+    clearLater()
+  end
   -- Battlebond "Partner with <name>": its enters trigger.
   if tostring(it.text or ""):sub(1, 13) == "Partner with " then
     Effects.partnerWith(it, tostring(it.text):sub(14))

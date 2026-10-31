@@ -4190,3 +4190,210 @@ Events.on("stepStarted", function(d)
     end
   end
 end)
+
+---------------------------------------------------------------------------
+-- Battlebond "friend or foe" (CR 701.33... "For each player, choose friend or foe"): the caster picks for
+-- every player (2HG teammates are suggested as friends, the other team as foes), then each friend does the
+-- friend part and each foe the foe part, in turn order. Pir's Whim, Khorvath's Fury, Virtus's Maneuver,
+-- Zndrsplt's Judgment, Regna's Sanction. Lives here because it uses the same tools as the planes.
+---------------------------------------------------------------------------
+
+local function mustPick(seat, it, title, text, fits, cb, label)
+  local any = false
+  for _, e in ipairs(field(fits)) do
+    if e.seat == seat then
+      any = true
+    end
+  end
+  if not any then
+    say(it.name, seat .. " has nothing to " .. title .. ".", INFO)
+    cb(nil)
+    return
+  end
+  local function ask()
+    pick(seat, it, title, text, function(obj, owner)
+      return owner == seat and fits(obj, owner)
+    end, function(obj)
+      if obj == nil then
+        broadcastToColor("You have to pick one.", seat, WARN)
+        ask()
+        return
+      end
+      cb(obj)
+    end, "SKIP", label)
+  end
+  ask()
+end
+
+local FOF = {}
+
+FOF.pir = {
+  friend = function(it, c, nxt)
+    if LibSearch and LibSearch.open then
+      LibSearch.open(c, "land", it.name .. ": friend - put a land card onto the battlefield tapped, then close the search (it shuffles).",
+        "battlefield", true, { limit = 1, fixedDest = true })
+    end
+    nxt()
+  end,
+  foe = function(it, c, nxt)
+    sacOne(it, c, "an artifact or enchantment", function(o) local t = types(o) return t.artifact or t.enchantment end,
+      function() nxt() end)
+  end,
+}
+
+FOF.khorvath = {
+  friend = function(it, c, nxt)
+    local n = Actions.discardHand(c, it.name) or 0
+    say(it.name, c .. " (friend) discards " .. n .. " and draws " .. (n + 1) .. ".")
+    Wait.time(function()
+      Actions.draw(c, n + 1, it.name)
+      nxt()
+    end, 0.8)
+  end,
+  foe = function(it, c, nxt)
+    local n = #handOf(c)
+    if n > 0 then
+      say(it.name, "deals " .. n .. " damage to " .. c .. " (foe, " .. n .. " card" .. (n == 1 and "" or "s") .. " in hand).")
+      life(c, -n, it.name)
+    else
+      say(it.name, c .. " (foe) has no cards in hand: no damage.", INFO)
+    end
+    nxt()
+  end,
+}
+
+FOF.virtus = {
+  friend = function(it, c, nxt)
+    local done = false
+    local ok = pcall(pickGrave, c, it.name .. ": friend - a creature card back to your hand", function(e)
+      return tostring(e.typeLine):find("creature", 1, true) ~= nil
+    end, function(e)
+      if e then
+        takeFrom(c, "graveyard", { e.guid }, "battlefield", function(card) toHand(card, c) end)
+        say(it.name, c .. " (friend) returns " .. tostring(e.name) .. " to their hand.")
+      end
+    end)
+    if not ok then
+      broadcastToColor(it.name .. ": return a creature card from your graveyard to your hand yourself.", c, INFO)
+    end
+    nxt()
+  end,
+  foe = function(it, c, nxt)
+    sacOne(it, c, "a creature", isCreature, function() nxt() end)
+  end,
+}
+
+FOF.zndrsplt = {
+  friend = function(it, c, nxt)
+    mustPick(c, it, "copy a creature", c .. " (friend): click COPY on a creature you control.", isCreature, function(obj)
+      if obj then
+        copyFor(obj, c, it.name)
+        say(it.name, c .. " (friend) creates a token copy of " .. obj.getName() .. ".")
+      end
+      nxt()
+    end, "COPY")
+  end,
+  foe = function(it, c, nxt)
+    mustPick(c, it, "return a creature", c .. " (foe): click RETURN on a creature you control.", isCreature, function(obj)
+      if obj then
+        local owner = (Effects.ownerOf and Effects.ownerOf(obj)) or c
+        say(it.name, c .. " (foe) returns " .. obj.getName() .. " to its owner's hand.")
+        toHand(obj, owner)
+      end
+      nxt()
+    end, "RETURN")
+  end,
+}
+
+FOF.regna = {
+  friend = function(it, c, nxt)
+    local n = 0
+    for _, e in ipairs(field(isCreature)) do
+      if e.seat == c then
+        plus(e.obj, 1, c)
+        n = n + 1
+      end
+    end
+    say(it.name, c .. " (friend) puts a +1/+1 counter on each of their " .. n .. " creature" .. (n == 1 and "" or "s") .. ".")
+    nxt()
+  end,
+  foe = function(it, c, nxt)
+    local function untapped(o)
+      if not isCreature(o) then
+        return false
+      end
+      local s = TableSetup.seat(c)
+      local y = (o.getRotation().y - (s and s.yaw or 0)) % 360
+      return y < 45 or y > 315
+    end
+    mustPick(c, it, "keep one untapped", c .. " (foe): click KEEP on the untapped creature that stays untapped.", untapped, function(keep)
+      local n = 0
+      for _, e in ipairs(field(isCreature)) do
+        if e.seat == c and e.obj ~= keep then
+          setTapped(e.obj, c, true)
+          n = n + 1
+        end
+      end
+      say(it.name, c .. " (foe) keeps " .. (keep and keep.getName() or "nothing") .. " untapped; " .. n .. " other creature"
+        .. (n == 1 and "" or "s") .. " tapped.")
+      nxt()
+    end, "KEEP")
+  end,
+}
+
+local FOF_BY = {
+  { "each friend searches their library for a land card", "pir" },
+  { "each friend discards all cards from their hand", "khorvath" },
+  { "each friend returns a creature card from their graveyard", "virtus" },
+  { "each friend creates a token that's a copy of a creature they control", "zndrsplt" },
+  { "each friend puts a +1/+1 counter on each creature they control", "regna" },
+}
+
+-- Effects.resolve hands any "choose friend or foe" text here: true when it's one the table runs.
+function PlaneFx.friendOrFoe(it)
+  local low = tostring(it and it.text or ""):lower():gsub("’", "'")
+  if not low:find("choose friend or foe", 1, true) then
+    return false
+  end
+  local h
+  for _, e in ipairs(FOF_BY) do
+    if low:find(e[1], 1, true) then
+      h = FOF[e[2]]
+    end
+  end
+  if h == nil then
+    return false
+  end
+  local seat = it.controller
+  local role = {}
+  each(fromSeat(seat), function(c, nxt)
+    local friendly = not TableSetup.isOpponent(c, seat)
+    local ch = friendly and { { label = "FRIEND", value = "friend" }, { label = "FOE", value = "foe" } }
+      or { { label = "FOE", value = "foe" }, { label = "FRIEND", value = "friend" } }
+    choose(seat, it.name .. ": friend or foe", "Is " .. c .. (c == seat and " (you)" or "") .. " a friend or a foe?", ch, function(v)
+      role[c] = v == "friend" and "friend" or "foe"
+      nxt()
+    end)
+  end, function()
+    local parts = {}
+    for _, c in ipairs(fromSeat(seat)) do
+      table.insert(parts, c .. " " .. string.upper(role[c] or "foe"))
+    end
+    say(it.name, table.concat(parts, ", ") .. ".")
+    local order = {}
+    for _, c in ipairs(fromSeat(seat)) do
+      if role[c] == "friend" then table.insert(order, { c, "friend" }) end
+    end
+    for _, c in ipairs(fromSeat(seat)) do
+      if role[c] ~= "friend" then table.insert(order, { c, "foe" }) end
+    end
+    each(order, function(e, nxt)
+      local ok, err = pcall(h[e[2]], it, e[1], nxt)
+      if not ok then
+        if Events and Events.noteError then Events.noteError(it.name .. " (friend or foe)", err) end
+        nxt()
+      end
+    end)
+  end)
+  return true
+end

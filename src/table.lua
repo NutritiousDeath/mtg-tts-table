@@ -246,6 +246,10 @@ function TableSetup.isOpponent(a, b)
   if a == nil or b == nil or a == b then
     return a ~= b
   end
+  -- Set by effects.lua while an "each other player" effect resolves in 2HG (the teammate is included).
+  if TableSetup.allOthers then
+    return true
+  end
   local ta = TableSetup.teamOf(a)
   return ta == nil or ta ~= TableSetup.teamOf(b)
 end

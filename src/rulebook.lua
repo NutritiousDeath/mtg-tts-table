@@ -276,7 +276,8 @@ local CHAPTERS = {
       .. "- \"Opponent\" on a card means a player on the other team: your teammate is never a target opponent, and"
       .. " \"whenever an opponent...\" doesn't trigger off them.\n"
       .. "- Battlebond: " .. C .. "Assist" .. E .. " (the table asks your teammate to chip in), " .. C .. "Partner with" .. E
-      .. " (the search for the partner), and \"your team\" (anthems, counters and triggers count both of you).",
+      .. " (the search for the partner), " .. C .. "Friend or foe" .. E .. " (the caster picks for each player), and \"your team\""
+      .. " (anthems, counters and triggers count both of you). \"Each other player\" includes your teammate.",
   } },
 }
 
@@ -312,6 +313,7 @@ local KEYWORDS = {
   { "Flying", "Can only be blocked by creatures with flying or reach." },
   { "Foretell", "Pay {2} and exile it face down from your hand; cast it on a later turn for its foretell cost." },
   { "Goad", "Until your next turn, it must attack each combat, and must attack a player other than you if it can." },
+  { "Friend or foe", "Battlebond: the caster picks friend or foe for each player; friends get the good part, foes the bad. The table asks." },
   { "Haste", "Can attack and tap the turn it comes under your control." },
   { "Hexproof", "Can't be the target of spells or abilities your opponents control." },
   { "Indestructible", "Isn't destroyed by damage or \"destroy\" effects. (0 toughness still kills it.)" },

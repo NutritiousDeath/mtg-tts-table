@@ -128,7 +128,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.75 (2HG: teammates aren't opponents; assist, partner with, your team)"
+SCRIPT_VERSION = "2.76 (2HG: friend or foe, each other player)"
 
 function onLoad(saved)
   GameLog.setup()
