@@ -996,6 +996,10 @@ local function typesOf(obj)
   for _, name in ipairs(d and d.types or {}) do
     t[name:lower()] = true
   end
+  -- Planes (planefx.lua): Nyx's nontoken creatures are enchantments too (constellation sees them).
+  if PlaneFx and PlaneFx.extraTypes then
+    pcall(PlaneFx.extraTypes, obj, t)
+  end
   return t
 end
 

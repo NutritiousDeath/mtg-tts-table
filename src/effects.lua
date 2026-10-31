@@ -8125,6 +8125,10 @@ local function cardTypes(obj)
     if anim and anim[obj.getGUID()] then
       t.creature = true
     end
+    -- Planes (planefx.lua): Nyx's nontoken creatures are enchantments too.
+    if PlaneFx and PlaneFx.extraTypes then
+      PlaneFx.extraTypes(obj, t)
+    end
   end)
   return t
 end

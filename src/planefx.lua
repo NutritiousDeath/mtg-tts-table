@@ -713,8 +713,46 @@ end)
 
 -- Glimmervoid Basin
 on("Glimmervoid Basin", "copies that spell for each other spell", function(it, seat)
-  say(it.name, (it.that or seat) .. " copies that spell once for each other thing it could target, each copy aimed at a"
-    .. " different one: use COPY on the spell for each.", CYAN)
+  local who = it.that or seat
+  local spell = it.thatCard and getObjectFromGUID(it.thatCard)
+  if spell == nil or not (Stack and Stack.has and Stack.has(it.thatCard)) then
+    say(it.name, "the spell is gone: no copies.", INFO)
+    return
+  end
+  -- Its single target: count everything else it could target (permanents of that kind, players).
+  local entry
+  for _, e in ipairs(Stack.entries()) do
+    if e.guid == it.thatCard then
+      entry = e
+    end
+  end
+  local pre = entry and entry.preTargets and entry.preTargets[1]
+  local n
+  if pre and pre.kind == "player" then
+    n = #players() - 1
+  elseif pre and pre.spec and Effects.targetFits then
+    n = 0
+    for _, e in ipairs(field()) do
+      local okf, fits = pcall(Effects.targetFits, pre.spec, e.obj, e.seat, who, spell.getGUID(), {})
+      if okf and fits and e.obj.getGUID() ~= pre.guid then
+        n = n + 1
+      end
+    end
+  end
+  local function make(k)
+    k = math.max(0, math.min(k or 0, 20))
+    for _ = 1, k do
+      pcall(Effects.copySpell, spell, who, it.name)
+    end
+    say(it.name, who .. " copies " .. spell.getName() .. " " .. k .. " time" .. (k == 1 and "" or "s") .. ": aim each copy at a"
+      .. " different target as it resolves.")
+  end
+  if n then
+    make(n)
+  else
+    Effects.askAmount(who, it.name .. ": how many copies?", "One copy for each other thing " .. spell.getName() .. " could target."
+      .. " Type the number, then OK.", "NONE", function(v) make(tonumber(v) or 0) end)
+  end
 end)
 on("Glimmervoid Basin", "each player except that creature's controller creates a token that's a copy", function(it, seat)
   pick(seat, it, "creature to copy", "Click TARGET on a creature: every player except its controller gets a token copy.",
@@ -993,11 +1031,7 @@ on("Murasa", "target land becomes a 4/4 creature that's still a land", function(
     return types(obj).land
   end, function(obj)
     if obj then
-      pcall(Effects.setBasePT, obj, 4, 4)
-      local s = st()
-      s.animated = s.animated or {}
-      s.animated[obj.getGUID()] = true
-      say(it.name, obj.getName() .. " is now a 4/4 creature (still a land).")
+      pcall(Effects.forgeAnimate, seat, { on = "that", p = 4, t = 4, perm = true, kw = "" }, { name = it.name, thatCard = obj.getGUID() })
     end
   end)
 end)
@@ -1516,25 +1550,26 @@ on("Esper", "creatures you control that are white, blue, and/or black become art
 end)
 
 -- Ghirapur / New New York: artifacts become Vehicles (the table shows it; crew by hand)
-on("Ghirapur", "each noncreature, non-vehicle artifact you control becomes a 5/3 vehicle", function(it, seat)
+local function makeVehicles(it, seat, p, t, kw, crew, skipVehicles)
+  local s = st()
+  s.vehicles = s.vehicles or {}
   local n = 0
-  for _, e in ipairs(field(function(o, s) return s == seat and types(o).artifact and not types(o).creature end)) do
-    if not typeLine(e.obj):find("vehicle", 1, true) then
-      boost(seat, e.obj, 0, 0, { "trample", "haste" }, "5/3 Vehicle, trample, haste, crew 2", it.name)
+  for _, e in ipairs(field(function(o, se) return se == seat and types(o).artifact and not types(o).creature end)) do
+    if not (skipVehicles and typeLine(e.obj):find("vehicle", 1, true)) then
+      s.vehicles[e.obj.getGUID()] = { seat = seat, p = p, t = t, kw = kw, crew = crew, turn = turnNo(), name = it.name }
       n = n + 1
     end
   end
-  say(it.name, n .. " artifact" .. (n == 1 and "" or "s") .. " of " .. seat .. " are 5/3 Vehicles with trample, haste and crew 2"
-    .. " this turn (crew them by tapping creatures with total power 2).", CYAN)
+  say(it.name, n .. " artifact" .. (n == 1 and "" or "s") .. " of " .. seat .. " are " .. p .. "/" .. t .. " Vehicles (" .. kw
+    .. ", crew " .. crew .. ") this turn: click CREW on the plane, pick the Vehicle, then tap creatures with total power "
+    .. crew .. " or more.", CYAN)
+  pcall(Planechase.showCounters)
+end
+on("Ghirapur", "each noncreature, non-vehicle artifact you control becomes a 5/3 vehicle", function(it, seat)
+  makeVehicles(it, seat, 5, 3, "trample and haste", 2, true)
 end)
 on("New New York", "noncreature artifacts you control become 3/3 vehicles", function(it, seat)
-  local n = 0
-  for _, e in ipairs(field(function(o, s) return s == seat and types(o).artifact and not types(o).creature end)) do
-    boost(seat, e.obj, 0, 0, { "flying", "haste" }, "3/3 Vehicle, flying, haste, crew 1", it.name)
-    n = n + 1
-  end
-  say(it.name, n .. " artifact" .. (n == 1 and "" or "s") .. " of " .. seat .. " are 3/3 Vehicles with flying, haste and crew 1"
-    .. " this turn.", CYAN)
+  makeVehicles(it, seat, 3, 3, "flying and haste", 1, false)
 end)
 
 -- Inys Haen
@@ -1561,7 +1596,7 @@ on("Ketria", "put your choice of a vigilance, menace, or trample counter on targ
     end)
 end)
 on("Ketria", "exile cards from the top of your library until you exile a nonland permanent card", function(it, seat)
-  Library.exileUntilNonland(seat, true, function(card)
+  Library.exileUntilNonland(seat, false, function(card)
     if card == nil then
       return
     end
@@ -2285,12 +2320,32 @@ on("Prime Minister's Cabinet Room", "up to one target creature you control becom
     pick(seat, it, "creature to copy", "Click TARGET on a creature an opponent controls.", function(obj, owner)
       return TableSetup.isOpponent(owner, seat) and isCreature(obj)
     end, function(b)
-      if b then
-        local p, t = powerOf(b), toughOf(b)
-        pcall(Effects.setBasePT, a, tonumber(data(b).power) or p, tonumber(data(b).toughness) or t)
-        say(it.name, a.getName() .. " becomes a copy of " .. b.getName() .. " (its power and toughness now match; its abilities"
-          .. " are " .. b.getName() .. "'s).", CYAN)
+      if not b or a.isDestroyed() then
+        return
       end
+      -- The table's clone swap: a token copy of b takes a's place; a waits aside and comes back to wherever the
+      -- copy goes (effects.lua cloneLeft).
+      local pos, rot = a.getPosition(), a.getRotation()
+      local c = b.clone({ position = { x = pos.x, y = pos.y + 0.6, z = pos.z } })
+      if c == nil then
+        say(it.name, "couldn't copy " .. b.getName() .. ": make the copy yourself.", WARN)
+        return
+      end
+      c.addTag("Token")
+      c.memo = ""
+      c.setRotation({ 0, rot.y, 0 })
+      pcall(Zones.inherit, a, c)
+      GameState.data.clones = GameState.data.clones or {}
+      GameState.data.clones[c.getGUID()] = { real = a.getGUID(), seat = seat, name = a.getName() }
+      a.setPosition(TableSetup.slot(seat, "act_tokens", TableSetup.SURFACE_TOP + 1.5))
+      Wait.time(function()
+        if not c.isDestroyed() then
+          pcall(Counters.setup, c)
+          pcall(Counters.render, c)
+        end
+      end, 1.5)
+      say(it.name, a.getName() .. " becomes a copy of " .. b.getName() .. " (the real card waits beside the table and returns to"
+        .. " wherever the copy goes).")
     end)
   end)
 end)
@@ -2672,7 +2727,12 @@ function PlaneFx.handlesLine(planeName, low)
 end
 
 -- The planes face up now, by name.
+local upCache = { at = -100, map = {} }
 local function planesUp()
+  local now = (Time and Time.time) or os.time()
+  if now - upCache.at < 0.5 then
+    return upCache.map
+  end
   local out = {}
   if Planechase and Planechase.allPlanes then
     local ok, list = pcall(Planechase.allPlanes)
@@ -2680,6 +2740,7 @@ local function planesUp()
       out[p.getName()] = p
     end
   end
+  upCache.at, upCache.map = now, out
   return out
 end
 
@@ -3891,3 +3952,241 @@ Wait.time(function()
     pcall(Planechase.showCounters)
   end
 end, 4)
+
+---------------------------------------------------------------------------
+-- v2.69: CREW (Ghirapur, New New York), CONVOKE (Ood Sphere), rebound (Trail of the Mage-Rings), demonstrate
+-- (Strixhaven), cascade (TARDIS Bay), Nyx's enchantment creatures.
+---------------------------------------------------------------------------
+
+GRANTS["Ghirapur"] = { { "CREW", "planefx_crew", "Crew one of your Vehicles: tap creatures with total power at least its crew number; it becomes an artifact creature until end of turn" } }
+GRANTS["New New York"] = { { "CREW", "planefx_crew", "Crew one of your Vehicles: tap creatures with total power at least its crew number; it becomes an artifact creature until end of turn" } }
+GRANTS["Ood Sphere"] = { { "CONVOKE", "planefx_convoke", "Tap your untapped creatures to help pay for a noncreature spell: each adds one mana of one of its colors (or colorless)" } }
+
+local function isTappedObj(o, seat)
+  local s = TableSetup.seat(seat)
+  local r = o.getRotation()
+  local diff = ((r.y - s.yaw + 540) % 360) - 180
+  return math.abs(diff) > 30
+end
+
+function planefx_crew(obj, color)
+  if not seated(color) then
+    return
+  end
+  local s = st()
+  local mine = {}
+  for g, v in pairs(s.vehicles or {}) do
+    local o = getObjectFromGUID(g)
+    if o and v.seat == color and v.turn == turnNo() and Effects.fieldSeat(o) == color then
+      mine[g] = v
+    end
+  end
+  if next(mine) == nil then
+    broadcastToColor("You have no Vehicles from the plane to crew this turn.", color, INFO)
+    return
+  end
+  local it = { name = "Crew" }
+  pick(color, it, "which Vehicle?", "Click CREW on the Vehicle to crew.", function(o)
+    return mine[o.getGUID()] ~= nil
+  end, function(veh)
+    if not veh then
+      return
+    end
+    local v = mine[veh.getGUID()]
+    local total, tapped = 0, {}
+    local function more()
+      if total >= v.crew then
+        pcall(Effects.forgeAnimate, color, { on = "that", p = v.p, t = v.t, kw = v.kw, types = "artifact" },
+          { name = v.name .. " (crewed)", thatCard = veh.getGUID() })
+        s.vehicles[veh.getGUID()] = nil
+        return
+      end
+      pick(color, it, "tap a creature (" .. total .. " of " .. v.crew .. " power)", "Click CREW on an untapped creature you"
+        .. " control to tap it.", function(o, owner)
+          return owner == color and isCreature(o) and o ~= veh and not tapped[o.getGUID()] and not isTappedObj(o, color)
+        end, function(c)
+          if not c then
+            return
+          end
+          tapped[c.getGUID()] = true
+          setTapped(c, color, true)
+          total = total + math.max(0, powerOf(c))
+          more()
+        end, "CANCEL", "CREW")
+    end
+    more()
+  end, "CANCEL", "CREW")
+end
+
+function planefx_convoke(obj, color)
+  if not seated(color) then
+    return
+  end
+  local it = { name = "Convoke (Ood Sphere)" }
+  local n = 0
+  local function more()
+    pick(color, it, "tap a creature", "Click CONVOKE on an untapped creature you control (" .. n .. " so far), or DONE.",
+      function(o, owner) return owner == color and isCreature(o) and not isTappedObj(o, color) end, function(c)
+        if not c then
+          if n > 0 then
+            say(it.name, color .. " convoked " .. n .. " creature" .. (n == 1 and "" or "s") .. ".")
+          end
+          return
+        end
+        setTapped(c, color, true)
+        n = n + 1
+        local cols = colorsOf(c)
+        local ch = {}
+        for _, k in ipairs({ "W", "U", "B", "R", "G" }) do
+          if cols[k] then
+            table.insert(ch, { label = k, value = k })
+          end
+        end
+        table.insert(ch, { label = "C", value = "C" })
+        if #ch == 1 then
+          ManaChips.add(color, "C", 1)
+          more()
+          return
+        end
+        Effects.askChoice(color, "Convoke: " .. c.getName(), "Which mana does it add?", ch, function(k)
+          ManaChips.add(color, k or "C", 1)
+          more()
+        end)
+      end, "DONE", "CONVOKE")
+  end
+  more()
+end
+
+-- Nyx: nontoken creatures are enchantments too (effects.lua / triggers.lua card types ask).
+function PlaneFx.extraTypes(obj, t)
+  if t and t.creature and not t.enchantment and planesUp()["Nyx"] then
+    local okT, tok = pcall(function() return obj.hasTag("Token") end)
+    if not (okT and tok) then
+      t.enchantment = true
+    end
+  end
+  return t
+end
+
+-- Rebound / demonstrate / cascade: on cast.
+Events.on("spellCast", function(d)
+  if d == nil or d.card == nil or d.controller == nil or not GameState.data.started then
+    return
+  end
+  local up = planesUp()
+  if next(up) == nil then
+    return
+  end
+  local spell, who = d.card, d.controller
+  local g = spell.getGUID()
+  local tl = typeLine(spell)
+  local isIS = tl:find("instant", 1, true) or tl:find("sorcery", 1, true)
+  local s = st()
+  -- Trail of the Mage-Rings: from the hand (it was in a hand a moment ago).
+  if up["Trail of the Mage-Rings"] and isIS then
+    local loc = Zones.locationOf and Zones.locationOf(spell)
+    s.rebound = s.rebound or {}
+    s.rebound[g] = who
+    say("Trail of the Mage-Rings", spell.getName() .. " has rebound: it's exiled as it resolves, and " .. who .. " may cast it free"
+      .. " at their next upkeep.", INFO)
+  end
+  -- Strixhaven: demonstrate.
+  if up["Strixhaven"] and isIS then
+    Wait.time(function()
+      yesNo(who, "Strixhaven: demonstrate", who .. ": copy " .. spell.getName() .. "? If you do, an opponent you choose copies it"
+        .. " too.", "COPY IT", "NO", function(y)
+          if not y or not (Stack.has and Stack.has(g)) then
+            return
+          end
+          pcall(Effects.copySpell, spell, who, "Strixhaven")
+          local ch = {}
+          for _, c in ipairs(opps(who)) do
+            table.insert(ch, { label = string.upper(c), value = c })
+          end
+          Effects.askChoice(who, "Demonstrate: which opponent?", "That opponent also copies " .. spell.getName() .. ".", ch, function(c)
+            if c then
+              pcall(Effects.copySpell, spell, c, "Strixhaven")
+            end
+          end)
+        end)
+    end, 1)
+  end
+  -- TARDIS Bay: the first spell the planar controller casts each of their turns with mana value 2 or more cascades.
+  if up["TARDIS Bay"] and who == planarSeat() and mvOf(spell) >= 2 and not tl:find("land", 1, true) then
+    local mv = mvOf(spell)
+    if s.cascadeTurn ~= turnNo() then
+      s.cascadeTurn = turnNo()
+      Wait.time(function()
+        say("TARDIS Bay", spell.getName() .. " cascades: exiling until a nonland card with mana value less than " .. mv .. ".", CYAN)
+        Library.exileUntilNonland(who, false, function(found, exiled)
+          local rest = {}
+          for _, c in ipairs(exiled or {}) do
+            if c ~= found and not c.isDestroyed() then
+              table.insert(rest, c)
+            end
+          end
+          local function bottom()
+            if #rest > 0 then
+              Library.putBottomRandom(who, rest)
+            end
+          end
+          if found == nil then
+            bottom()
+            return
+          end
+          yesNo(who, "Cascade", "Cast " .. found.getName() .. " without paying its mana cost?", "CAST IT", "NO", function(y)
+            if y then
+              castFrom(found, who)
+            else
+              table.insert(rest, found)
+            end
+            bottom()
+          end)
+        end, function(o) return mvOf(o) < mv and not typeLine(o):find("land", 1, true) end)
+      end, 1.5)
+    end
+  end
+end)
+
+-- Rebound: the spell goes to exile instead of the graveyard; at its owner's next upkeep they may cast it free.
+Events.on("cardMoved", function(d)
+  if d == nil or d.card == nil or d.to == nil or d.pileExtra then
+    return
+  end
+  local s = st()
+  local okG, g = pcall(function() return d.card.getGUID() end)
+  if not okG or not (s.rebound and s.rebound[g]) or d.to.region ~= "graveyard" then
+    return
+  end
+  local who = s.rebound[g]
+  s.rebound[g] = nil
+  Wait.time(function()
+    takeFrom(d.to.seat or who, "graveyard", { g }, "exile", function(c)
+      c.setPosition(TableSetup.slot(d.to.seat or who, "exile", TableSetup.SURFACE_TOP + 2))
+      Wait.time(function() if not c.isDestroyed() then Zones.refresh(c) end end, 0.5)
+      s.reboundWait = s.reboundWait or {}
+      s.reboundWait[c.getGUID()] = { seat = who, turn = turnNo() }
+      say("Rebound", c.getName() .. " is exiled; " .. who .. " may cast it free at their next upkeep.", INFO)
+    end)
+  end, 1.2)
+end)
+
+Events.on("stepStarted", function(d)
+  if d == nil or d.step ~= "upkeep" or d.seat == nil or not GameState.data.started then
+    return
+  end
+  local s = st()
+  for g, r in pairs(s.reboundWait or {}) do
+    if Turns.isActiveSeat(r.seat) and r.turn < turnNo() then
+      s.reboundWait[g] = nil
+      local c = getObjectFromGUID(g)
+      if c and not c.isDestroyed() then
+        yesNo(r.seat, "Rebound", "Cast " .. c.getName() .. " from exile without paying its mana cost?", "CAST IT", "NO", function(y)
+          if y and not c.isDestroyed() then
+            castFrom(c, r.seat)
+          end
+        end)
+      end
+    end
+  end
+end)

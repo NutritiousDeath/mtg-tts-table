@@ -127,7 +127,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.68 (Planechase: granted casting buttons, Kessig, Great Forest, Skybreen reveals, Agyrem, devour)"
+SCRIPT_VERSION = "2.69 (Planechase final: crew, convoke, rebound, demonstrate, cascade, Nyx, Glimmervoid, full copy)"
 
 function onLoad(saved)
   GameLog.setup()
