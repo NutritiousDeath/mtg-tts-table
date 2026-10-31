@@ -43,7 +43,8 @@ local CHAPTERS = {
       .. "- " .. G .. "Tracker" .. E .. " (in front of you): click the heart for +1 life, right-click for -1; the -/+ rings do 1 (right-click: 5). "
       .. "The drop is poison, the crowns are commander damage from each opponent.\n"
       .. "- " .. G .. "Turn strip" .. E .. ": the current step, and who the table is waiting on.\n"
-      .. "- " .. G .. "Action tiles" .. E .. " (your right): DRAW, SCRY, MILL, UNTAP, TOKENS.\n"
+      .. "- " .. G .. "Action tiles" .. E .. " (your right): DRAW, SCRY, MILL, EXILE, UNTAP, TOKENS. "
+      .. "EXILE exiles the top card; right-click it to exile until a nonland card.\n"
       .. "- " .. G .. "NEXT STEP / END STEP / END TURN" .. E .. " tiles beside the tracker.\n"
       .. "- " .. G .. "Mana chips" .. E .. " (left of the command zones): tapping lands adds mana; the table spends it when it can.",
     "<b>Cards</b>\n\n"
@@ -54,6 +55,20 @@ local CHAPTERS = {
       .. "- " .. G .. "RESOLVE" .. E .. " asks everyone again for the top item. " .. G .. "RESOLVE ALL" .. E .. " works down the whole stack.\n"
       .. "- " .. G .. "YIELD" .. E .. ": you pass on everything until the stack is empty.\n"
       .. "- " .. G .. "COUNTER" .. E .. " counters the top item by hand.",
+    "<b>Decks and games</b>\n\n"
+      .. "- " .. G .. "Importing" .. E .. ": paste your Archidekt or Moxfield link in the box under a " .. G .. "Deck Importer" .. E
+      .. " card and click IMPORT TO MY SEAT (or type " .. C .. "!import <link>" .. E .. "). Importing again replaces your deck.\n"
+      .. "- " .. G .. "START GAME" .. E .. " panel: the " .. G .. "format" .. E .. " (Commander or Pauper Commander), the "
+      .. G .. "table layout" .. E .. " (4, 3 or 2 players, or Two-Headed Giant) and who goes first.\n"
+      .. "- " .. G .. "START" .. E .. " starts, or restarts with the decks on the table (every card goes back into its owner's library).\n"
+      .. "- " .. G .. "NEW DECKS" .. E .. " (click twice) ends the game and clears every seat, so everyone can import a new deck.\n"
+      .. "- Changing the layout during a game: click the layout twice; it ends the game first.",
+    "<b>If something looks wrong</b>\n\n"
+      .. "- Can't click a panel, or a panel is missing: " .. C .. "!resync" .. E .. " rebuilds the screen panels for everyone.\n"
+      .. "- Your camera is under or outside the table: " .. C .. "!view" .. E .. ".\n"
+      .. "- Which version is loaded, and which seat you are: " .. C .. "!seats" .. E .. ".\n"
+      .. "- A pop-up nobody can answer: " .. C .. "!unstick" .. E .. ".\n"
+      .. "- Script errors to report: " .. C .. "!errors" .. E .. ".",
     "<b>Handy chat commands</b>\n\n"
       .. C .. "!concede" .. E .. "  leave the game (asks first)\n"
       .. C .. "!firevolume off/low/medium/high" .. E .. "  the fireplace crackle\n"
@@ -64,6 +79,7 @@ local CHAPTERS = {
       .. C .. "!view" .. E .. "  point your camera at your seat\n"
       .. C .. "!unstick" .. E .. "  clear a stuck pop-up\n"
       .. C .. "!import <link>" .. E .. "  import an Archidekt / Moxfield deck\n"
+      .. C .. "!format pdh" .. E .. " / " .. C .. "!format commander" .. E .. "  the format (between games)\n"
       .. C .. "!planechase" .. E .. "  Planechase help",
   } },
   { title = "Turn order", pages = {
@@ -97,6 +113,14 @@ local CHAPTERS = {
       .. "- If someone responds, their spell goes on top and gets its own round. Last in, first out.\n"
       .. "- After something resolves, the next item down gets a fresh round.\n\n"
       .. "(In a solo test game nobody else is asked: click RESOLVE.)",
+    "<b>Holding priority for a response</b>\n\n"
+      .. "Clicking " .. G .. "I HAVE A RESPONSE" .. E .. " gives you priority: nothing resolves and the turn doesn't move on until you act. "
+      .. "The turn strip shows RESPONSE? WAITING ON you.\n\n"
+      .. "- Put your spell or ability on the stack: everyone else is asked about it.\n"
+      .. "- Changed your mind: " .. G .. "NO RESPONSE AFTER ALL" .. E .. ".\n"
+      .. "- Someone is away: anyone can type " .. C .. "!forcepass" .. E .. ". The hold also ends by itself after 90 seconds.\n\n"
+      .. G .. "RESOLVE ALL" .. E .. " stops as soon as anyone says I HAVE A RESPONSE.\n\n"
+      .. "A triggered ability with no legal target is removed from the stack by itself.",
     "<b>Fizzling</b>\n\nAs a spell or ability resolves, its targets are checked again. A target is no longer legal if it left the battlefield "
       .. "(even if it came back: it's a new object), stopped being the right kind of thing, or gained hexproof, shroud or protection.\n\n"
       .. "- Some targets still legal: it only affects those.\n"
@@ -185,9 +209,53 @@ local CHAPTERS = {
       .. "UNPACK on the chest lays out the planar deck, the plane and the dice tower. The plane in play affects everyone.\n\n"
       .. "- On your turn, in a main phase with the stack empty, you may roll the planar die (drop it in the tower). "
       .. "The first roll each turn is free; each extra roll costs 1 more mana.\n"
-      .. "- " .. G .. "Blank" .. E .. ": nothing. " .. G .. "Chaos" .. E .. ": the plane's chaos ability. " .. G .. "Planeswalk" .. E .. ": move to the next plane.\n"
-      .. "- The active player controls the plane's abilities (\"you\" on a plane means them).\n"
-      .. "- " .. C .. "Phenomena" .. E .. " happen once, then you planeswalk away.",
+      .. "- " .. G .. "Blank" .. E .. ": nothing. " .. G .. "Chaos" .. E .. ": the plane's chaos ability goes on the stack. "
+      .. G .. "Planeswalk" .. E .. ": PLANESWALK goes on the stack; when it resolves you move to the next plane.\n"
+      .. "- The active player controls the planes (\"you\" on a plane means them).\n"
+      .. "- " .. C .. "Phenomena" .. E .. " happen once, then the table planeswalks away by itself.\n"
+      .. "- Right-click the plane > Planeswalk for cards that say \"planeswalk\".",
+    "<b>What the table does for you</b>\n\n"
+      .. "- Each plane's abilities go on the stack by themselves: chaos, planeswalking to and away, \"at the beginning of your upkeep\" "
+      .. "and the rest, \"whenever a player casts a spell / draws / taps a land\" and so on.\n"
+      .. "- Always-on effects apply: anthems (Krosa), keywords (Gavony), who can attack or block (Tazeem), untapping (The Eon Fog), "
+      .. "hand size, land drops, tokens and counters doubling, combat damage (Kessig, The Great Forest).\n"
+      .. "- " .. G .. "Counters on a plane" .. E .. " (Aretopolis, Pompeii...) show on the plane card.\n"
+      .. "- " .. C .. "Spatial Merging" .. E .. ": two planes side by side. Both count, chaos triggers both, the next planeswalk leaves both.\n"
+      .. "- Skybreen and Windriddle Palaces turn each library's top card face up beside it.",
+    "<b>Buttons on a plane card</b>\n\n"
+      .. "Some planes let everyone do something new: click the button on the plane, for yourself.\n\n"
+      .. G .. "UNEARTH" .. E .. " (Grixis), " .. G .. "FLASHBACK" .. E .. " (Otaria), " .. G .. "EMBALM" .. E .. " (Naktamun), "
+      .. G .. "ESCAPE" .. E .. " (Stormcage), " .. G .. "SCAVENGE" .. E .. " (The Cave of Skulls): pick a card from your graveyard.\n"
+      .. G .. "BLITZ" .. E .. " (The Caldaia), " .. G .. "SUSPEND" .. E .. " (Talon Gates), " .. G .. "FORETELL" .. E .. " (Singing Towers): "
+      .. "pick a card from your hand.\n"
+      .. G .. "CREW" .. E .. " (Ghirapur, New New York): tap creatures to make a Vehicle a creature.\n"
+      .. G .. "CONVOKE" .. E .. " (Ood Sphere): tap creatures for mana.\n\n"
+      .. "You pay the mana yourself, as for any spell. The table does the rest (haste, exiling afterwards, the token copy, sacrificing at the end step...).",
+    "<b>Phasing</b> (Unyaro, The Doctor's Childhood Barn)\n\n"
+      .. "A " .. C .. "phased-out" .. E .. " permanent turns grey and is treated as though it doesn't exist: it can't attack, block or be "
+      .. "targeted, sweepers and \"each creature\" skip it, it doesn't count, its abilities stop, and it doesn't untap. "
+      .. "Auras and Equipment on it phase out too. They phase back in when a player planeswalks.\n\n"
+      .. "<b>Still up to you</b>\n\n"
+      .. "- Paying mana costs.\n"
+      .. "- Playing a card from a revealed top card (Windriddle Palaces) or from exile (The Matrix of Time, Hotel of Fears): drag it.\n"
+      .. "- Choosing a new target for a copy as it resolves.",
+  } },
+  { title = "Pauper Commander", pages = {
+    "<b>Pauper Commander (PDH)</b>\n\n"
+      .. "Commander with common cards. Pick it in the START GAME panel (FORMAT: PAUPER COMMANDER) or type " .. C .. "!format pdh" .. E .. ".\n\n"
+      .. "<b>The deck</b>\n\n"
+      .. "- Your " .. G .. "commander" .. E .. " is an " .. C .. "uncommon" .. E .. " creature (or Vehicle or Spacecraft). It doesn't have to be legendary.\n"
+      .. "- The other 99 cards are " .. C .. "commons" .. E .. ".\n"
+      .. "- A card counts at a rarity if it was ever printed at that rarity on paper or on Magic Online. Arena-only printings don't count.\n"
+      .. "- One copy of each card except basic lands, and every card within your commander's colours, as in Commander.",
+    "<b>Playing Pauper Commander</b>\n\n"
+      .. "- " .. G .. "30 life" .. E .. " (the table sets it; 45 per team in Two-Headed Giant at this table).\n"
+      .. "- " .. G .. "16" .. E .. " combat damage from one commander and you lose (the table checks it).\n"
+      .. "- Everything else is as in Commander: the command zone, commander tax, the free first mulligan.\n\n"
+      .. "<b>Banned</b>\n\n"
+      .. "Rhystic Study, Mystic Remora, Conspiracy cards, cards that mention ante, and cards banned in every format.\n\n"
+      .. "PDH is run by the PDH Home Base committee; check their site for the current banned list. "
+      .. "The table doesn't check card rarity: build your deck to the rules.",
   } },
   { title = "Two-Headed Giant", pages = {
     "<b>Two-Headed Giant</b> (" .. C .. "!layout 2hg" .. E .. ")\n\n"
@@ -196,7 +264,11 @@ local CHAPTERS = {
       .. "- Teammates take their turn together and attack together.\n"
       .. "- The team that goes first skips its first draw.\n"
       .. "- Each attacking creature's damage goes to one player of the other team.\n"
-      .. "- If one player loses, their team loses. Commander damage still counts per player, per commander.",
+      .. "- If one player loses, their team loses. Commander damage still counts per player, per commander.\n\n"
+      .. "<b>Teams at this table</b>\n\n"
+      .. "- Teammates see each other's hands.\n"
+      .. "- A team shares priority: the other team gets one question, both of them see it and either can answer.\n"
+      .. "- Talk privately in the chat window's " .. G .. "Team" .. E .. " tab.",
   } },
 }
 
@@ -206,6 +278,7 @@ local KEYWORDS = {
   { "Afflict", "When it becomes blocked, the defending player loses that much life." },
   { "Annihilator", "When it attacks, the defending player sacrifices that many permanents." },
   { "Battle cry", "When it attacks, each other attacking creature gets +1/+0." },
+  { "Blitz", "Cast it for its blitz cost: haste, draws you a card when it dies, sacrificed at the next end step." },
   { "Cascade", "When you cast it, exile cards from the top of your library until a cheaper nonland card; you may cast that free, the rest go to the bottom." },
   { "Changeling", "It is every creature type." },
   { "Convoke", "Your creatures can help pay: tap one for {1} or one mana of its colour." },
@@ -214,14 +287,19 @@ local KEYWORDS = {
   { "Deathtouch", "Any damage it deals to a creature is enough to destroy it." },
   { "Defender", "Can't attack." },
   { "Delve", "Exile cards from your graveyard to pay {1} each." },
+  { "Demonstrate", "When you cast it, you may copy it; if you do, an opponent you choose copies it too." },
+  { "Devour", "As it enters, sacrifice any number of creatures; it gets that many +1/+1 counters for each." },
   { "Double strike", "Deals combat damage in both the first-strike and regular damage steps." },
+  { "Embalm", "Exile it from your graveyard and pay: create a token copy, a white Zombie. Sorcery speed." },
   { "Equip", "Attach this Equipment to a creature you control, any time you could cast a sorcery." },
+  { "Escape", "Cast it from your graveyard for its escape cost, exiling other cards from your graveyard." },
   { "Exalted", "Whenever a creature you control attacks alone, it gets +1/+1 for each exalted instance." },
   { "Fabricate", "When it enters, put that many +1/+1 counters on it or create that many 1/1 Servos." },
   { "First strike", "Deals combat damage before creatures without first strike." },
   { "Flash", "Can be cast any time you could cast an instant." },
   { "Flashback", "Cast it from your graveyard for its flashback cost, then exile it." },
   { "Flying", "Can only be blocked by creatures with flying or reach." },
+  { "Foretell", "Pay {2} and exile it face down from your hand; cast it on a later turn for its foretell cost." },
   { "Goad", "Until your next turn, it must attack each combat, and must attack a player other than you if it can." },
   { "Haste", "Can attack and tap the turn it comes under your control." },
   { "Hexproof", "Can't be the target of spells or abilities your opponents control." },
@@ -238,17 +316,22 @@ local KEYWORDS = {
   { "Ninjutsu", "Return an unblocked attacker you control to hand: put this onto the battlefield tapped and attacking." },
   { "Partner", "You can have two commanders if both have partner." },
   { "Persist", "When it dies without a -1/-1 counter, return it with a -1/-1 counter." },
-  { "Protection", "Protection from X: can't be Damaged, Enchanted/Equipped, Blocked or Targeted by X (DEBT)." },
+  { "Phasing", "Phased out: treated as though it doesn't exist until it phases back in." },
   { "Proliferate", "Choose any permanents and players with counters; give each one more of a kind it already has." },
+  { "Protection", "Protection from X: can't be Damaged, Enchanted/Equipped, Blocked or Targeted by X (DEBT)." },
   { "Reach", "Can block creatures with flying." },
+  { "Rebound", "Cast from your hand, it's exiled as it resolves; at your next upkeep you may cast it free." },
+  { "Scavenge", "Exile it from your graveyard and pay: +1/+1 counters equal to its power on target creature. Sorcery speed." },
   { "Scry", "Look at that many cards on top of your library; put any on the bottom, the rest back in any order." },
   { "Shroud", "Can't be the target of any spells or abilities (yours too)." },
   { "Split second", "While it's on the stack, players can't cast spells or activate abilities except mana abilities." },
   { "Storm", "When you cast it, copy it for each spell cast before it this turn." },
   { "Surveil", "Look at that many cards on top; put any into your graveyard, the rest back in any order." },
+  { "Suspend", "Exile it with time counters; remove one each upkeep; when the last goes, cast it free." },
   { "Toxic", "Combat damage it deals to a player also gives them that many poison counters." },
   { "Trample", "Combat damage beyond what's lethal to its blockers goes to the player or planeswalker." },
   { "Undying", "When it dies without a +1/+1 counter, return it with a +1/+1 counter." },
+  { "Unearth", "Return it from your graveyard to the battlefield with haste; exile it at the next end step or if it would leave." },
   { "Vigilance", "Attacking doesn't tap it." },
   { "Ward", "When an opponent targets it, their spell or ability is countered unless they pay the ward cost." },
   { "Wither", "Deals damage to creatures as -1/-1 counters." },
@@ -415,7 +498,7 @@ function Rulebook.xml()
         :format(c, i, c, i, (ch.title:gsub("&", "and"))))
     end
     table.insert(parts, ([[
-<Panel id="rulebook_%s" visibility="%s" active="false" width="880" height="600" color="#0B0F17F7" outline="#5AF0FF" outlineSize="2 2"
+<Panel id="rulebook_%s" visibility="%s" active="false" width="880" height="660" color="#0B0F17F7" outline="#5AF0FF" outlineSize="2 2"
        allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <HorizontalLayout padding="14 14 14 14" spacing="14" childForceExpandWidth="false">
     <VerticalLayout preferredWidth="220" spacing="5" childForceExpandHeight="false">
@@ -430,7 +513,7 @@ function Rulebook.xml()
     </VerticalLayout>
     <VerticalLayout preferredWidth="610" spacing="8" childForceExpandHeight="false">
       <Text id="rbTitle_%s" fontSize="22" fontStyle="Bold" color="#FFD15A" preferredHeight="34" alignment="MiddleLeft">-</Text>
-      <Text id="rbText_%s" fontSize="15" color="#E6F1FF" preferredHeight="458" alignment="UpperLeft">-</Text>
+      <Text id="rbText_%s" fontSize="15" color="#E6F1FF" preferredHeight="518" alignment="UpperLeft">-</Text>
       <HorizontalLayout spacing="8" preferredHeight="36" childForceExpandWidth="false">
         <Button onClick="ui_rulesPage(%s_prev)" preferredWidth="110" color="#1B2333">PREV</Button>
         <Text id="rbPage_%s" preferredWidth="370" fontSize="13" color="#8B98A9" alignment="MiddleCenter">-</Text>

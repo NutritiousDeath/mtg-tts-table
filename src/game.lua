@@ -152,13 +152,18 @@ function GameFlow.xml()
 
 <Panel id="startPanel"
        active="false"
-       width="560" height="350"
+       width="560" height="420"
        color="#0D1117F2"
        outline="#3B5BDB" outlineSize="2 2"
        allowDragging="true" returnToOriginalPositionWhenReleased="false">
   <VerticalLayout padding="16 16 16 16" spacing="10" childForceExpandHeight="false">
     <Text fontSize="22" fontStyle="Bold" alignment="MiddleLeft" preferredHeight="32">Start Game</Text>
     <Text fontSize="13" alignment="MiddleLeft" preferredHeight="36" color="#8B98A9">Every seated player with a deck joins. Cards in hands and on the battlefield, graveyard and exile go back into their owner's library; commanders return to the command zone. Life resets to 40.</Text>
+    <Text fontSize="15" alignment="MiddleLeft" preferredHeight="22">Format</Text>
+    <HorizontalLayout spacing="8" preferredHeight="40">
+      <Button id="format_commander" onClick="ui_setFormat(commander)" fontStyle="Bold" tooltip="Commander: 40 life, 21 commander damage">COMMANDER</Button>
+      <Button id="format_pdh" onClick="ui_setFormat(pdh)" fontStyle="Bold" tooltip="Pauper Commander: 30 life, 16 commander damage; uncommon commander, all other cards common">PAUPER COMMANDER</Button>
+    </HorizontalLayout>
     <Text fontSize="15" alignment="MiddleLeft" preferredHeight="22">Table layout</Text>
     <HorizontalLayout spacing="8" preferredHeight="40">
       <Button id="layout_four" onClick="ui_setLayout(four)" fontStyle="Bold" tooltip="Four players, one per side: White, Red, Green, Blue">4 PLAYERS</Button>
@@ -181,6 +186,9 @@ end
 -- Bring the panels in line with the saved state (after the XML is (re)built).
 function GameFlow.refreshUI()
   local s = setup()
+  local fmt = (GameState.data and GameState.data.table and GameState.data.table.format) or "commander"
+  UI.setAttribute("format_commander", "color", fmt == "commander" and ON or OFF)
+  UI.setAttribute("format_pdh", "color", fmt == "pdh" and ON or OFF)
   local cur = TableSetup.layout()
   for _, l in ipairs({ "four", "three", "two", "twohg" }) do
     UI.setAttribute("layout_" .. l, "color", l == cur and ON or OFF)
@@ -273,7 +281,7 @@ local function resetPlayer(color)
   local p = GameState.player(color)
   local f = GameState.format()
   -- Two-Headed Giant: each team shares 60 life (Commander's 40, times 1.5 like 2HG's 30 for 20).
-  p.life = (TableSetup.isTeamGame and TableSetup.isTeamGame()) and Trackers.TEAM_LIFE_2HG or f.startingLife
+  p.life = (TableSetup.isTeamGame and TableSetup.isTeamGame()) and (f.teamLife or Trackers.TEAM_LIFE_2HG) or f.startingLife
   p.poison = 0
   p.commanderDamage = {}
   p.eliminated = false
@@ -689,7 +697,7 @@ function GameFlow.switchLayout(color, layout)
   for _, c in ipairs(TableSetup.activeSeats()) do
     local p = GameState.player(c)
     if p then
-      p.life = (layout == "twohg") and Trackers.TEAM_LIFE_2HG or GameState.format().startingLife
+      p.life = (layout == "twohg") and (GameState.format().teamLife or Trackers.TEAM_LIFE_2HG) or GameState.format().startingLife
       p.poison = 0
     end
   end
@@ -716,6 +724,40 @@ function GameFlow.switchLayout(color, layout)
       .. " (" .. table.concat(TableSetup.activeSeats(), ", ") .. ")", { 0.7, 0.85, 1 })
   end
   return true
+end
+
+-- FORMAT: Commander or Pauper Commander (kept with the table). Not during a game: it sets everyone's life.
+function GameFlow.setFormat(color, fmt)
+  if GameState.FORMATS[fmt] == nil then
+    return
+  end
+  if GameState.data.started then
+    broadcastToColor("A game is running: change the format between games (NEW DECKS or !reset first).", color, WARN)
+    return
+  end
+  GameState.data.table = GameState.data.table or {}
+  GameState.data.table.format = fmt
+  local f = GameState.format()
+  local team = TableSetup.isTeamGame and TableSetup.isTeamGame()
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    local p = GameState.player(c)
+    if p then
+      p.life = team and (f.teamLife or Trackers.TEAM_LIFE_2HG) or f.startingLife
+    end
+  end
+  pcall(Trackers.ensureTableDisplay)
+  pcall(GameFlow.refreshUI)
+  broadcastToAll("Format: " .. f.label .. " (" .. (team and (f.teamLife .. " team life") or (f.startingLife .. " life")) .. ", "
+    .. f.commanderDamageLethal .. " commander damage). " .. (fmt == "pdh" and "Commander: an uncommon creature; every other card"
+    .. " common. See the RULES book, Pauper Commander." or ""), { 0.7, 0.85, 1 })
+end
+
+function ui_setFormat(player, fmt)
+  local c = player.color
+  if c == nil or c == "Grey" or c == "Black" then
+    return
+  end
+  GameFlow.setFormat(c, fmt)
 end
 
 -- NEW DECKS: end the game and clear every seat's cards (decks, hands, battlefield, graveyards, exile,

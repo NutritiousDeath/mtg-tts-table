@@ -38,7 +38,11 @@
 Trackers = {}
 
 local POISON_LETHAL = 10
-local COMMANDER_LETHAL = 21
+local COMMANDER_LETHAL = 21   -- Commander; Pauper Commander uses 16 (GameState.format())
+local function cmdLethal()
+  local f = GameState.format and GameState.format()
+  return (f and f.commanderDamageLethal) or COMMANDER_LETHAL
+end
 -- Two-Headed Giant (CR 810): a team shares one life total and one poison count; 15 poison kills the team.
 -- Commander version used here: 60 team life, 15 team poison, 21 damage from one commander to one player.
 local POISON_LETHAL_2HG = 15
@@ -158,8 +162,8 @@ local function lossReason(p)
     return poisonLethal() .. " poison"
   end
   for key, dmg in pairs(p.commanderDamage) do
-    if dmg >= COMMANDER_LETHAL then
-      return COMMANDER_LETHAL .. " commander damage from " .. commanderLabel(key)
+    if dmg >= cmdLethal() then
+      return cmdLethal() .. " commander damage from " .. commanderLabel(key)
     end
   end
   return nil
@@ -755,7 +759,7 @@ function Trackers.render(color)
       local tip = "Commander damage from " .. c.name .. " (" .. c.seat .. "): click +1, right-click -1"
       local click = handler(key .. "cmd" .. i,
         function(pc, alt) Trackers.changeCommanderDamage(color, c.key, alt and -1 or 1, pc) end)
-      local fontColor = dmg >= COMMANDER_LETHAL - 5 and WARN or INK
+      local fontColor = dmg >= cmdLethal() - 5 and WARN or INK
       if col == 1 then
         outlined(tile, tostring(dmg), CROWN_X[1], z, 280, fontColor, click, tip, 640, 560)
       else

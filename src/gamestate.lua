@@ -67,6 +67,19 @@ GameState.FORMATS = {
     poisonLethal = 10,
     commanderDamageLethal = 21,
     freeFirstMulligan = true,
+    teamLife = 60,
+    label = "Commander",
+  },
+  -- Pauper Commander (PDH Home Base rules): 30 life, 16 commander damage.
+  pdh = {
+    startingLife = 30,
+    deckSize = 100,
+    handSize = 7,
+    poisonLethal = 10,
+    commanderDamageLethal = 16,
+    freeFirstMulligan = true,
+    teamLife = 45,
+    label = "Pauper Commander",
   },
 }
 
@@ -115,8 +128,11 @@ function GameState.new(formatName)
   return data
 end
 
+-- The format chosen in the START GAME panel (kept with the table, so a reset or a new game keeps it).
 function GameState.format()
-  return GameState.FORMATS[GameState.data.format]
+  local d = GameState.data or {}
+  local pick = d.table and d.table.format
+  return GameState.FORMATS[pick or d.format] or GameState.FORMATS.commander
 end
 
 function GameState.player(color)

@@ -127,7 +127,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.69 (Planechase final: crew, convoke, rebound, demonstrate, cascade, Nyx, Glimmervoid, full copy)"
+SCRIPT_VERSION = "2.70 (rules book updated; Pauper Commander format)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -817,6 +817,21 @@ function onChat(message, sender)
       print("MTG > Take a seat in the current layout first: " .. table.concat(TableSetup.activeSeats(), ", "))
     end
     return false
+  end
+
+  -- "!format pdh" / "!format commander": Pauper Commander or Commander (also in the START GAME panel).
+  do
+    local fm = message:lower():match("^%s*!format%s*(%a*)%s*$")
+    if fm then
+      local key = (fm == "pdh" or fm == "pauper") and "pdh" or (fm == "commander" or fm == "edh") and "commander" or nil
+      if key == nil then
+        broadcastToColor("Formats: !format commander (40 life, 21 commander damage), !format pdh (Pauper Commander: 30 life, 16).",
+          sender.color, { 1, 0.6, 0.2 })
+      else
+        GameFlow.setFormat(sender.color, key)
+      end
+      return false
+    end
   end
 
   -- Any case and spacing: "!layout 2HG", "!Layout 2hg ", "!layout 4".
