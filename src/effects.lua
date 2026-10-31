@@ -8131,6 +8131,10 @@ end
 Effects.cardTypes = cardTypes
 
 local function fieldSeat(obj)
+  -- Phased out (Unyaro, The Doctor's Childhood Barn): treated as though it doesn't exist.
+  if PlaneFx and PlaneFx.isPhased and PlaneFx.isPhased(obj) then
+    return nil
+  end
   local loc = Zones.regionAt(obj.getPosition())
   if loc.region == "battlefield" or loc.region == "lands" then
     return loc.seat

@@ -1116,7 +1116,8 @@ end
 local function permanents()
   local list = {}
   for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
-    if obj.type == "Card" and not Faces.unknown(obj) and obj.held_by_color == nil then
+    if obj.type == "Card" and not Faces.unknown(obj) and obj.held_by_color == nil
+        and not (PlaneFx and PlaneFx.isPhased and PlaneFx.isPhased(obj)) then
       local loc = Zones.regionAt(obj.getPosition())
       if loc.seat and (loc.region == "battlefield" or loc.region == "lands") then
         table.insert(list, { obj = obj, controller = loc.seat })

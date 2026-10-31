@@ -420,20 +420,97 @@ local function whileWalk(key)
   return st().untilWalk and st().untilWalk[key]
 end
 
+---------------------------------------------------------------------------
+-- Phasing (Unyaro, The Doctor's Childhood Barn). A phased-out permanent stays where it is but is treated as
+-- though it doesn't exist (CR 702.26): it isn't on the battlefield for targeting, counting, sweepers, static
+-- abilities or triggers; it can't attack or block; it doesn't untap. It's shown greyed out and can't be
+-- picked up. Auras and Equipment attached to it phase out with it. Both planes phase them back in when a
+-- player planeswalks.
+---------------------------------------------------------------------------
+
+local PHASE_TINT = { 0.28, 0.3, 0.36 }
+
+function PlaneFx.isPhased(obj)
+  local d = GameState.data and GameState.data.planefx
+  if d == nil or d.phasedSet == nil or obj == nil then
+    return false
+  end
+  local ok, g = pcall(function() return obj.getGUID() end)
+  return ok and d.phasedSet[g] == true
+end
+
+local function showPhased(o, out)
+  pcall(function()
+    if out then
+      o.setColorTint(PHASE_TINT)
+      o.setLock(true)
+      o.interactable = false
+    else
+      o.setColorTint({ 1, 1, 1 })
+      o.interactable = true
+      o.setLock(false)
+    end
+  end)
+end
+
+local function phaseOut(obj, why)
+  if obj == nil or obj.isDestroyed() or PlaneFx.isPhased(obj) then
+    return
+  end
+  local s = st()
+  s.phasedSet = s.phasedSet or {}
+  local list = { obj }
+  -- Indirectly: what's attached to it goes too.
+  if Equip and Equip.attachments then
+    local okA, atts = pcall(Equip.attachments, obj)
+    for _, a in ipairs(okA and atts or {}) do
+      table.insert(list, a)
+    end
+  end
+  for _, o in ipairs(list) do
+    s.phasedSet[o.getGUID()] = true
+    showPhased(o, true)
+  end
+  if Statics and Statics.soon then
+    Statics.soon()
+  end
+end
+
+local function phaseInAll()
+  local s = st()
+  local n = 0
+  for g in pairs(s.phasedSet or {}) do
+    local o = getObjectFromGUID(g)
+    if o and not o.isDestroyed() then
+      showPhased(o, false)
+      n = n + 1
+    end
+  end
+  s.phasedSet = {}
+  if n > 0 then
+    printToAll("MTG > " .. n .. " phased-out permanent" .. (n == 1 and "" or "s") .. " phase back in.", GOOD)
+    if Statics and Statics.soon then
+      Statics.soon()
+    end
+  end
+end
+
+-- After a load: phased-out permanents keep their look.
+Wait.time(function()
+  local d = GameState.data and GameState.data.planefx
+  for g in pairs(d and d.phasedSet or {}) do
+    local o = getObjectFromGUID(g)
+    if o then
+      showPhased(o, true)
+    end
+  end
+end, 3)
+
 function PlaneFx.onPlaneswalk(leavingName)
   local s = st()
   s.untilWalk = {}
-  -- The Doctor's Childhood Barn: its phased-out permanents come back.
-  if s.phased and #s.phased > 0 then
-    for _, g in ipairs(s.phased) do
-      local o = getObjectFromGUID(g)
-      if o then
-        pcall(function() o.setInvisibleTo({}) end)
-      end
-    end
-    printToAll("MTG > The permanents that phased out phase back in.", GOOD)
-    s.phased = {}
-  end
+  -- Unyaro / The Doctor's Childhood Barn: everything phased out phases back in.
+  phaseInAll()
 end
 
 ---------------------------------------------------------------------------
@@ -1683,8 +1760,17 @@ end)
 on("Unyaro", "if you planeswalked to unyaro this turn, untap all creatures", function(it, seat)
   local s = st()
   if s.arrived and s.arrived["Unyaro"] == turnNo() then
-    run(it, seat, "untap all creatures.")
-    say(it.name, "all creatures untap; they phase out until a player planeswalks (they don't take part until then).", CYAN)
+    local list = field(function(o) return isCreature(o) end)
+    for _, e in ipairs(list) do
+      Effects.untapObj(e.obj)
+    end
+    Wait.time(function()
+      for _, e in ipairs(list) do
+        phaseOut(e.obj)
+      end
+    end, 0.8)
+    say(it.name, #list .. " creature" .. (#list == 1 and "" or "s") .. " untap and phase out until a player planeswalks (greyed"
+      .. " out: they're treated as though they don't exist).", CYAN)
   else
     say(it.name, "you didn't planeswalk to Unyaro this turn: nothing happens.", INFO)
   end
@@ -2289,19 +2375,15 @@ end)
 
 -- The Doctor's Childhood Barn
 on("The Doctor's Childhood Barn", "for each opponent, choose up to one target nonland permanent that opponent controls", function(it, seat)
-  local s = st()
-  s.phased = s.phased or {}
   each(opps(seat), function(c, nxt)
     pick(seat, it, "phase out (" .. c .. ")", "Click TARGET on a nonland permanent " .. c .. " controls, or SKIP.", function(obj, owner)
       return owner == c and not types(obj).land
     end, function(obj)
       if obj then
         Effects.untapObj(obj)
-        table.insert(s.phased, obj.getGUID())
-        Wait.time(function()
-          pcall(function() obj.setInvisibleTo({ "White", "Red", "Green", "Blue", "Grey", "Black" }) end)
-        end, 0.6)
-        say(it.name, obj.getName() .. " untaps and phases out until a player planeswalks (it's treated as though it doesn't exist).")
+        Wait.time(function() phaseOut(obj) end, 0.8)
+        say(it.name, obj.getName() .. " untaps and phases out until a player planeswalks (greyed out: it's treated as though"
+          .. " it doesn't exist).")
       end
       nxt()
     end)
@@ -3035,6 +3117,9 @@ if Statics then
   Statics.cantAttack = function(card)
     local s = st()
     local g = card and card.getGUID()
+    if PlaneFx.isPhased(card) then
+      return "phased out"
+    end
     if g and (s.detained or {})[g] then
       return "detained (Stormcage Containment Facility)"
     end
@@ -3055,6 +3140,12 @@ if Statics then
   local origCantBlock = Statics.cantBlock
   Statics.cantBlock = function(blocker, attacker)
     local s = st()
+    if PlaneFx.isPhased(blocker) then
+      return blocker.getName() .. " is phased out"
+    end
+    if attacker and PlaneFx.isPhased(attacker) then
+      return attacker.getName() .. " is phased out"
+    end
     if blocker and (s.detained or {})[blocker.getGUID()] then
       return blocker.getName() .. " is detained (Stormcage Containment Facility)"
     end
@@ -3132,6 +3223,15 @@ end
 if Actions and Actions.untapAll then
   local origUntap = Actions.untapAll
   Actions.untapAll = function(color, quiet)
+    -- Phased-out permanents don't untap.
+    if Actions.setSkipUntap then
+      for g in pairs(st().phasedSet or {}) do
+        local o = getObjectFromGUID(g)
+        if o and not o.isDestroyed() and Zones.regionAt(o.getPosition()).seat == color then
+          pcall(Actions.setSkipUntap, o, true, "phased out")
+        end
+      end
+    end
     local up = planesUp()
     if up["Edge of Malacol"] and color == planarSeat() and Actions.setSkipUntap then
       local s = TableSetup.seat(color)

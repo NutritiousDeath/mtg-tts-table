@@ -61,7 +61,8 @@ end
 local function perms()
   local list = {}
   for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
-    if obj.type == "Card" and not obj.isDestroyed() and obj.held_by_color == nil and not (Faces and Faces.unknown(obj)) then
+    if obj.type == "Card" and not obj.isDestroyed() and obj.held_by_color == nil and not (Faces and Faces.unknown(obj))
+        and not (PlaneFx and PlaneFx.isPhased and PlaneFx.isPhased(obj)) then
       local loc = Zones.regionAt(obj.getPosition())
       if loc.seat and IN[loc.region] then
         local d = dataOf(obj)

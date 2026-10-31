@@ -127,7 +127,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.66 (Planechase: every plane and Phenomenon automated)"
+SCRIPT_VERSION = "2.67 (phasing: Unyaro, The Doctor's Childhood Barn)"
 
 function onLoad(saved)
   GameLog.setup()
