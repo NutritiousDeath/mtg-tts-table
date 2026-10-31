@@ -127,7 +127,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.71 (MTG Errors notebook tab)"
+SCRIPT_VERSION = "2.72 (rules book: commander damage, smarter search)"
 
 function onLoad(saved)
   GameLog.setup()

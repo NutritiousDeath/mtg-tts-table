@@ -169,15 +169,17 @@ local CHAPTERS = {
       .. "- If your commander would go to your graveyard or exile, you may put it back in the command zone (the table asks). "
       .. "Its \"dies\" triggers still happen.\n"
       .. "- If it would go to your hand or library, you may put it in the command zone instead (the table asks first).\n\n"
-      .. "<b>Commander damage</b>\n\n"
-      .. "21 or more " .. C .. "combat" .. E .. " damage from a single commander and you lose. Each commander counts separately; it's the crowns on your tracker.",
+      .. "<b>Commander damage (lethal at 21)</b>\n\n"
+      .. "21 or more " .. C .. "combat" .. E .. " damage from a single commander and you lose, even with life left (16 in Pauper Commander). "
+      .. "Each commander counts separately, and partners count separately too; it's the crowns on your tracker. "
+      .. "Only combat damage counts. The table flags the loss itself.",
   } },
   { title = "Winning and losing", pages = {
     "<b>You lose when</b>\n\n"
       .. "- your life is 0 or less,\n"
       .. "- you'd draw from an empty library,\n"
       .. "- you have 10 or more poison counters (15 for a 2HG team),\n"
-      .. "- 21 or more combat damage from one commander,\n"
+      .. "- 21 or more combat damage from one commander (lethal commander damage; 16 in Pauper Commander),\n"
       .. "- a card says so, or you concede.\n\n"
       .. "The table flags a loss on your tracker: " .. G .. "Confirm loss" .. E .. ", or " .. G .. "Dismiss" .. E .. " if something stops it (a replacement effect). "
       .. "Conceding can't be stopped. Type " .. C .. "!concede" .. E .. " or use TURN OPTIONS.",
@@ -281,6 +283,8 @@ local KEYWORDS = {
   { "Blitz", "Cast it for its blitz cost: haste, draws you a card when it dies, sacrificed at the next end step." },
   { "Cascade", "When you cast it, exile cards from the top of your library until a cheaper nonland card; you may cast that free, the rest go to the bottom." },
   { "Changeling", "It is every creature type." },
+  { "Commander damage", "Lethal: 21 or more combat damage from one commander and that player loses, even with life left (16 in Pauper Commander). Counted per commander; the crowns on the tracker." },
+  { "Commander tax", "Casting your commander from the command zone costs {2} more for each earlier time this game (the tax tile above the command zone)." },
   { "Convoke", "Your creatures can help pay: tap one for {1} or one mana of its colour." },
   { "Crew", "Tap creatures with that much total power: this Vehicle becomes a creature until end of turn." },
   { "Cycling", "Pay the cost, discard it: draw a card." },
@@ -452,14 +456,33 @@ function ui_rulesFind(player)
     return
   end
   local lq = q:lower()
+  -- Several words ("lethal commander damage"): a match has every word, in any order. Tiny words don't count.
+  local words = {}
+  for w in lq:gmatch("[%w%-']+") do
+    if #w >= 3 and w ~= "the" and w ~= "and" then
+      table.insert(words, w)
+    end
+  end
+  if #words == 0 then
+    words = { lq }
+  end
+  local function has(text)
+    local t = text:lower()
+    for _, w in ipairs(words) do
+      if not t:find(w, 1, true) then
+        return false
+      end
+    end
+    return true
+  end
   local out = {}
   for _, k in ipairs(KEYWORDS) do
-    if k[1]:lower():find(lq, 1, true) then
+    if has(k[1]) then
       table.insert(out, G .. k[1] .. E .. ": " .. k[2])
     end
   end
   for _, k in ipairs(KEYWORDS) do
-    if not k[1]:lower():find(lq, 1, true) and k[2]:lower():find(lq, 1, true) and #out < 8 then
+    if not has(k[1]) and has(k[1] .. " " .. k[2]) and #out < 8 then
       table.insert(out, G .. k[1] .. E .. ": " .. k[2])
     end
   end
@@ -467,7 +490,7 @@ function ui_rulesFind(player)
   for ci, ch in ipairs(CHAPTERS) do
     if ch.title ~= "Keywords A-Z" then
       for pi, pg in ipairs(ch.pages) do
-        if plain(pg):lower():find(lq, 1, true) then
+        if has(plain(pg)) then
           table.insert(where, ch.title .. " (page " .. pi .. ")")
         end
       end
