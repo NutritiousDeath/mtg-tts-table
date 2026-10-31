@@ -144,6 +144,78 @@ function GameLog.clearErrors()
   writeErrors()
 end
 
+---------------------------------------------------------------------------
+-- "MTG By Hand": every time the table tells someone to do something themselves ("resolve it by hand",
+-- "do this part yourself", "the table can't watch for this"), the line goes in a third Notebook tab with
+-- the time, version, turn and whose turn it is. After a game it's the list of what to automate next.
+-- !byhandclear empties it. Same message to several seats (2HG teammates) within 3 seconds = one line.
+---------------------------------------------------------------------------
+
+local HAND_TITLE = "MTG By Hand"
+local MAX_HAND = 500
+local handLines = nil
+local lastHand, lastHandAt = nil, -100
+
+-- Plain finds only (TTS's Lua chokes on fancy patterns over long text).
+local HAND_WORDS = { "by hand", "yourself", "can't watch", "cannot watch", "can't track", "not automated",
+  "isn't automated", "can't automate", "wasn't found", "couldn't tell", "no rules text" }
+
+function GameLog.isByHand(msg)
+  if type(msg) ~= "string" then
+    return false
+  end
+  local low = msg:lower()
+  for _, w in ipairs(HAND_WORDS) do
+    if low:find(w, 1, true) then
+      return true
+    end
+  end
+  return false
+end
+
+local function writeHand()
+  local body = table.concat(handLines or {}, "\n")
+  pcall(function()
+    for _, tab in ipairs(Notes.getNotebookTabs() or {}) do
+      if tab.title == HAND_TITLE then
+        Notes.editNotebookTab({ index = tab.index, title = HAND_TITLE, body = body, color = "Orange" })
+        return
+      end
+    end
+    Notes.addNotebookTab({ title = HAND_TITLE, body = body, color = "Orange" })
+  end)
+end
+
+function GameLog.byHand(msg)
+  local now = (Time and Time.time) or 0
+  if msg == lastHand and now - lastHandAt < 3 then
+    return
+  end
+  lastHand, lastHandAt = msg, now
+  if handLines == nil then
+    handLines = readTab(HAND_TITLE)
+  end
+  local t = GameState and GameState.data and GameState.data.turn or {}
+  table.insert(handLines, stamp() .. " v" .. tostring(SCRIPT_VERSION or "?"):match("^[%d%.]+") .. " turn "
+    .. tostring(t.number or "-") .. " " .. tostring(t.activeSeat or "-") .. ": " .. tostring(msg))
+  while #handLines > MAX_HAND do
+    table.remove(handLines, 1)
+  end
+  writeHand()
+end
+
+function GameLog.clearByHand()
+  handLines = {}
+  lastHand = nil
+  writeHand()
+end
+
+local function noteHand(msg)
+  if GameLog.isByHand(msg) then
+    pcall(GameLog.byHand, msg)
+  end
+end
+
 function GameLog.clear()
   lines = {}
   GameLog.add("LOG", "log cleared")
@@ -179,10 +251,12 @@ local function wrapChat()
   local bAll, pAll, bColor, pColor = broadcastToAll, printToAll, broadcastToColor, printToColor
   broadcastToAll = function(msg, ...)
     GameLog.add("MSG", msg)
+    noteHand(msg)
     return bAll(msg, ...)
   end
   printToAll = function(msg, ...)
     GameLog.add("MSG", msg)
+    noteHand(msg)
     return pAll(msg, ...)
   end
   -- TTS errors on a private message to an empty seat (solo tests play seats
@@ -193,6 +267,7 @@ local function wrapChat()
   end
   broadcastToColor = function(msg, color, ...)
     GameLog.add("TO " .. tostring(color), msg)
+    noteHand(msg)
     if not seated(color) then
       return bAll(msg, ...)
     end
@@ -200,6 +275,7 @@ local function wrapChat()
   end
   printToColor = function(msg, color, ...)
     GameLog.add("TO " .. tostring(color), msg)
+    noteHand(msg)
     if not seated(color) then
       return pAll(msg, ...)
     end

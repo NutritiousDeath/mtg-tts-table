@@ -68,7 +68,9 @@ local CHAPTERS = {
       .. "- Your camera is under or outside the table: " .. C .. "!view" .. E .. ".\n"
       .. "- Which version is loaded, and which seat you are: " .. C .. "!seats" .. E .. ".\n"
       .. "- A pop-up nobody can answer: " .. C .. "!unstick" .. E .. ".\n"
-      .. "- Script errors to report: " .. C .. "!errors" .. E .. ".",
+      .. "- Script errors to report: " .. C .. "!errors" .. E .. ".\n"
+      .. "- Everything the table asked you to do by hand is kept in the Notebook tab MTG By Hand ("
+      .. C .. "!byhandclear" .. E .. " empties it).",
     "<b>Handy chat commands</b>\n\n"
       .. C .. "!concede" .. E .. "  leave the game (asks first)\n"
       .. C .. "!firevolume off/low/medium/high" .. E .. "  the fireplace crackle\n"

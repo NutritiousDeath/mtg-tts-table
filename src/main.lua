@@ -22,6 +22,7 @@
     !firevolume off|low|medium|high  the fireplace crackle for the whole table (also in TURN OPTIONS)
     !concede     leave the game (asks first; your cards go into a bag at your seat)
     !errors         list the last script errors (copy them and send them over)
+    !byhandclear    empty the "MTG By Hand" Notebook tab
     !unstick        clear stuck pop-ups / search panels / triggers (!unstick stack also empties the stack)
     !seat <Color>   take a free seat (after a disconnect); !resync refreshes your panels
     !stack on/off   token piles: identical plain tokens share one card (xN badge); !stack merge / !stack unstack
@@ -127,7 +128,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.72 (rules book: commander damage, smarter search)"
+SCRIPT_VERSION = "2.73 (MTG By Hand notebook tab)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -563,6 +564,14 @@ function onChat(message, sender)
       GameLog.clearErrors()
     end
     broadcastToColor("The \"MTG Errors\" Notebook tab is empty again.", sender.color, { 0.7, 0.85, 1 })
+    return false
+  end
+
+  if message == "!byhandclear" then
+    if GameLog and GameLog.clearByHand then
+      GameLog.clearByHand()
+    end
+    broadcastToColor("The \"MTG By Hand\" Notebook tab is empty again.", sender.color, { 0.7, 0.85, 1 })
     return false
   end
 
