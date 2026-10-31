@@ -410,7 +410,7 @@ function Statics.forgeMatches(filter, q, src)
       elseif tok == "you" then
         ok = q.seat == src.seat
       elseif tok == "opp" then
-        ok = q.seat ~= src.seat
+        ok = TableSetup.isOpponent(q.seat, src.seat)
       elseif tok == "other" then
         ok = q.obj ~= src.obj
       elseif tok == "self" then
@@ -454,6 +454,7 @@ end
 -- "All Slivers get +1/+1" -> "all". Plain searches only (TTS gives up on lazy patterns over long text).
 local function parseAnthem(line)
   local forms = { { " you control get ", "mine" }, { " you control gets ", "mine" },
+    { " your team controls get ", "team" }, { " your team controls gets ", "team" },
     { " your opponents control get ", "opps" }, { " your opponents control gets ", "opps" },
     { " get ", "all" }, { " gets ", "all" } }
   for _, f in ipairs(forms) do
@@ -619,7 +620,7 @@ function Statics.compute()
             subj = subj:sub(5)
           end
           for _, q in ipairs(list) do
-            local sideOk = (scope == "all") or (scope == "mine" and q.seat == p.seat) or (scope == "opps" and q.seat ~= p.seat and TableSetup.isOpponent(q.seat, p.seat))
+            local sideOk = (scope == "all") or (scope == "mine" and q.seat == p.seat) or (scope == "team" and TableSetup.sameTeam(q.seat, p.seat)) or (scope == "opps" and q.seat ~= p.seat and TableSetup.isOpponent(q.seat, p.seat))
             if sideOk and subjectMatches(subj, q, p) then
               add(q, tonumber(x), tonumber(y))
             end
@@ -758,10 +759,12 @@ function Statics.counterAmount(obj, kind, n, putter)
           elseif not s:find("permanent", 1, true) and s:find("creature", 1, true) then
             ok = ok and isCreature
           end
-          if s:find("you control", 1, true) then
+          if s:find("your team controls", 1, true) then
+            ok = ok and TableSetup.sameTeam(owner, p.seat)
+          elseif s:find("you control", 1, true) then
             ok = ok and owner ~= nil and owner == p.seat
           elseif s:find("an opponent would", 1, true) then
-            ok = ok and putter ~= nil and putter ~= p.seat
+            ok = ok and putter ~= nil and TableSetup.isOpponent(putter, p.seat)
           elseif s:find("if you would", 1, true) then
             ok = ok and (putter or owner) == p.seat
           end
@@ -817,7 +820,7 @@ function Statics.replacers(kind, subject)
           local ok = true
           if kind ~= "damage" then
             if s:find("an opponent would", 1, true) then
-              ok = subject ~= nil and subject ~= p.seat
+              ok = subject ~= nil and TableSetup.isOpponent(subject, p.seat)
             elseif s:find("if you would", 1, true) then
               ok = subject == p.seat
             end
@@ -948,7 +951,8 @@ local function parseGrantLine(line)
   if first == "when" or line:sub(1, 3) == "at " or line:sub(1, 3) == "if " or line:sub(1, 4) == "{t}:" then
     return nil
   end
-  local forms = { { " you control have ", "mine" }, { " you control has ", "mine" } }
+  local forms = { { " you control have ", "mine" }, { " you control has ", "mine" },
+    { " your team controls have ", "team" }, { " your team controls has ", "team" } }
   if line:sub(1, 4) == "all " or line:sub(1, 5) == "each " then
     table.insert(forms, { " have ", "all" })
     table.insert(forms, { " has ", "all" })
@@ -1101,7 +1105,7 @@ function Statics.grants(obj)
     end
   end
   for _, g in ipairs(srcs) do
-    local sideOk = g.scope == "all" or g.seat == loc.seat
+    local sideOk = g.scope == "all" or g.seat == loc.seat or (g.scope == "team" and TableSetup.sameTeam(g.seat, loc.seat))
     local fits
     if g.forge then
       fits = Statics.forgeMatches(g.forge, q, { obj = g.obj, seat = g.seat })
@@ -1287,6 +1291,8 @@ function Statics.othersEnterTapped(card, seat)
           local scopeOk = true
           if subj:find("your opponents control", 1, true) or subj:find("an opponent controls", 1, true) then
             scopeOk = seat ~= nil and TableSetup.isOpponent(seat, p.seat)
+          elseif subj:find("your team controls", 1, true) then
+            scopeOk = TableSetup.sameTeam(seat, p.seat)
           elseif subj:find("you control", 1, true) then
             scopeOk = seat == p.seat
           end
@@ -1442,7 +1448,7 @@ function Statics.costChange(card, caster)
   local n, from = 0, {}
   local function use(e, src)
     local w = e.f.w
-    if (w == "you" and caster ~= src.seat) or (w == "opp" and caster == src.seat) then
+    if (w == "you" and caster ~= src.seat) or (w == "opp" and not TableSetup.isOpponent(caster, src.seat)) then
       return
     end
     if Statics.forgeMatches(e.f.f, q, src) then
@@ -1541,7 +1547,7 @@ function Statics.mustAttack(card)
 end
 
 local function whoFits(w, actor, srcSeat)
-  return w == "all" or (w == "you" and actor == srcSeat) or (w == "opp" and actor ~= srcSeat)
+  return w == "all" or (w == "you" and actor == srcSeat) or (w == "opp" and TableSetup.isOpponent(actor, srcSeat))
 end
 
 -- "Your opponents can't cast creature spells": the permanent that says so, or nil.

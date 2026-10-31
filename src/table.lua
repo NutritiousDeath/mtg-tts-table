@@ -250,6 +250,18 @@ function TableSetup.isOpponent(a, b)
   return ta == nil or ta ~= TableSetup.teamOf(b)
 end
 
+-- Same team: the same seat, or 2HG teammates ("your team" on Battlebond cards).
+function TableSetup.sameTeam(a, b)
+  if a == nil or b == nil then
+    return false
+  end
+  if a == b then
+    return true
+  end
+  local ta = TableSetup.teamOf(a)
+  return ta ~= nil and ta == TableSetup.teamOf(b)
+end
+
 -- The other player on a seat's team (2HG), or nil.
 function TableSetup.teammate(color)
   local team = TableSetup.teamOf(color)

@@ -126,7 +126,15 @@ local function normalize(text, name)
     t = t:gsub("this " .. w, "~")
   end
   t = t:gsub("enters the battlefield", "enters")
+  -- Battlebond "your team": read as "you", and the trigger is marked team = true (see ours()).
+  t = t:gsub("your team controls", "you control"):gsub("your team control", "you control")
+    :gsub("your team attacks", "you attack"):gsub("your team", "you")
   return t
+end
+
+-- Is seat "you" for a trigger? The controller, or (team = true, "your team") their 2HG teammate.
+local function ours(t, seat, controller)
+  return seat == controller or (t ~= nil and t.team == true and TableSetup.sameTeam(seat, controller))
 end
 
 -- Card type words used in trigger subjects.
@@ -869,11 +877,24 @@ local function abilitiesOf(obj)
       -- Forge's data first (a card's own printed paragraphs); the rules text otherwise.
       local fromForge = forgeMap[pi]
       if fromForge then
+        local teamF = para:lower():find("your team", 1, true) ~= nil
         for _, ft in ipairs(fromForge) do
+          if teamF then
+            local cp = {}
+            for k, v in pairs(ft) do
+              cp[k] = v
+            end
+            cp.team = true
+            ft = cp
+          end
           table.insert(list, { trig = ft, text = para, harness = harness, forge = true })
         end
       else
         local trig = parseTrigger(norm)
+        local team = para:lower():find("your team", 1, true) ~= nil
+        if trig and team then
+          trig.team = true
+        end
         if norm:find("whenever you play a land or cast a spell", 1, true) then
           table.insert(list, { trig = { kind = "enters", subject = "land", subjects = { "land" }, mine = true, playedOnly = true }, text = para })
           trig = { kind = "cast", who = "you" }
@@ -882,6 +903,9 @@ local function abilitiesOf(obj)
           table.insert(list, { trig = trig, text = para, harness = harness })
         end
         for _, ct in ipairs(parseCombat(norm)) do
+          if team then
+            ct.team = true
+          end
           table.insert(list, { trig = ct, text = para, harness = harness })
         end
       end
@@ -947,6 +971,14 @@ local function abilitiesOf(obj)
   end
   if lw then
     table.insert(list, { trig = { kind = "enters", self = true }, text = LIVING_WEAPON_TEXT })
+  end
+  -- "Partner with <name>": when it enters, target player may put <name> into their hand from their
+  -- library, then shuffle (effects.lua Effects.partnerWith).
+  for _, para in ipairs(stripped) do
+    local nm = para:match("^[Pp]artner with ([^\n]+)$")
+    if nm then
+      table.insert(list, { trig = { kind = "enters", self = true }, text = "Partner with " .. nm, partnerWith = nm })
+    end
   end
   -- Exalted given by other permanents (First Sliver's Chosen): one trigger per instance.
   if given ~= "" then
@@ -1634,7 +1666,7 @@ Events.on("cardMoved", function(d)
       for _, a in ipairs(abilitiesOf(p.obj)) do
         local t = a.trig
         if t.kind == "draw" then
-          local mine = p.controller == d.to.seat
+          local mine = ours(t, d.to.seat, p.controller)
           local oppOf = d.to.seat
           local nthOk = true
           if t.nth then
@@ -1704,7 +1736,7 @@ Events.on("cardMoved", function(d)
                 local st = Counters.stats(card)
                 return (tonumber(st.power) or 0) >= (t.powerMin or -99) and (tonumber(st.toughness) or 0) >= (t.toughMin or -99)
               end)())
-              and not (t.mine and cardController ~= p.controller)
+              and not (t.mine and not ours(t, cardController, p.controller))
               and not (t.theirs and not TableSetup.isOpponent(cardController, p.controller)) then
             table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
           end
@@ -1751,10 +1783,10 @@ function Triggers.onTargeted(obj, bySeat)
     if p.obj ~= obj then
       for _, a in ipairs(abilitiesOf(p.obj)) do
         local tr = a.trig
-        if tr.kind == "targeted" and tr.mine and not tr.self and (not tr.opp or bySeat ~= p.controller) and matchesSubject(obj, tr) then
+        if tr.kind == "targeted" and tr.mine and not tr.self and (not tr.opp or TableSetup.isOpponent(bySeat, p.controller)) and matchesSubject(obj, tr) then
           local ownerSeat
           pcall(function() ownerSeat = Zones.regionAt(obj.getPosition()).seat end)
-          if ownerSeat == p.controller then
+          if ours(tr, ownerSeat, p.controller) then
             table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
           end
         end
@@ -1765,7 +1797,7 @@ function Triggers.onTargeted(obj, bySeat)
     if p.obj == obj then
       for _, a in ipairs(abilitiesOf(obj)) do
         local tr = a.trig
-        if tr.kind == "targeted" and tr.self and (not tr.opp or bySeat ~= p.controller) then
+        if tr.kind == "targeted" and tr.self and (not tr.opp or TableSetup.isOpponent(bySeat, p.controller)) then
           -- "...becomes the target..., exile ~": it leaves before the spell can do anything
           -- (the table applies the spell right away), so the spell has no target left.
           local low = tostring(a.text):lower()
@@ -1826,7 +1858,7 @@ function Triggers.onCounters(obj, kind, amount, byColor)
       local t = a.trig
       if t.kind == "counters" and matchesSubject(obj, t)
           and not (t.counterKind == "plus" and kind ~= "plus")
-          and not (t.mine and loc.seat ~= p.controller) then
+          and not (t.mine and not ours(t, loc.seat, p.controller)) then
         table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, amount = amount })
       end
     end
@@ -1863,7 +1895,7 @@ function Triggers.onLife(seat, delta)
     for _, a in ipairs(abilitiesOf(p.obj)) do
       local t = a.trig
       if t.kind == "life" and t.dir == dir then
-        local mine = p.controller == seat
+        local mine = ours(t, seat, p.controller)
         local oppOf = seat
         if (t.who == "you" and mine) or (t.who == "opp" and TableSetup.isOpponent(p.controller, oppOf)) then
           table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, amount = math.abs(delta) })
@@ -2036,7 +2068,7 @@ local function cardEvent(kind, card, seat)
       for _, a in ipairs(abilitiesOf(p.obj)) do
         local t = a.trig
         if t.kind == kind and not t.self and not t.equipped and matchesSubject(card, t)
-            and not (t.mine and seat ~= p.controller) and not (t.theirs and not TableSetup.isOpponent(seat, p.controller))
+            and not (t.mine and not ours(t, seat, p.controller)) and not (t.theirs and not TableSetup.isOpponent(seat, p.controller))
             and not (t.nontoken and isToken(card)) and not (t.tokenOnly and not isToken(card))
             and whoMatches(t, seat, p.controller) and (t.spell == nil or spellSpecMatches(card, t.spell)) then
           table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, thatCard = card.getGUID() })
@@ -2087,19 +2119,19 @@ function Triggers.onDamage(list, combat)
         local n, last = 0, nil
         for _, h in ipairs(list) do
           local src = h.obj
-          local okT = (t.tgt == "player" and h.seat ~= nil) or (t.tgt == "opp" and h.seat ~= nil and h.seat ~= p.controller)
+          local okT = (t.tgt == "player" and h.seat ~= nil) or (t.tgt == "opp" and h.seat ~= nil and TableSetup.isOpponent(h.seat, p.controller))
             or (t.tgt == "you" and h.seat == p.controller) or (t.tgt == "creature" and h.target ~= nil)
             or (t.tgt == "self" and h.target == p.obj)
           local okS
           if t.tgt == "self" then
-            okS = not t.opp or h.controller ~= p.controller
+            okS = not t.opp or TableSetup.isOpponent(h.controller, p.controller)
           elseif t.self then
             okS = src == p.obj
           elseif t.equipped then
             okS = src ~= nil and Equip ~= nil and Equip.hostOf(p.obj) == src
           else
             okS = (src == nil and t.subjects == nil) or (src ~= nil and not src.isDestroyed() and matchesSubject(src, t))
-            okS = okS and not (t.mine and h.controller ~= p.controller) and not (t.theirs and not TableSetup.isOpponent(h.controller, p.controller))
+            okS = okS and not (t.mine and not ours(t, h.controller, p.controller)) and not (t.theirs and not TableSetup.isOpponent(h.controller, p.controller))
           end
           if okT and okS then
             n, last = n + 1, h
@@ -2137,7 +2169,7 @@ function Triggers.onUnblocked(list)
       local t = a.trig
       if t.kind == "unblocked" and t.mine then
         for _, u in ipairs(list) do
-          if u.controller == p.controller and not u.obj.isDestroyed() and matchesSubject(u.obj, t) then
+          if ours(t, u.controller, p.controller) and not u.obj.isDestroyed() and matchesSubject(u.obj, t) then
             table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, thatCard = u.obj.getGUID() })
           end
         end
@@ -2189,7 +2221,7 @@ Events.on("spellCast", function(d)
     for _, a in ipairs(abilitiesOf(p.obj)) do
       local t = a.trig
       if t.kind == "cast" and not (t.other and p.obj == d.card) then
-        local mine = p.controller == d.controller
+        local mine = ours(t, d.controller, p.controller)
         local oppOf = d.controller
         local firstOk = true
         if t.nth and seatNo ~= t.nth then
@@ -2357,7 +2389,7 @@ function Triggers.onAttack(list)
           if t.commander then
             okType = okType and Combat ~= nil and Combat.isCommander ~= nil and Combat.isCommander(at.obj) == true
           end
-          if at.controller == p.controller and okType then
+          if ours(t, at.controller, p.controller) and okType then
             mineCount = mineCount + 1
             table.insert(mineList, at)
           end
@@ -2448,7 +2480,7 @@ function Triggers.onBlock(list)
     for _, p in ipairs(permanents()) do
       for _, a in ipairs(abilitiesOf(p.obj)) do
         local t = a.trig
-        if t.kind == "blocked" and t.mine and p.controller == e.controller and matchesSubject(att, t) then
+        if t.kind == "blocked" and t.mine and ours(t, e.controller, p.controller) and matchesSubject(att, t) then
           local times = t.perBlocker and #e.blockers or 1
           for _ = 1, times do
             table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, thatCard = att.getGUID() })
@@ -2505,7 +2537,7 @@ function Triggers.onCombatDamage(list)
                 or (Equip ~= nil and #Equip.attachments(h.obj) > 0)
             end
           end
-          if modOk and h.controller == p.controller and (t.subjects == nil or (not h.obj.isDestroyed() and matchesSubject(h.obj, t))) then
+          if modOk and ours(t, h.controller, p.controller) and (t.subjects == nil or (not h.obj.isDestroyed() and matchesSubject(h.obj, t))) then
             n = n + 1
           end
         end

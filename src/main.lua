@@ -128,7 +128,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.74 (NEW DECKS clears out-of-game bags)"
+SCRIPT_VERSION = "2.75 (2HG: teammates aren't opponents; assist, partner with, your team)"
 
 function onLoad(saved)
   GameLog.setup()

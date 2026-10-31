@@ -268,11 +268,15 @@ local CHAPTERS = {
       .. "- Teammates take their turn together and attack together.\n"
       .. "- The team that goes first skips its first draw.\n"
       .. "- Each attacking creature's damage goes to one player of the other team.\n"
-      .. "- If one player loses, their team loses. Commander damage still counts per player, per commander.\n\n"
-      .. "<b>Teams at this table</b>\n\n"
+      .. "- If one player loses, their team loses. Commander damage still counts per player, per commander.",
+    "<b>Teams at this table</b>\n\n"
       .. "- Teammates see each other's hands.\n"
       .. "- A team shares priority: the other team gets one question, both of them see it and either can answer.\n"
-      .. "- Talk privately in the chat window's " .. G .. "Team" .. E .. " tab.",
+      .. "- Talk privately in the chat window's " .. G .. "Team" .. E .. " tab.\n"
+      .. "- \"Opponent\" on a card means a player on the other team: your teammate is never a target opponent, and"
+      .. " \"whenever an opponent...\" doesn't trigger off them.\n"
+      .. "- Battlebond: " .. C .. "Assist" .. E .. " (the table asks your teammate to chip in), " .. C .. "Partner with" .. E
+      .. " (the search for the partner), and \"your team\" (anthems, counters and triggers count both of you).",
   } },
 }
 
@@ -281,6 +285,7 @@ local KEYWORDS = {
   { "Affinity", "Costs {1} less for each of a certain kind of permanent you control." },
   { "Afflict", "When it becomes blocked, the defending player loses that much life." },
   { "Annihilator", "When it attacks, the defending player sacrifices that many permanents." },
+  { "Assist", "Two-Headed Giant: your teammate may pay some of the spell's generic cost. The table asks them how much (tap lands first)." },
   { "Battle cry", "When it attacks, each other attacking creature gets +1/+0." },
   { "Blitz", "Cast it for its blitz cost: haste, draws you a card when it dies, sacrificed at the next end step." },
   { "Cascade", "When you cast it, exile cards from the top of your library until a cheaper nonland card; you may cast that free, the rest go to the bottom." },
@@ -321,6 +326,7 @@ local KEYWORDS = {
   { "Morph", "Cast it face down as a 2/2 for {3}; turn it face up any time for its morph cost." },
   { "Ninjutsu", "Return an unblocked attacker you control to hand: put this onto the battlefield tapped and attacking." },
   { "Partner", "You can have two commanders if both have partner." },
+  { "Partner with", "Partner with a named card: when it enters, a player you pick may search their library for that card and put it into their hand. The table asks who." },
   { "Persist", "When it dies without a -1/-1 counter, return it with a -1/-1 counter." },
   { "Phasing", "Phased out: treated as though it doesn't exist until it phases back in." },
   { "Proliferate", "Choose any permanents and players with counters; give each one more of a kind it already has." },
@@ -341,6 +347,7 @@ local KEYWORDS = {
   { "Vigilance", "Attacking doesn't tap it." },
   { "Ward", "When an opponent targets it, their spell or ability is countered unless they pay the ward cost." },
   { "Wither", "Deals damage to creatures as -1/-1 counters." },
+  { "Your team", "Two-Headed Giant: you and your teammate. Outside 2HG your team is just you." },
 }
 
 -- The keywords chapter: a few per page.

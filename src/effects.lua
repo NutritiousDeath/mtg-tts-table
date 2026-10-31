@@ -156,6 +156,10 @@ function Effects.parse(text, sourceName)
   -- Other ways to say the same thing.
   t = t:gsub("each of your opponents", "each opponent"):gsub("each of those opponents", "each opponent")
     :gsub("each other player", "each opponent")
+  -- Battlebond "your team" wording: the parts the table runs for one player read as "you"
+  -- (outside 2HG your team is just you; in 2HG the teammate does their half by hand).
+  t = t:gsub("your team controls", "you control"):gsub("your team control", "you control")
+    :gsub("you and your teammates", "you"):gsub("you and your teammate", "you")
   -- Several paragraphs (a spell: "This spell can't be countered." then
   -- "Destroy all creatures."): read them as sentences.
   t = t:gsub("\n", " ")
@@ -4900,7 +4904,7 @@ function Effects.edict(seat, a, it)
   else
     local choices = {}
     for _, c in ipairs(players()) do
-      if not (a.scope == "target opponent" and c == seat) then
+      if not (a.scope == "target opponent" and not TableSetup.isOpponent(c, seat)) then
         table.insert(choices, { label = string.upper(c), value = c })
       end
     end
@@ -5800,6 +5804,43 @@ function Effects.copyStack(seat, a, it)
         copy(list[i])
       end
     end)
+  end
+end
+
+-- "Partner with <name>" (CR 702.124j): when it enters, target player may search their library for a card
+-- named <name>, reveal it, put it into their hand, then shuffle. The controller picks the player (their 2HG
+-- teammate is listed first after themselves); that player gets the library search with the name filled in.
+function Effects.partnerWith(it, name)
+  local seat = it.controller
+  name = tostring(name or ""):gsub("%s+$", "")
+  local choices = { { label = string.upper(seat), value = seat } }
+  local mate = TableSetup.teammate and TableSetup.teammate(seat)
+  if mate and TableSetup.isActive(mate) then
+    table.insert(choices, { label = string.upper(mate), value = mate })
+  end
+  for _, c in ipairs(players()) do
+    if c ~= seat and c ~= mate then
+      table.insert(choices, { label = string.upper(c), value = c })
+    end
+  end
+  local function go(who)
+    if who == nil or not TableSetup.isActive(who) then
+      return
+    end
+    ask(who, it.name .. ": partner with", "Search your library for " .. name .. " and put it into your hand?",
+      { { label = "SEARCH", value = "yes" }, { label = "NO", value = "no" } }, function(v)
+        if v ~= "yes" then
+          printToAll("MTG > " .. who .. " doesn't search for " .. name .. ".", INFO)
+          return
+        end
+        LibSearch.open(who, name, it.name .. ": take " .. name .. " (into your hand). Close the search when done; the library is shuffled.",
+          "hand", false, { limit = 1, fixedDest = true })
+      end)
+  end
+  if #choices == 1 then
+    go(seat)
+  else
+    ask(seat, it.name .. ": partner with", "Target player may put " .. name .. " into their hand from their library.", choices, go)
   end
 end
 
@@ -7424,6 +7465,11 @@ function Effects.resolve(it)
     Effects.resolveWard(it)
     return
   end
+  -- Battlebond "Partner with <name>": its enters trigger.
+  if tostring(it.text or ""):sub(1, 13) == "Partner with " then
+    Effects.partnerWith(it, tostring(it.text):sub(14))
+    return
+  end
   -- Kalia of the Vast, Preeminent Captain...: "you may put an Angel, Demon, or Dragon creature card from your hand onto
   -- the battlefield tapped and attacking (that opponent)".
   do
@@ -7966,9 +8012,9 @@ function Effects.resolve(it)
     for _, c in ipairs(players()) do
       if pro[c] and c ~= seat then
         printToAll("MTG > " .. c .. " has protection from everything: " .. it.name .. " can't target them.", INFO)
-      elseif not (oppOnly and c == seat) then
-        -- Opponents first, so a seat nobody sits in picks one by default.
-        table.insert(choices, c == seat and #choices + 1 or 1, { label = string.upper(c), value = c })
+      elseif not (oppOnly and not TableSetup.isOpponent(c, seat)) then
+        -- Opponents first, so a seat nobody sits in picks one by default (you and a 2HG teammate last).
+        table.insert(choices, (not TableSetup.isOpponent(c, seat)) and #choices + 1 or 1, { label = string.upper(c), value = c })
       end
     end
     local anyTarget = false
@@ -9252,7 +9298,7 @@ function Effects.pump(seat, a, it)
     end
     if (a.scope == "allMine" or a.scope == "targetMine") and owner ~= seat then
       return false
-    elseif (a.scope == "allOpp" or a.scope == "targetOpp") and owner == seat then
+    elseif (a.scope == "allOpp" or a.scope == "targetOpp") and not TableSetup.isOpponent(owner, seat) then
       return false
     end
     if a.other and it.source and obj.getGUID() == it.source then
@@ -9583,7 +9629,7 @@ end
 
 function Effects.oppExile(seat, a, it)
   for _, opp in ipairs(orderFrom(seat)) do
-    if opp ~= seat and creatureCount(opp) > 0 then
+    if TableSetup.isOpponent(opp, seat) and creatureCount(opp) > 0 then
       ask(opp, it.name .. ": exile a " .. tostring(a.type), "Click EXILE on a " .. tostring(a.type) .. " you control.",
         { { label = "NONE", value = false } }, function(obj)
           if not obj then
@@ -9817,7 +9863,7 @@ function Effects.forgeDamageAll(seat, a, it)
       if obj.type == "Card" and not obj.isDestroyed() and not Faces.unknown(obj) and obj.held_by_color == nil then
         local owner = fieldSeat(obj)
         if owner and cardTypes(obj).creature
-            and not (parts.you and owner ~= seat) and not (parts.opp and owner == seat)
+            and not (parts.you and owner ~= seat) and not (parts.opp and not TableSetup.isOpponent(owner, seat))
             and not (parts.o and it.source and obj.getGUID() == it.source)
             and not (parts.fly and not hasKeyword(obj, "flying")) and not (parts.nofly and hasKeyword(obj, "flying")) then
           table.insert(hit, obj)
@@ -10536,7 +10582,8 @@ function Effects.chooseTargets(it, done)
   if not enabled() or not GameState.data.started or it == nil then
     return finish()
   end
-  if it.kind ~= "card" and (not it.auto or it.copyOf or it.planar or it.ninjutsu or it.planeFx) then
+  if it.kind ~= "card" and (not it.auto or it.copyOf or it.planar or it.ninjutsu or it.planeFx
+      or tostring(it.text or ""):sub(1, 13) == "Partner with ") then
     return finish()
   end
   if not TableSetup.isActive(it.controller) then

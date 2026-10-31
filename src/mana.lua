@@ -861,9 +861,73 @@ Events.on("spellCast", function(d)
     return
   end
   if cost and cost ~= "" and d.controller and TableSetup.isActive(d.controller) then
+    if ManaChips.assist(d.controller, cost, d.card) then
+      return
+    end
     ManaChips.pay(d.controller, cost, d.card.getName(), d.card)
   end
 end)
+
+-- Assist (Battlebond, CR 702.132): in 2HG the caster's teammate may pay some of the spell's generic cost.
+-- The teammate is asked how much (tapping lands first fills their pool); that comes out of their pool and
+-- the caster pays the rest from theirs. Returns true when it took over the payment.
+local function hasAssist(card)
+  local d = CardData.get(card)
+  for _, kw in ipairs(type(d.keywords) == "table" and d.keywords or {}) do
+    if tostring(kw):lower() == "assist" then
+      return true
+    end
+  end
+  local o = "\n" .. tostring(d.oracle or ""):lower()
+  return o:find("\nassist", 1, true) ~= nil
+end
+
+function ManaChips.assist(seat, cost, card)
+  local mate = TableSetup.teammate and TableSetup.teammate(seat)
+  if mate == nil or not TableSetup.isActive(mate) or (Leave and Leave.isOut and Leave.isOut(mate)) then
+    return false
+  end
+  if not hasAssist(card) or Effects == nil or Effects.askChoice == nil then
+    return false
+  end
+  local generic, rest = 0, {}
+  for sym in tostring(cost):gmatch("{([^}]*)}") do
+    if sym:match("^%d+$") then
+      generic = generic + tonumber(sym)
+    else
+      table.insert(rest, "{" .. sym .. "}")
+    end
+  end
+  if generic == 0 then
+    return false
+  end
+  local name = card.getName()
+  local choices = {}
+  for k = 0, generic do
+    table.insert(choices, { label = k == 0 and "NONE" or tostring(k), value = k })
+  end
+  printToAll("MTG > " .. name .. " has assist: " .. mate .. " may pay up to " .. generic .. " of its generic cost.", INFO)
+  Effects.askChoice(mate, name .. ": assist " .. seat,
+    "Pay up to " .. generic .. " of " .. seat .. "'s generic cost? Tap your lands first (the mana goes to your pool), then pick how much.",
+    choices, function(k)
+      k = tonumber(k) or 0
+      local paid = 0
+      if k > 0 then
+        local _, covered = ManaChips.pay(mate, "{" .. k .. "}", name .. " (assist)")
+        paid = k
+        if not covered then
+          broadcastToColor(name .. ": pay your assist mana yourself (" .. k .. " generic; your pool didn't cover it).", mate, INFO)
+        end
+        printToAll("MTG > " .. mate .. " assists with " .. k .. " of " .. name .. "'s cost.", INFO)
+      end
+      local left = generic - paid
+      local newCost = (left > 0 and ("{" .. left .. "}") or "") .. table.concat(rest)
+      if newCost ~= "" and not card.isDestroyed() then
+        ManaChips.pay(seat, newCost, name, card)
+      end
+    end)
+  return true
+end
 
 -- The rules empty every mana pool when a step ends.
 Events.on("stepStarted", function()
