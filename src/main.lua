@@ -127,7 +127,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.67 (phasing: Unyaro, The Doctor's Childhood Barn)"
+SCRIPT_VERSION = "2.68 (Planechase: granted casting buttons, Kessig, Great Forest, Skybreen reveals, Agyrem, devour)"
 
 function onLoad(saved)
   GameLog.setup()

@@ -890,6 +890,9 @@ function Planechase.showCounters()
   for _, pl in ipairs(planes) do
     if pl and not pl.isDestroyed() then
       pcall(function() pl.clearButtons() end)
+      if PlaneFx and PlaneFx.planeButtons then
+        pcall(PlaneFx.planeButtons, pl)
+      end
       local n, kind = Planechase.counter(pl.getName())
       if n > 0 then
         local sc = pl.getScale().x

@@ -509,6 +509,10 @@ end, 3)
 function PlaneFx.onPlaneswalk(leavingName)
   local s = st()
   s.untilWalk = {}
+  -- Skybreen / Windriddle Palaces: the revealed top cards go back on top.
+  if (leavingName == "Skybreen" or leavingName == "Windriddle Palaces") and PlaneFx.revealTopsOff then
+    pcall(PlaneFx.revealTopsOff)
+  end
   -- Unyaro / The Doctor's Childhood Barn: everything phased out phases back in.
   phaseInAll()
 end
@@ -851,6 +855,11 @@ end)
 
 -- Jund (watched below)
 on("Jund", "it gains devour 5", function(it, seat)
+  local s = st()
+  s.devour = s.devour or {}
+  if it.thatCard then
+    s.devour[it.thatCard] = 5
+  end
   say(it.name, "that creature spell gains devour 5: as it enters, " .. (it.that or seat) .. " may sacrifice any number of"
     .. " creatures; it enters with five +1/+1 counters for each.", CYAN)
 end)
@@ -3183,12 +3192,17 @@ if Statics then
     if up["Skybreen"] then
       local tl = typeLine(card)
       for _, c in ipairs(players()) do
-        local top = Library.peek(c, 0)
+        local held = Library.revealedCard and Library.revealedCard(c)
+        local top = held and { name = held.getName() } or Library.peek(c, 0)
         if top and top.name then
           for _, w in ipairs({ "creature", "artifact", "enchantment", "instant", "sorcery", "planeswalker", "battle", "land" }) do
             local lib = Library.find(c)
             local ttl = ""
             pcall(function()
+              if held then
+                ttl = typeLine(held)
+                return
+              end
               local dd = lib.type == "Deck" and lib.getObjects()[1] or nil
               ttl = dd and tostring(JSON.decode(dd.gm_notes or "{}").typeLine or ""):lower() or typeLine(lib)
             end)
@@ -3352,4 +3366,528 @@ function PlaneFx.arrived(name)
   local s = st()
   s.arrived = s.arrived or {}
   s.arrived[name] = turnNo()
+  if name == "Skybreen" or name == "Windriddle Palaces" then
+    Wait.time(function()
+      for _, c in ipairs(players()) do
+        pcall(function()
+          if not (Library.revealedCard and Library.revealedCard(c)) then
+            Library.revealTop(c, function(card)
+              if card and Library.holdRevealed then
+                Library.holdRevealed(c, card)
+              end
+            end)
+          end
+        end)
+      end
+    end, 2)
+  end
 end
+
+
+---------------------------------------------------------------------------
+-- Devour (Jund): as the creature enters, sacrifice any number of other creatures; five +1/+1 counters for each.
+---------------------------------------------------------------------------
+
+Events.on("cardMoved", function(d)
+  if d == nil or d.card == nil or d.to == nil or d.pileExtra then
+    return
+  end
+  local s = st()
+  local okG, g = pcall(function() return d.card.getGUID() end)
+  local n = okG and s.devour and s.devour[g]
+  if not n or not ON_FIELD[d.to.region] then
+    return
+  end
+  s.devour[g] = nil
+  local card, seat = d.card, d.to.seat
+  local eaten = 0
+  local it = { name = "Devour " .. n .. " (Jund)", guid = g }
+  local function more()
+    pick(seat, it, "devour", seat .. ": click SACRIFICE on another creature to devour (" .. eaten .. " so far), or DONE.",
+      function(obj, owner) return owner == seat and isCreature(obj) and obj ~= card end, function(obj)
+        if obj then
+          sacrifice(obj)
+          eaten = eaten + 1
+          more()
+        elseif eaten > 0 then
+          plus(card, n * eaten, seat)
+          say(it.name, card.getName() .. " devoured " .. eaten .. " creature" .. (eaten == 1 and "" or "s") .. ": "
+            .. (n * eaten) .. " +1/+1 counters.")
+        end
+      end, "DONE", "SACRIFICE")
+  end
+  Wait.time(more, 1)
+end)
+
+---------------------------------------------------------------------------
+-- Combat damage (combat.lua asks): The Great Forest (toughness), Kessig (only Werewolves). Agyrem's chaos.
+---------------------------------------------------------------------------
+
+function PlaneFx.combatDamage(obj, power, tough)
+  local up = planesUp()
+  if next(up) == nil then
+    return nil
+  end
+  local p = power
+  if up["The Great Forest"] then
+    p = tough
+  end
+  if up["Kessig"] then
+    local wolf = typeLine(obj):find("werewolf", 1, true) ~= nil or ((st().werewolf or {})[obj.getGUID()] == turnNo())
+      or tostring(data(obj).oracle or ""):lower():find("changeling", 1, true) ~= nil
+    if not wolf then
+      p = 0
+    end
+  end
+  return p
+end
+
+function PlaneFx.cantBeAttacked(seat)
+  return whileWalk("noAttack:" .. tostring(seat)) and true or false
+end
+
+---------------------------------------------------------------------------
+-- Skybreen / Windriddle Palaces: everyone plays with the top card of their library revealed. The top card is
+-- held face up beside each library (Library.holdRevealed; drawing takes it first) and the next one is turned up
+-- after each draw. When the plane leaves, they go back on top.
+---------------------------------------------------------------------------
+
+local function revealsTops()
+  local up = planesUp()
+  return up["Skybreen"] or up["Windriddle Palaces"]
+end
+
+local revealing = {}
+local function revealFor(c)
+  if revealing[c] or not GameState.data.started then
+    return
+  end
+  if Library.revealedCard and Library.revealedCard(c) then
+    return
+  end
+  revealing[c] = true
+  Library.revealTop(c, function(card)
+    revealing[c] = nil
+    if card and Library.holdRevealed then
+      Library.holdRevealed(c, card)
+    end
+  end)
+end
+
+local function revealAll()
+  if not revealsTops() then
+    return
+  end
+  for _, c in ipairs(players()) do
+    revealFor(c)
+  end
+end
+
+function PlaneFx.revealTopsOff()
+  for _, c in ipairs(players()) do
+    if Library.revealedCard and Library.revealedCard(c) then
+      pcall(Library.putRevealedOnTop, c)
+    end
+  end
+end
+
+Events.on("cardMoved", function(d)
+  if d == nil or d.from == nil or d.to == nil or not GameState.data.started then
+    return
+  end
+  if d.from.region == "library" and d.to.region == "hand" and d.to.seat and revealsTops() then
+    local c = d.to.seat
+    Wait.time(function() revealFor(c) end, 1.2)
+  end
+end)
+
+Events.on("stepStarted", function(d)
+  if d and (d.step == "upkeep" or d.step == "main1") then
+    Wait.time(revealAll, 0.5)
+  end
+end)
+
+---------------------------------------------------------------------------
+-- Buttons on the plane card for what a plane lets players do (each player clicks for themselves):
+-- UNEARTH (Grixis), FLASHBACK (Otaria), EMBALM (Naktamun), ESCAPE (Stormcage Containment Facility),
+-- SCAVENGE (The Cave of Skulls), BLITZ (The Caldaia), SUSPEND (Talon Gates), FORETELL (Singing Towers of
+-- Darillium). Costs are paid by hand, as with every spell.
+---------------------------------------------------------------------------
+
+local GRANTS = {
+  ["Grixis"] = { { "UNEARTH", "planefx_unearth", "Put a blue, black or red creature card from your graveyard onto the battlefield (pay its mana cost); it has haste and is exiled at the next end step or if it would leave" } },
+  ["Otaria"] = { { "FLASHBACK", "planefx_flashback", "Cast an instant or sorcery card from your graveyard (pay its mana cost); it's exiled afterwards" } },
+  ["Naktamun"] = { { "EMBALM", "planefx_embalm", "Exile a creature card from your graveyard (pay its mana cost): create a token copy, a white Zombie with no mana cost. Sorcery speed" } },
+  ["Stormcage Containment Facility"] = { { "ESCAPE", "planefx_escape", "Cast a creature card from your graveyard (pay its mana cost and exile three other cards from your graveyard)" } },
+  ["The Cave of Skulls"] = { { "SCAVENGE", "planefx_scavenge", "Exile a creature card from your graveyard (pay its mana cost): +1/+1 counters equal to its power on target creature. Sorcery speed" } },
+  ["The Caldaia"] = { { "BLITZ", "planefx_blitz", "Cast a creature card from your hand for {3}: it has haste, draws you a card when it dies, and is sacrificed at the next end step" } },
+  ["Talon Gates"] = { { "SUSPEND", "planefx_suspend", "Exile a nonland card from your hand with time counters equal to its mana value (it gains suspend). Sorcery speed" } },
+  ["Singing Towers of Darillium"] = { { "FORETELL", "planefx_foretell", "Pay {2} and exile a nonland card from your hand face down; cast it on a later turn for its mana cost minus {2}" } },
+}
+
+function PlaneFx.planeButtons(plane)
+  if plane == nil or plane.isDestroyed() then
+    return
+  end
+  local list = GRANTS[plane.getName()]
+  if not list then
+    return
+  end
+  local sc = plane.getScale().x
+  for i, b in ipairs(list) do
+    plane.createButton({ click_function = b[2], function_owner = Global, label = b[1], tooltip = b[3],
+      position = { 0, 0.3, (-0.9 - (i - 1) * 0.45) / sc * 1.4 }, rotation = { 0, 0, 0 }, scale = { 1 / sc, 1, 1 / sc },
+      width = 1300, height = 300, font_size = 190, color = { 0.35, 0.12, 0.5, 0.95 }, font_color = { 1, 0.9, 1 },
+      hover_color = { 0.5, 0.2, 0.7, 1 } })
+  end
+end
+
+local function seated(color)
+  if color == nil or color == "Grey" or color == "Black" or not TableSetup.isActive(color) or not GameState.data.started then
+    broadcastToColor("Take a seat in a running game first.", color or "Grey", WARN)
+    return false
+  end
+  return true
+end
+
+-- Pick a card from your graveyard: fits(entry) with entry = { guid, name, typeLine, gm }. cb(entry).
+local function pickGrave(color, title, fits, cb)
+  local list = {}
+  local pile = Library.pileIn(color, "graveyard")
+  if pile and pile.type == "Deck" then
+    for _, e in ipairs(pile.getObjects() or {}) do
+      local okd, dd = pcall(function() return JSON.decode(e.gm_notes or "{}") end)
+      local ent = { guid = e.guid, name = e.name or e.nickname or "?", gm = okd and type(dd) == "table" and dd or {} }
+      ent.typeLine = tostring(ent.gm.typeLine or ""):lower()
+      if fits(ent) then
+        table.insert(list, ent)
+      end
+    end
+  elseif pile and pile.type == "Card" then
+    local ent = { guid = pile.getGUID(), name = pile.getName(), gm = data(pile) }
+    ent.typeLine = typeLine(pile)
+    if fits(ent) then
+      table.insert(list, ent)
+    end
+  end
+  if #list == 0 then
+    broadcastToColor(title .. ": nothing in your graveyard can.", color, INFO)
+    return
+  end
+  local page = 0
+  local function show()
+    local ch = {}
+    local per = 7
+    for i = page * per + 1, math.min(#list, page * per + per) do
+      table.insert(ch, { label = list[i].name:sub(1, 18), value = i })
+    end
+    if #list > (page + 1) * per then
+      table.insert(ch, { label = "MORE...", value = "more" })
+    end
+    table.insert(ch, { label = "CANCEL", value = false })
+    Effects.askChoice(color, title, "Pick the card from your graveyard.", ch, function(i)
+      if i == "more" then
+        page = page + 1
+        show()
+      elseif i then
+        cb(list[i])
+      end
+    end)
+  end
+  show()
+end
+
+local function gmColors(gm)
+  local out = {}
+  for _, x in ipairs(type(gm.colors) == "table" and gm.colors or {}) do
+    out[x] = true
+  end
+  return out
+end
+
+-- Cast a card taken out of a pile or hand: it goes onto the battlefield area and onto the stack.
+local function castFrom(card, color)
+  card.setLock(false)
+  card.setRotation({ 0, TableSetup.seat(color).yaw, 0 })
+  card.setPosition(TableSetup.slot(color, "battlefield", TableSetup.SURFACE_TOP + 2))
+  Wait.time(function()
+    if not card.isDestroyed() and Stack and Stack.onDrop then
+      pcall(Stack.onDrop, color, card)
+    end
+  end, 0.6)
+end
+
+function planefx_unearth(obj, color)
+  if not seated(color) then
+    return
+  end
+  pickGrave(color, "Grixis: unearth", function(e)
+    local c = gmColors(e.gm)
+    return e.typeLine:find("creature", 1, true) and (c.U or c.B or c.R)
+  end, function(e)
+    takeFrom(color, "graveyard", { e.guid }, "battlefield", function(card)
+      toBattlefield(card, color, false)
+      local s = st()
+      s.unearthed = s.unearthed or {}
+      s.unearthed[card.getGUID()] = true
+      Wait.time(function() pcall(Counters.addTempKeyword, card, "haste") end, 1)
+      printToAll("MTG > Grixis: " .. color .. " unearths " .. card.getName() .. " (pay its mana cost). It has haste and is exiled at"
+        .. " the next end step.", GOOD)
+    end)
+  end)
+end
+
+function planefx_flashback(obj, color)
+  if not seated(color) then
+    return
+  end
+  pickGrave(color, "Otaria: flashback", function(e)
+    return e.typeLine:find("instant", 1, true) or e.typeLine:find("sorcery", 1, true)
+  end, function(e)
+    takeFrom(color, "graveyard", { e.guid }, "battlefield", function(card)
+      local s = st()
+      s.exileAfter = s.exileAfter or {}
+      s.exileAfter[card.getGUID()] = color
+      castFrom(card, color)
+      printToAll("MTG > Otaria: " .. color .. " casts " .. card.getName() .. " with flashback (pay its mana cost). It's exiled"
+        .. " afterwards.", GOOD)
+    end)
+  end)
+end
+
+function planefx_escape(obj, color)
+  if not seated(color) then
+    return
+  end
+  local total = #Effects.graveyardCards(color)
+  pickGrave(color, "Stormcage: escape", function(e)
+    return e.typeLine:find("creature", 1, true) and total >= 4
+  end, function(e)
+    local others = {}
+    for _, x in ipairs(Effects.graveyardCards(color)) do
+      if x.guid ~= e.guid then
+        table.insert(others, x)
+      end
+    end
+    local chosen = {}
+    local function pickOther(k)
+      if k > 3 then
+        takeFrom(color, "graveyard", chosen, "exile", function(card)
+          card.setPosition(TableSetup.slot(color, "exile", TableSetup.SURFACE_TOP + 2))
+          Wait.time(function() if not card.isDestroyed() then Zones.refresh(card) end end, 0.5)
+        end)
+        Wait.time(function()
+          takeFrom(color, "graveyard", { e.guid }, "battlefield", function(card)
+            castFrom(card, color)
+            printToAll("MTG > Stormcage Containment Facility: " .. color .. " casts " .. card.getName() .. " with escape (pay its"
+              .. " mana cost; three other cards exiled).", GOOD)
+          end)
+        end, 1)
+        return
+      end
+      local ch = {}
+      local used = {}
+      for _, g in ipairs(chosen) do
+        used[g] = true
+      end
+      for _, x in ipairs(others) do
+        if not used[x.guid] and #ch < 7 then
+          table.insert(ch, { label = x.name:sub(1, 18), value = x.guid })
+        end
+      end
+      Effects.askChoice(color, "Escape: exile " .. k .. " of 3", "Pick another card from your graveyard to exile.", ch, function(g)
+        if g then
+          table.insert(chosen, g)
+          pickOther(k + 1)
+        end
+      end)
+    end
+    pickOther(1)
+  end)
+end
+
+function planefx_embalm(obj, color)
+  if not seated(color) then
+    return
+  end
+  pickGrave(color, "Naktamun: embalm", function(e) return e.typeLine:find("creature", 1, true) end, function(e)
+    takeFrom(color, "graveyard", { e.guid }, "exile", function(card)
+      card.setPosition(TableSetup.slot(color, "exile", TableSetup.SURFACE_TOP + 2))
+      Wait.time(function()
+        if card.isDestroyed() then
+          return
+        end
+        Zones.refresh(card)
+        local copy = copyFor(card, color, "Naktamun")
+        printToAll("MTG > Naktamun: " .. color .. " embalms " .. card.getName() .. " (pay its mana cost): a token copy, a white"
+          .. " Zombie with no mana cost.", GOOD)
+      end, 0.8)
+    end)
+  end)
+end
+
+function planefx_scavenge(obj, color)
+  if not seated(color) then
+    return
+  end
+  pickGrave(color, "The Cave of Skulls: scavenge", function(e) return e.typeLine:find("creature", 1, true) end, function(e)
+    local n = tonumber(e.gm.power) or 0
+    takeFrom(color, "graveyard", { e.guid }, "exile", function(card)
+      card.setPosition(TableSetup.slot(color, "exile", TableSetup.SURFACE_TOP + 2))
+      Wait.time(function() if not card.isDestroyed() then Zones.refresh(card) end end, 0.5)
+      pick(color, { name = "Scavenge " .. card.getName() }, n .. " +1/+1 counters", "Pay its mana cost, then click TARGET on a"
+        .. " creature: it gets " .. n .. " +1/+1 counters.", isCreature, function(t)
+          if t then
+            plus(t, n, color)
+          end
+        end)
+    end)
+  end)
+end
+
+function planefx_blitz(obj, color)
+  if not seated(color) then
+    return
+  end
+  Effects.pickFromHand(color, "The Caldaia: blitz", "Pick a creature card to cast for its blitz cost {3}.", function(h, d)
+    return tostring(d.typeLine or ""):lower():find("creature", 1, true) ~= nil
+  end, function(card)
+    if not card then
+      return
+    end
+    local s = st()
+    s.blitz = s.blitz or {}
+    s.blitz[card.getGUID()] = color
+    castFrom(card, color)
+    printToAll("MTG > The Caldaia: " .. color .. " casts " .. card.getName() .. " for its blitz cost {3}: haste, it draws a card"
+      .. " when it dies, and it's sacrificed at the next end step.", GOOD)
+  end)
+end
+
+function planefx_suspend(obj, color)
+  if not seated(color) then
+    return
+  end
+  Effects.pickFromHand(color, "Talon Gates: suspend", "Pick a nonland card: it's exiled with time counters equal to its mana value.",
+    function(h, d) return not tostring(d.typeLine or ""):lower():find("land", 1, true) end, function(card)
+      if not card then
+        return
+      end
+      local n = mvOf(card)
+      card.setPosition(TableSetup.slot(color, "exile", TableSetup.SURFACE_TOP + 2))
+      Wait.time(function()
+        if not card.isDestroyed() then
+          Zones.refresh(card)
+          Counters.change(card, "tc", n, color)
+        end
+      end, 0.8)
+      printToAll("MTG > Talon Gates: " .. card.getName() .. " is suspended with " .. n .. " time counter" .. (n == 1 and "" or "s")
+        .. ".", GOOD)
+    end)
+end
+
+function planefx_foretell(obj, color)
+  if not seated(color) then
+    return
+  end
+  Effects.pickFromHand(color, "Singing Towers: foretell", "Pay {2}: pick a nonland card to exile face down (foretold).", function(h, d)
+    return not tostring(d.typeLine or ""):lower():find("land", 1, true)
+  end, function(card)
+    if not card then
+      return
+    end
+    local s = st()
+    s.foretold = s.foretold or {}
+    s.foretold[card.getGUID()] = turnNo()
+    card.setRotation({ 0, TableSetup.seat(color).yaw, 180 })
+    card.setPosition(TableSetup.slot(color, "exile", TableSetup.SURFACE_TOP + 2))
+    Wait.time(function() if not card.isDestroyed() then Zones.refresh(card) end end, 0.8)
+    printToAll("MTG > Singing Towers of Darillium: " .. color .. " foretells a card (face down in exile). Cast it on a later turn"
+      .. " for its mana cost minus {2}: turn it face up and drop it on the battlefield.", GOOD)
+  end)
+end
+
+-- What those leave behind: unearth (exiled at end step / instead of leaving), flashback (exiled after it
+-- resolves), blitz (haste, sacrificed at end step, draws when it dies).
+Events.on("cardMoved", function(d)
+  if d == nil or d.card == nil or d.from == nil or d.to == nil or d.pileExtra then
+    return
+  end
+  local s = st()
+  local okG, g = pcall(function() return d.card.getGUID() end)
+  if not okG then
+    return
+  end
+  local card = d.card
+  if s.exileAfter and s.exileAfter[g] and d.to.region == "graveyard" then
+    local owner = s.exileAfter[g]
+    s.exileAfter[g] = nil
+    Wait.time(function()
+      takeFrom(d.to.seat or owner, "graveyard", { g }, "exile", function(c)
+        c.setPosition(TableSetup.slot(d.to.seat or owner, "exile", TableSetup.SURFACE_TOP + 2))
+        Wait.time(function() if not c.isDestroyed() then Zones.refresh(c) end end, 0.5)
+        printToAll("MTG > " .. c.getName() .. " (flashback) is exiled.", INFO)
+      end)
+    end, 1.2)
+  end
+  if s.unearthed and s.unearthed[g] and ON_FIELD[d.from.region] and not ON_FIELD[d.to.region] then
+    s.unearthed[g] = nil
+    if d.to.region ~= "exile" then
+      Wait.time(function()
+        local seat = d.to.seat or d.from.seat
+        if d.to.region == "graveyard" then
+          takeFrom(seat, "graveyard", { g }, "exile", function(c)
+            c.setPosition(TableSetup.slot(seat, "exile", TableSetup.SURFACE_TOP + 2))
+            Wait.time(function() if not c.isDestroyed() then Zones.refresh(c) end end, 0.5)
+          end)
+        elseif not card.isDestroyed() then
+          card.setPosition(TableSetup.slot(seat, "exile", TableSetup.SURFACE_TOP + 2))
+          Wait.time(function() if not card.isDestroyed() then Zones.refresh(card) end end, 0.5)
+        end
+        printToAll("MTG > Grixis: the unearthed creature is exiled instead.", INFO)
+      end, 1)
+    end
+  end
+  if s.blitz and s.blitz[g] then
+    if ON_FIELD[d.to.region] and not ON_FIELD[d.from.region] then
+      Wait.time(function() pcall(Counters.addTempKeyword, card, "haste") end, 1)
+      s.blitzOn = s.blitzOn or {}
+      s.blitzOn[g] = s.blitz[g]
+    elseif ON_FIELD[d.from.region] and d.to.region == "graveyard" and (s.blitzOn or {})[g] then
+      local who = s.blitzOn[g]
+      s.blitzOn[g] = nil
+      s.blitz[g] = nil
+      Actions.draw(who, 1, "blitz")
+      printToAll("MTG > Blitz: " .. who .. " draws a card (" .. tostring(d.name) .. " died).", GOOD)
+    end
+  end
+end)
+
+Events.on("stepStarted", function(d)
+  if d == nil or d.step ~= "end" or not GameState.data.started then
+    return
+  end
+  local s = st()
+  for g in pairs(s.unearthed or {}) do
+    local o = getObjectFromGUID(g)
+    if o and Effects.fieldSeat(o) then
+      Combat.removeCard(o, "exile")
+      printToAll("MTG > Grixis: " .. o.getName() .. " (unearthed) is exiled.", INFO)
+    end
+    s.unearthed[g] = nil
+  end
+  for g, who in pairs(s.blitzOn or {}) do
+    local o = getObjectFromGUID(g)
+    if o and Effects.fieldSeat(o) then
+      printToAll("MTG > Blitz: " .. o.getName() .. " is sacrificed.", INFO)
+      Combat.removeCard(o, "graveyard")
+    end
+  end
+end)
+
+-- After a load: the plane card buttons come back.
+Wait.time(function()
+  if Planechase and Planechase.showCounters then
+    pcall(Planechase.showCounters)
+  end
+end, 4)

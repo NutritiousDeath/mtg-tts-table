@@ -276,6 +276,19 @@ local function stats(obj)
   return p or 0, t or 0, (p == nil and s.power ~= nil)
 end
 
+-- The combat damage a creature deals: its power, unless a plane says otherwise (planefx.lua: The Great Forest,
+-- toughness instead; Kessig, only Werewolves deal combat damage).
+local function dmgStats(obj)
+  local p, t, odd = stats(obj)
+  if PlaneFx and PlaneFx.combatDamage then
+    local ok, v = pcall(PlaneFx.combatDamage, obj, p, t)
+    if ok and type(v) == "number" then
+      p = v
+    end
+  end
+  return p, t, odd
+end
+
 local function obj(guid)
   local o = guid and getObjectFromGUID(guid)
   if o and not o.isDestroyed() then
@@ -359,7 +372,11 @@ local function targets(active)
   for _, seat in ipairs(othersInOrder(active)) do
     -- 2HG: the other team only (a teammate isn't an opponent).
     if TableSetup.isOpponent(seat, active) then
-      table.insert(list, seat)
+      -- Agyrem's chaos: creatures can't attack that player until a player planeswalks.
+      local barred = PlaneFx and PlaneFx.cantBeAttacked and PlaneFx.cantBeAttacked(seat)
+      if not barred then
+        table.insert(list, seat)
+      end
       for _, pw in ipairs(walkers[seat] or {}) do
         table.insert(list, "pw:" .. pw.getGUID())
       end
@@ -1023,7 +1040,7 @@ local function buildRows(phase)
   for _, ag in ipairs(c.order) do
     local a = live(ag)
     if a and dealsIn(a, phase) then
-      local power, _, odd = stats(a)
+      local power, _, odd = dmgStats(a)
       local note = odd and "power is *: set it" or nil
       local key = c.attackers[ag]
       local blockers = {}
@@ -1071,7 +1088,7 @@ local function buildRows(phase)
       for _, bg in ipairs(c.blockOrder[ag] or {}) do
         local b = live(bg)
         if b and dealsIn(b, phase) then
-          local power = stats(b)
+          local power = dmgStats(b)
           local more = #(c.extra[bg] or {})
           add({ kind = "creature", src = bg, dst = ag, amount = power,
             note = more > 0 and ("blocks " .. (more + 1) .. " attackers: split its power") or nil })

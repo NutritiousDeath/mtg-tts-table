@@ -841,7 +841,7 @@ end
 -- (a planeswalker's spark) for planeswalking. It ignites while such an item is on the stack and goes out in a
 -- puff of smoke when it has resolved (tools/unity/MTGTorchBuilder.cs, mtg_stackfire).
 local STACK_FIRE_URL = "https://raw.githubusercontent.com/NutritiousDeath/mtg-tts-table/main/assets/torch/mtg_stackfire.unity3d?v=5"
-local FIRE_EFFECT = { chaos = 1, walk = 2 }
+local FIRE_EFFECT = { chaos = 1, walk = 1 }   -- both purple (walk had its own blue-white ring, effect 2)
 local fireNow = nil   -- "chaos", "walk" or nil
 local fireSpawning = false
 
