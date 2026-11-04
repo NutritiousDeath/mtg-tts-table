@@ -600,6 +600,23 @@ function Statics.compute()
           end
         end
       end
+      -- Door of Destinies: "Creatures you control of the chosen type get +1/+1 for each charge counter on this artifact."
+      do
+        local gx, gy = line:match("creatures you control of the chosen type get %+(%d+)/%+(%d+) for each %a+ counter on ")
+        if gx then
+          understood = true
+          local ty = Statics.chosenType(p.obj)
+          local okc, cc = pcall(Counters.get, p.obj)
+          local k = okc and cc and (cc.other or 0) or 0
+          if ty and k > 0 then
+            for _, q in ipairs(list) do
+              if q.seat == p.seat and Statics.typeMatches(q.tl, q.oracle or "", ty) then
+                add(q, tonumber(gx) * k, tonumber(gy) * k)
+              end
+            end
+          end
+        end
+      end
       local lowl = line
       local temporary = lowl:find("until end of turn", 1, true) or lowl:find("until your next turn", 1, true)
         or lowl:find("this turn", 1, true) or lowl:find(":", 1, true) or lowl:sub(1, 4) == "when"
@@ -803,7 +820,7 @@ local WATCH = {
   damage = { "would deal damage", "would be dealt damage", "would deal noncombat damage", "would be dealt noncombat damage" },
 }
 
-function Statics.replacers(kind, subject)
+function Statics.replacers(kind, subject, srcSeat)
   local found, seen = {}, {}
   local phrases = WATCH[kind] or {}
   for _, p in ipairs(perms()) do
@@ -818,7 +835,17 @@ function Statics.replacers(kind, subject)
         end
         if hit and (s:find("instead", 1, true) or s:find("plus", 1, true) or s:find("double", 1, true)) then
           local ok = true
-          if kind ~= "damage" then
+          if kind == "damage" then
+            -- Solphim, Torbran...: "a source you control" / "a red source you control" only changes its controller's
+            -- damage, and "to an opponent" only damage to that player's opponents.
+            if s:find("source you control", 1, true) and srcSeat ~= nil and srcSeat ~= p.seat then
+              ok = false
+            end
+            if ok and (s:find("to an opponent", 1, true) or s:find("an opponent or", 1, true)) and subject ~= nil
+                and not TableSetup.isOpponent(subject, p.seat) then
+              ok = false
+            end
+          else
             if s:find("an opponent would", 1, true) then
               ok = subject ~= nil and TableSetup.isOpponent(subject, p.seat)
             elseif s:find("if you would", 1, true) then

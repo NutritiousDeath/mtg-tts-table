@@ -457,6 +457,9 @@ local function parseTrigger(p)
     return { kind = "ninjutsuAct" }
   end
   -- Diamond Mare: "whenever you cast a spell of the chosen color" (chosen as it entered: effects.lua).
+  if plainFind(p, "whenever you cast a spell of the chosen type") then
+    return { kind = "cast", who = "you", spellType = "chosen type" }
+  end
   if plainFind(p, "whenever you cast a spell of the chosen color") then
     return { kind = "cast", who = "you", spellType = "chosen color" }
   end
@@ -883,7 +886,25 @@ local function abilitiesOf(obj)
       local fromForge = forgeMap[pi]
       if fromForge then
         local teamF = para:lower():find("your team", 1, true) ~= nil
+        -- Forge's data sometimes loses who casts ("whenever YOU cast" read as anyone: Ral, Crackling Wit).
+        local castWho = nil
+        do
+          local lp = para:lower()
+          if lp:find("whenever you cast", 1, true) or lp:find("when you cast", 1, true) then
+            castWho = "you"
+          elseif lp:find("whenever an opponent casts", 1, true) then
+            castWho = "opp"
+          end
+        end
         for _, ft in ipairs(fromForge) do
+          if castWho and ft.kind == "cast" and ft.who ~= castWho then
+            local cp = {}
+            for k, v in pairs(ft) do
+              cp[k] = v
+            end
+            cp.who = castWho
+            ft = cp
+          end
           if teamF then
             local cp = {}
             for k, v in pairs(ft) do
@@ -1953,6 +1974,21 @@ local function spellMatches(card, spellType, source)
     local cd = cardData(card) or {}
     return tonumber(cd.cmc) == n or tonumber(cd.power) == n or tonumber(cd.toughness) == n
   end
+  -- Door of Destinies: "a spell of the chosen type" (the creature type chosen as it entered).
+  if spellType == "chosen type" then
+    local ty = source and Statics and Statics.chosenType and Statics.chosenType(source)
+    if ty == nil or ty == "" then
+      return false
+    end
+    local cd = cardData(card) or {}
+    local tl = tostring(cd.typeLine or ""):lower()
+    for _, k in ipairs(type(cd.keywords) == "table" and cd.keywords or {}) do
+      if tostring(k):lower() == "changeling" then
+        return true
+      end
+    end
+    return tl:find(tostring(ty):lower(), 1, true) ~= nil
+  end
   if spellType == "chosen color" then
     local chosen = source and Effects and Effects.chosenColor and Effects.chosenColor(source)
     if chosen == nil then
@@ -2109,6 +2145,12 @@ end
 
 -- A permanent became tapped / untapped (a player turning it, attacking, a {T} cost, the untap step).
 function Triggers.onTapped(obj, seat)
+  -- City of Brass and lands like it: the damage is taken right as it's tapped for mana (mana.lua / actions.lua);
+  -- a trigger on top of that dealt it twice.
+  local d = cardData(obj)
+  if d and type(d.oracle) == "string" and d.oracle:lower():find("becomes tapped, it deals %d+ damage to you") then
+    return
+  end
   cardEvent("tapped", obj, seat)
 end
 

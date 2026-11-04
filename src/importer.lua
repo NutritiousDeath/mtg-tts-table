@@ -1319,7 +1319,7 @@ function Importer.importDeck(color, text)
       spawnObjectJSON({
         json = JSON.encode(c),
         position = commanderSpot(color, cmdrPos, i),
-        rotation = { 0, yaw, 0 },
+        rotation = { 0, yaw, GameState.data.started and 0 or 180 },
         callback_function = function(obj)
           if player then
             -- By index, so commander i always matches command zone i.
@@ -1439,7 +1439,14 @@ function Importer.importDeck(color, text)
         for i, c in ipairs(commanderList) do
           table.insert(bits, roles[i]:sub(1, 1) .. roles[i]:sub(2):lower() .. ": " .. c.name)
         end
-        broadcastToAll(color .. " - " .. table.concat(bits, " · "), { 0.7, 0.85, 1 })
+        if GameState.data.started then
+          broadcastToAll(color .. " - " .. table.concat(bits, " · "), { 0.7, 0.85, 1 })
+        else
+          -- Commanders stay secret until the game starts (they're face down in the command zone).
+          broadcastToAll(color .. " has chosen " .. (#commanderList == 1 and "a commander" or (#commanderList .. " commanders"))
+            .. " (face down until START GAME).", { 0.7, 0.85, 1 })
+          broadcastToColor("Your " .. table.concat(bits, " · ") .. " (only you see this until the game starts).", color, { 0.7, 0.85, 1 })
+        end
       end
     end
 
@@ -1477,7 +1484,7 @@ function Importer.importDeck(color, text)
       spawnObjectJSON({
         json = json,
         position = commanderSpot(color, cmdrPos, i),
-        rotation = { 0, yaw, 0 },
+        rotation = { 0, yaw, GameState.data.started and 0 or 180 },
         callback_function = function(obj)
           if player then
             -- By index, so commander i always matches command zone i.
@@ -1609,3 +1616,27 @@ function Importer.importDeck(color, text)
     runLocal()
   end
 end
+
+-- Commanders were imported face down (chosen in secret): the game starting turns them face up and says who's who.
+Events.on("gameStarted", function()
+  local parts = {}
+  for _, color in ipairs(TableSetup.activeSeats()) do
+    local p = GameState.player(color)
+    local st = TableSetup.seat(color)
+    for _, g in pairs(p and p.commanders or {}) do
+      local o = getObjectFromGUID(g)
+      if o and not o.isDestroyed() and o.is_face_down and st then
+        o.setRotationSmooth({ 0, st.yaw, 0 }, false, true)
+      end
+    end
+    if p and p.commanderNames and #p.commanderNames > 0 then
+      table.insert(parts, color .. ": " .. table.concat(p.commanderNames, " + "))
+    end
+  end
+  if #parts > 0 then
+    broadcastToAll("Commanders revealed - " .. table.concat(parts, "; ") .. ".", { 0.7, 0.85, 1 })
+  end
+  if Trackers and Trackers.renderAll then
+    pcall(Trackers.renderAll)
+  end
+end)

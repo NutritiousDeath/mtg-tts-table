@@ -66,6 +66,49 @@ function Counters.carry(old, obj)
   memoOf[old] = nil
 end
 
+-- Named counters (corruption, oil, quest, charge, shield...): the count by name, shown on the card, kept with the
+-- game. Their total is also the card's "other" counter (what effects that count counters use).
+local function namedStore()
+  GameState.data.namedCounters = GameState.data.namedCounters or {}
+  return GameState.data.namedCounters
+end
+
+function Counters.named(obj)
+  local ok, g = pcall(function() return obj.getGUID() end)
+  return ok and namedStore()[g] or {}
+end
+
+-- Add (or take away) named counters; the "other" total follows. name: "corruption".
+function Counters.addNamed(obj, name, delta, byColor)
+  name = tostring(name or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+  if name == "" or delta == 0 or obj == nil then
+    return 0
+  end
+  local KNOWN = { ["+1/+1"] = "plus", ["-1/-1"] = "minus", ["+1/+0"] = "pc", ["+0/+1"] = "tc", loyalty = "loyalty" }
+  if KNOWN[name] then
+    Counters.change(obj, KNOWN[name], delta, byColor)
+    return delta
+  end
+  local st = namedStore()
+  local g = obj.getGUID()
+  st[g] = st[g] or {}
+  local before = st[g][name] or 0
+  local after = math.max(0, before + delta)
+  st[g][name] = after > 0 and after or nil
+  if next(st[g]) == nil then
+    st[g] = nil
+  end
+  Counters.change(obj, "other", after - before, byColor)
+  return after - before
+end
+
+function Counters.clearNamed(obj)
+  local ok, g = pcall(function() return obj.getGUID() end)
+  if ok then
+    namedStore()[g] = nil
+  end
+end
+
 function Counters.get(obj)
   local c = { plus = 0, minus = 0, loyalty = 0, other = 0, tp = 0, tt = 0, pc = 0, tc = 0, bp = 0, bt = 0, bs = 0, bk = 0 }
   local memo = obj and obj.memo
@@ -455,6 +498,23 @@ renderInto = function(obj)
       color = { 0.1, 0.18, 0.4, 0.88 },
     })
     sickIndex[obj.getGUID()] = #obj.getButtons() - 1
+  end
+  -- Named counters: "2 corruption", "1 oil".
+  do
+    local nm = Counters.named(obj)
+    local bits = {}
+    for k, v in pairs(nm) do
+      table.insert(bits, v .. " " .. k)
+    end
+    table.sort(bits)
+    if #bits > 0 then
+      table.insert(info, table.concat(bits, ", "))
+    end
+  end
+  -- A spell on the stack: no P/T or keyword labels over the card (they covered its text); the stack list has it.
+  local okR, region = pcall(Counters.regionOf, obj)
+  if okR and region == "stack" then
+    big, info = {}, {}
   end
   local bigH = 0
   local edge = nil   -- bottom edge (card z) of the labels drawn so far
@@ -1241,6 +1301,7 @@ Events.on("cardMoved", function(d)
     if d.card.memo and d.card.memo ~= "" then
       Counters.clear(d.card)
     end
+    Counters.clearNamed(d.card)
   elseif isOn and not wasOn then
     -- Entered the battlefield: planeswalkers get their printed loyalty.
     if Counters.lastKnown then Counters.lastKnown[d.card.getGUID()] = nil end

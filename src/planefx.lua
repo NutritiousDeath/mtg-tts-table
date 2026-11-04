@@ -4462,3 +4462,58 @@ function PlaneFx.castFromGraveyard(color, title, fits, opts)
     end)
   end)
 end
+
+-- Pick a card from ANY player's graveyard (Deathrite Shaman: "exile target land card from a graveyard") and exile it.
+-- chooser picks; fits(entry) with entry = { guid, name, typeLine, gm }; done(entry, ownerSeat) after it's exiled.
+function PlaneFx.exileFromAnyGraveyard(chooser, title, fits, done)
+  local list = {}
+  for _, seat in ipairs(TableSetup.activeSeats()) do
+    local pile = Library.pileIn(seat, "graveyard")
+    local function consider(ent)
+      ent.typeLine = tostring(ent.typeLine or (ent.gm and ent.gm.typeLine) or ""):lower()
+      ent.owner = seat
+      if fits(ent) then
+        table.insert(list, ent)
+      end
+    end
+    if pile and pile.type == "Deck" then
+      for _, e in ipairs(pile.getObjects() or {}) do
+        local okd, dd = pcall(function() return JSON.decode(e.gm_notes or "{}") end)
+        consider({ guid = e.guid, name = e.name or e.nickname or "?", gm = okd and type(dd) == "table" and dd or {} })
+      end
+    elseif pile and pile.type == "Card" then
+      consider({ guid = pile.getGUID(), name = pile.getName(), gm = data(pile), typeLine = typeLine(pile) })
+    end
+  end
+  if #list == 0 then
+    broadcastToColor(title .. ": no graveyard has a card it can exile.", chooser, INFO)
+    return
+  end
+  local page = 0
+  local function show()
+    local ch = {}
+    local per = 7
+    for i = page * per + 1, math.min(#list, page * per + per) do
+      table.insert(ch, { label = (list[i].name:sub(1, 14) .. " (" .. list[i].owner .. ")"), value = i })
+    end
+    if #list > (page + 1) * per then
+      table.insert(ch, { label = "MORE...", value = "more" })
+    end
+    table.insert(ch, { label = "CANCEL", value = false })
+    Effects.askChoice(chooser, title, "Pick the card to exile (any graveyard).", ch, function(i)
+      if i == "more" then
+        page = page + 1
+        show()
+      elseif i then
+        local e = list[i]
+        takeFrom(e.owner, "graveyard", { e.guid }, "exile", function(card)
+          card.setPosition(TableSetup.slot(e.owner, "exile", TableSetup.SURFACE_TOP + 2))
+          Wait.time(function() if not card.isDestroyed() then Zones.refresh(card) end end, 0.5)
+          printToAll("MTG > " .. title .. ": " .. chooser .. " exiles " .. e.name .. " from " .. e.owner .. "'s graveyard.", GOOD)
+          if done then done(e, e.owner) end
+        end)
+      end
+    end)
+  end
+  show()
+end

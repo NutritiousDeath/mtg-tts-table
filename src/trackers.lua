@@ -131,6 +131,10 @@ local function commanderLabel(key)
     return key
   end
   local op = player(seat)
+  -- Secret until the game starts (commanders are chosen face down).
+  if not (GameState.data and GameState.data.started) then
+    return seat .. "'s commander"
+  end
   local name = op and op.commanderNames[tonumber(slot)]
   return name or (seat .. "'s commander")
 end

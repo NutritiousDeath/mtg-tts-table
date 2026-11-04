@@ -55,6 +55,7 @@
     !relay <host>        use another relay (e.g. mtg-relay.yourname.workers.dev); !relay default goes back
     !cache / !cache clear  list / empty the decks saved at this table for offline re-imports
     !credits             the fan-content notice and credits
+    !counter <name> [n]  named counters (corruption, oil, shield...) on the card under your pointer; negative takes off
     !bug <what happened> send a bug report (with the logs) to the table's maker; BUG on the console opens the panel
     !import <link>       import an Archidekt / Moxfield link to your seat
     !import Red <link>   import an Archidekt / Moxfield link (or list) to a seat
@@ -136,7 +137,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.81 (Three Tree City, Yes Man, Aerith, The Sentry, Wedding Ring, Coveted Jewel)"
+SCRIPT_VERSION = "2.82 (Nov 3 game fixes: Ral, Door, Widow, Bauble, Fauna, Deathrite, named counters, secret commanders)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -953,6 +954,26 @@ function onChat(message, sender)
       and ("Solo test mode ON (by " .. sender.color .. "): you can act for every seat. Turn buttons, combat and planeswalkers work for anyone, no response pop-ups, empty seats keep their hands. Start Game includes every seat.")
       or "Solo test mode OFF.", { 0.7, 0.85, 1 })
     return false
+  end
+
+  -- "!counter corruption" / "!counter oil 2" / "!counter shield -1": named counters on the card under your pointer.
+  do
+    local cname, camt = message:match("^!counter%s+([%a%-]+)%s*(%-?%d*)%s*$")
+    if cname then
+      local obj = nil
+      pcall(function() obj = sender.getHoverObject() end)
+      if obj == nil or obj.type ~= "Card" then
+        broadcastToColor("Point at a card on the table, then type !counter <name> [amount] (e.g. !counter corruption, !counter oil -1).",
+          sender.color, { 1, 0.6, 0.2 })
+      else
+        local n = tonumber(camt) or 1
+        Counters.addNamed(obj, cname, n, sender.color)
+        local have = Counters.named(obj)[cname:lower()] or 0
+        printToAll("MTG > " .. sender.color .. ": " .. (n > 0 and ("+" .. n) or tostring(n)) .. " " .. cname:lower() .. " counter on "
+          .. obj.getName() .. " (now " .. have .. ").", { 0.7, 0.85, 1 })
+      end
+      return false
+    end
   end
 
   local freshLink = message:match("^!import fresh (%S+)$")

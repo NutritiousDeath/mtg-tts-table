@@ -1462,7 +1462,12 @@ function Effects.parse(text, sourceName)
   end
   w = t:match("each player draws (%w+) cards?") or t:match("each player loses %w+ life and draws (%w+) cards?")
   local thatW = t:match("that player draws (%w+) cards?")
-  if w then
+  -- Black Widow: "you and that player each draw two cards".
+  local bothW = t:match("you and that player each draw (%w+) cards?")
+  if bothW and num(bothW) then
+    add("draw", "you", num(bothW))
+    add("draw", "that", num(bothW))
+  elseif w then
     add("draw", "all", num(w))
   elseif thatW and num(thatW) then
     -- Horn of Greed: "that player draws a card" (the player the trigger was about).
@@ -2042,12 +2047,16 @@ function Effects.parse(text, sourceName)
   end
   -- "put three +1/+1 counters on target creature (you control)": pick it on the table.
   do
-    local t2 = t:gsub("up to one target", "target")
-    local upTo = t2 ~= t
+    local t2 = t:gsub("up to one other target", "another target"):gsub("up to one target", "target")
+    local upTo = t:find("up to one ", 1, true) ~= nil
     local another = t2:find(" on another target ", 1, true) ~= nil
     t2 = t2:gsub(" on another target ", " on target ")
     local pn, pk, pty = t2:match("put (%w+) ([%w%+/%-]+) counters? on target (%a+)")
     if pn and num(pn) and pty and (pty == "creature" or pty == "permanent" or pty == "artifact" or pty == "planeswalker" or pty == "land") then
+      -- "target creature or planeswalker": either.
+      if t2:find("on target creature or planeswalker", 1, true) then
+        pty = "permanent"
+      end
       local after = t2:match("put %w+ [%w%+/%-]+ counters? on target %a+ ([%a ]*)") or ""
       table.insert(actions, { what = "counterOn", who = "you", n = num(pn), kind = Counters.kindOf(pk), label = pk, ty = pty, mine = after:find("you control", 1, true) ~= nil,
         upTo = upTo, other = another })
@@ -3179,7 +3188,7 @@ local function watched(kind, subject, n, controller, name, run)
   end
   local names = {}
   if Statics and Statics.replacers then
-    local ok, list = pcall(Statics.replacers, kind, subject)
+    local ok, list = pcall(Statics.replacers, kind, subject, controller)
     if ok and list then
       names = list
     end
@@ -3459,8 +3468,26 @@ local function apply(it, plan, target)
               printToAll("MTG > " .. card.getName() .. " has a finality counter: if it would go to a graveyard from the battlefield, it's exiled instead.", INFO)
             end or nil })
         elseif a.what == "scry" then
-          for _ = 1, a.n do
-            Actions.openScry(seat)
+          -- Serum Visions: "Draw a card. Scry 2." - the draw has to land first, or the scry looks at the card being drawn.
+          local afterDraw = false
+          for _, b in ipairs(plan.actions) do
+            if b == a then
+              break
+            end
+            if b.what == "draw" then
+              afterDraw = true
+            end
+          end
+          local scrySeat, scryN = seat, a.n
+          local function doScry()
+            for _ = 1, scryN do
+              Actions.openScry(scrySeat)
+            end
+          end
+          if afterDraw then
+            Wait.time(doScry, 1.5)
+          else
+            doScry()
           end
         elseif a.what == "mill" then
           Actions.mill(seat, a.n)
@@ -4622,7 +4649,12 @@ function Effects.counterOn(seat, a, it)
     .. " counter" .. (a.n == 1 and "" or "s") .. (a.upTo and ", or SKIP." or "."),
     { { label = "SKIP", value = false } }, function(obj)
       if obj then
-        local placed = Counters.place(obj, a.kind, a.n, seat)
+        local placed
+        if a.kind == "other" and a.label and a.label ~= "" and a.label ~= "other" and Counters.addNamed then
+          placed = Counters.addNamed(obj, a.label, a.n, seat)
+        else
+          placed = Counters.place(obj, a.kind, a.n, seat)
+        end
         printToAll("MTG > " .. it.name .. ": " .. placed .. " " .. a.label .. " counter" .. (placed == 1 and "" or "s") .. " on " .. obj.getName() .. ".", GOOD)
       else
         printToAll("MTG > " .. it.name .. ": no counters placed.", INFO)
@@ -6041,6 +6073,86 @@ CARD_FX.drawToCopy = function(it, low)
   return true
 end
 
+-- Geyadrone Dihada: "Gain control of each permanent with a corruption counter on it."
+CARD_FX.controlCountered = function(it, low)
+  local name = low:match("gain control of each permanent with an? (%a+) counter on it")
+  if not name then
+    return false
+  end
+  local seat = it.controller
+  local n = 0
+  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+    local from = o.type == "Card" and not o.isDestroyed() and Effects.fieldSeat(o)
+    if from and from ~= seat and (Counters.named(o)[name] or 0) > 0 then
+      if Effects.ownerOf(o) == nil then
+        Effects.setOwner(o, from)
+      end
+      Effects.moveToSeat(o, seat)
+      n = n + 1
+    end
+  end
+  printToAll("MTG > " .. it.name .. ": " .. seat .. " gains control of " .. n .. " permanent" .. (n == 1 and "" or "s") .. " with a "
+    .. name .. " counter.", GOOD)
+  return true
+end
+
+-- Deathrite Shaman: "Exile target land card from a graveyard. Add one mana of any color." / "Exile target instant or
+-- sorcery card from a graveyard. Each opponent loses 2 life." / "Exile target creature card from a graveyard. You gain 2 life."
+CARD_FX.graveExile = function(it, low)
+  local kind = low:match("^%s*exile target (%a[%a ]-) card from a graveyard%.")
+  if not kind or not (PlaneFx and PlaneFx.exileFromAnyGraveyard) then
+    return false
+  end
+  local seat = it.controller
+  local words = {}
+  for w in kind:gsub(" or ", " "):gmatch("%a+") do
+    words[w] = true
+  end
+  local rest = low:gsub("^%s*exile target [%a ]- card from a graveyard%.%s*", "")
+  PlaneFx.exileFromAnyGraveyard(seat, it.name, function(e)
+    for w in pairs(words) do
+      if e.typeLine:find(w, 1, true) then
+        return true
+      end
+    end
+    return false
+  end, function()
+    if rest:find("add one mana of any color", 1, true) then
+      ask(seat, it.name .. ": color", "Add one mana of which color?", { { label = "WHITE", value = "W" }, { label = "BLUE", value = "U" },
+        { label = "BLACK", value = "B" }, { label = "RED", value = "R" }, { label = "GREEN", value = "G" } }, function(k)
+          ManaChips.add(seat, k, 1)
+          printToAll("MTG > " .. it.name .. ": " .. seat .. " adds " .. k .. ".", GOOD)
+        end)
+    elseif rest ~= "" then
+      Effects.resolve({ name = it.name, controller = seat, text = rest, auto = true, trigger = true, kind = "ability" })
+    end
+  end)
+  return true
+end
+
+-- Mishra's Bauble: "Look at the top card of target player's library. Draw a card at the beginning of the next turn's upkeep."
+CARD_FX.peekTop = function(it, low)
+  if not low:find("look at the top card of target player's library", 1, true) then
+    return false
+  end
+  local seat = it.controller
+  local ch = {}
+  for _, c in ipairs(players()) do
+    table.insert(ch, { label = string.upper(c), value = c })
+  end
+  ask(seat, it.name, "Whose top card do you look at?", ch, function(c)
+    local top = Library.peek(c, 0)
+    broadcastToColor(it.name .. ": the top card of " .. c .. "'s library is " .. (top and top.name or "nothing (it's empty)") .. ".",
+      seat, { 0.35, 0.95, 1 })
+    printToAll("MTG > " .. it.name .. ": " .. seat .. " looks at the top card of " .. c .. "'s library.", INFO)
+  end)
+  if low:find("draw a card at the beginning of the next turn's upkeep", 1, true) then
+    GameState.data.upkeepDraws = GameState.data.upkeepDraws or {}
+    table.insert(GameState.data.upkeepDraws, { seat = seat, after = (GameState.data.turn or {}).taken or 0, name = it.name })
+    printToAll("MTG > " .. it.name .. ": " .. seat .. " draws a card at the beginning of the next turn's upkeep.", INFO)
+  end
+  return true
+end
 -- Three Tree City: "{2}, {T}: Choose a color. Add an amount of mana of that color equal to the number of creatures
 -- you control of the chosen type." (The type was chosen as it entered.)
 CARD_FX.manaPerType = function(it, low)
@@ -6259,7 +6371,7 @@ CARD_FX.jewel = function(it, low)
   return true
 end
 
-local CARD_FX_ORDER = { "drawToCopy", "lookSplit", "namedAnywhere", "phaseOut", "castFromYard", "manaPerType", "giveAway",
+local CARD_FX_ORDER = { "controlCountered", "graveExile", "peekTop", "drawToCopy", "lookSplit", "namedAnywhere", "phaseOut", "castFromYard", "manaPerType", "giveAway",
   "tokensPerCounter", "countersOnLegends", "oppToken", "ringCopy", "ringWatch", "jewel" }
 
 -- Does cardFx take this text? (Its own prompts pick the targets, so nothing is asked as it goes on the stack.)
@@ -6268,7 +6380,7 @@ local CARD_FX_KEYS = { "you may have target opponent draw a card. if you do, cop
   "search your graveyard, hand, and library for a card named ", "target creature phases out", "target permanent phases out",
   "you may cast target instant or sorcery card with mana value ", "target opponent gains control of",
   "if it was cast, target opponent creates a token that's a copy of it", "who controls an artifact named wedding ring",
-  "that player draws three cards and gains control of this artifact" }
+  "that player draws three cards and gains control of this artifact", "card from a graveyard.", "look at the top card of target player's library" }
 function Effects.cardFxTakes(text)
   local low = tostring(text or ""):lower():gsub("’", "'")
   for _, k in ipairs(CARD_FX_KEYS) do

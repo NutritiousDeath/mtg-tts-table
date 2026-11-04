@@ -90,3 +90,25 @@ function CardWatch.unblocked(list)
     end
   end
 end
+
+-- Mishra's Bauble: "Draw a card at the beginning of the next turn's upkeep" (effects.lua records it).
+Events.on("stepStarted", function(d)
+  if d == nil or d.step ~= "upkeep" then
+    return
+  end
+  local list = GameState.data and GameState.data.upkeepDraws
+  if not list or #list == 0 then
+    return
+  end
+  local now = (GameState.data.turn or {}).taken or 0
+  local keep = {}
+  for _, e in ipairs(list) do
+    if now > (e.after or 0) then
+      Actions.draw(e.seat, 1, e.name)
+      printToAll("MTG > " .. tostring(e.name) .. ": " .. e.seat .. " draws a card (next turn's upkeep).", { 0.55, 0.9, 0.6 })
+    else
+      table.insert(keep, e)
+    end
+  end
+  GameState.data.upkeepDraws = keep
+end)

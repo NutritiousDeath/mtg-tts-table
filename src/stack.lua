@@ -1447,6 +1447,49 @@ function Stack.activate(obj, playerColor, ab)
       return
     end
   end
+  -- "Discard a card:" / "Discard a creature card:" (Fauna Shaman, Wild Mongrel): the player picks the card from their hand.
+  local discKind = (not ab.discDone) and low:match("discard an? (%a*)%s*card")
+  if discKind and Effects and Effects.askChoice then
+    local want = discKind ~= "" and discKind or nil
+    local okH, hand = pcall(function() return Player[playerColor].getHandObjects() end)
+    local list = {}
+    for _, o in ipairs(okH and hand or {}) do
+      if o.type == "Card" and o.hasTag("MTGCard") then
+        local tl = tostring(CardData.get(o).typeLine or ""):lower()
+        if want == nil or tl:find(want, 1, true) then
+          table.insert(list, o)
+        end
+      end
+    end
+    if #list == 0 then
+      broadcastToColor(obj.getName() .. ": you have no " .. (want and (want .. " ") or "") .. "card in hand to discard.", playerColor, WARN)
+      return
+    end
+    local ch = {}
+    for i, o in ipairs(list) do
+      if i <= 9 then
+        table.insert(ch, { label = o.getName():sub(1, 20), value = i })
+      end
+    end
+    table.insert(ch, { label = "CANCEL", value = false })
+    Effects.askChoice(playerColor, obj.getName() .. ": discard", "Discard which " .. (want and (want .. " ") or "") .. "card to pay for "
+      .. obj.getName() .. "?", ch, function(i)
+        local card = i and list[i]
+        if not card or card.isDestroyed() then
+          return
+        end
+        local st = TableSetup.seat(playerColor)
+        card.setPosition(TableSetup.slot(playerColor, "graveyard", TableSetup.SURFACE_TOP + 2))
+        card.setRotation({ 0, st.yaw, 0 })
+        if Library and Library.toGraveyard then
+          pcall(Library.toGraveyard, playerColor, card)
+        end
+        Wait.time(function() if not card.isDestroyed() then pcall(Zones.refresh, card) end end, 0.6)
+        Stack.activate(obj, playerColor, { cost = ab.cost, effect = ab.effect, line = ab.line, xDone = ab.xDone, sacDone = ab.sacDone,
+          sacName = ab.sacName, remDone = ab.remDone, remName = ab.remName, discDone = true, discName = card.getName() })
+      end)
+    return
+  end
   -- "Remove a counter from another permanent you control" (Xavier Sal).
   if not ab.remDone and low:find("remove a counter from another permanent", 1, true) and Effects and Effects.askChoice then
     Effects.askChoice(playerColor, obj.getName() .. ": remove a counter", "Click the permanent you control to take a counter off.",
@@ -1465,7 +1508,7 @@ function Stack.activate(obj, playerColor, ab)
         local function go(k)
           Counters.change(src, k, -1, playerColor)
           Stack.activate(obj, playerColor, { cost = ab.cost, effect = ab.effect, line = ab.line, xDone = ab.xDone, sacDone = ab.sacDone,
-            sacName = ab.sacName, remDone = true, remName = src.getName() .. " (" .. NAMES[k] .. ")" })
+            sacName = ab.sacName, remDone = true, remName = src.getName() .. " (" .. NAMES[k] .. ")", discDone = ab.discDone, discName = ab.discName })
         end
         if #kinds == 1 then
           go(kinds[1])
@@ -1536,6 +1579,10 @@ function Stack.activate(obj, playerColor, ab)
       end
     end
     table.insert(paid, "sacrificed " .. tostring(ab.sacName))
+  end
+  if ab.discDone then
+    rest = rest:gsub("discard an? %a*%s*card", "")
+    table.insert(paid, "discarded " .. tostring(ab.discName))
   end
   if ab.remDone then
     rest = rest:gsub("remove a counter from another permanent you control", ""):gsub("remove a counter from another permanent", "")
