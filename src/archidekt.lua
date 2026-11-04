@@ -46,7 +46,7 @@ end
 -- is too slow to decode that much JSON itself). cb(text, name) or
 -- cb(nil, error).
 function Archidekt.fetchMoxfield(id, cb)
-  local host = Importer and Importer.RELAY_HOST or ""
+  local host = Importer and Importer.relayHost and Importer.relayHost() or ""
   if host == "" then
     cb(nil, "Moxfield links need the relay. Export the deck from Moxfield (Export > Copy for MTGO) and paste it instead.")
     return

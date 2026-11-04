@@ -50,6 +50,11 @@
     !attraction  open an Attraction (top of your Attraction deck)
     !visit       roll to visit your Attractions now
     !import reset        clear a stuck "import already running" state
+    !import fresh <link> import, downloading every card again (skips the deck cache)
+    !relay               show the card relay and check it's answering
+    !relay <host>        use another relay (e.g. mtg-relay.yourname.workers.dev); !relay default goes back
+    !cache / !cache clear  list / empty the decks saved at this table for offline re-imports
+    !credits             the fan-content notice and credits
     !import <link>       import an Archidekt / Moxfield link to your seat
     !import Red <link>   import an Archidekt / Moxfield link (or list) to a seat
     !flip / !unflip   flip the table (just for fun) / put it back
@@ -128,7 +133,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.76 (2HG: friend or foe, each other player)"
+SCRIPT_VERSION = "2.77 (relay setting, deck cache, credits)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -167,6 +172,9 @@ function onLoad(saved)
     Wait.time(function() pcall(Zones.seed) end, 5)
     GameFlow.restore()
     Combat.restore()
+    if Rulebook and Rulebook.CREDITS then
+      printToAll(Rulebook.CREDITS, { 0.6, 0.6, 0.65 })
+    end
   end, 1)
 end
 
@@ -941,6 +949,58 @@ function onChat(message, sender)
     broadcastToAll(GameState.data.solo
       and ("Solo test mode ON (by " .. sender.color .. "): you can act for every seat. Turn buttons, combat and planeswalkers work for anyone, no response pop-ups, empty seats keep their hands. Start Game includes every seat.")
       or "Solo test mode OFF.", { 0.7, 0.85, 1 })
+    return false
+  end
+
+  local freshLink = message:match("^!import fresh (%S+)$")
+  if freshLink then
+    if not TableSetup.isActive(sender.color) then
+      printToColor("MTG > Take a seat first, then !import your deck link.", sender.color, { 1, 0.6, 0.2 })
+    else
+      TableUI.importFor(sender.color, "fresh " .. freshLink, sender.color)
+    end
+    return false
+  end
+
+  if message == "!relay" or message:sub(1, 7) == "!relay " then
+    local arg = message:sub(8):gsub("^%s+", ""):gsub("%s+$", "")
+    if arg ~= "" then
+      local h = Importer.setRelay(arg)
+      broadcastToAll("MTG > " .. sender.color .. " set the card relay to " .. h
+        .. (h == Importer.defaultRelay() and " (the default)." or ". !relay default goes back.") .. " Checking it...", { 0.7, 0.85, 1 })
+    end
+    local h = Importer.relayHost()
+    Importer.pingRelay(function(ok, why)
+      if ok then
+        broadcastToColor("MTG > Card relay " .. h .. " is answering.", sender.color, { 0.55, 0.9, 0.6 })
+      else
+        broadcastToColor("MTG > Card relay " .. h .. " is NOT answering (" .. tostring(why) .. "). Imports will go straight to"
+          .. " Scryfall (slower), decks imported here before come from the deck cache, and token search won't work until it's back.",
+          sender.color, { 1, 0.6, 0.2 })
+      end
+    end)
+    return false
+  end
+
+  if message == "!cache" then
+    local list = Importer.cacheInfo()
+    if #list == 0 then
+      broadcastToColor("MTG > No decks saved at this table yet (every import keeps one; up to 8).", sender.color, { 0.7, 0.85, 1 })
+    else
+      broadcastToColor("MTG > Decks saved at this table (newest first): " .. table.concat(list, "; ")
+        .. ". Importing one of these again needs no download.", sender.color, { 0.7, 0.85, 1 })
+    end
+    return false
+  end
+
+  if message == "!cache clear" then
+    local n = Importer.cacheClear()
+    broadcastToAll("MTG > " .. sender.color .. " emptied the deck cache (" .. n .. " deck" .. (n == 1 and "" or "s") .. ").", { 0.7, 0.85, 1 })
+    return false
+  end
+
+  if message == "!credits" then
+    broadcastToColor(Rulebook and Rulebook.CREDITS or "", sender.color, { 0.8, 0.8, 0.85 })
     return false
   end
 

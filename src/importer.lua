@@ -29,21 +29,62 @@ local REQUEST_GAP = 0.15 -- seconds between Scryfall requests
 --   e.g. "mtg-relay.yourname.workers.dev". When set, every image goes through
 --   it and the image checks are skipped (faster imports, art for new cards).
 -- IMAGE_HOST: community mirror, used only when RELAY_HOST is empty.
-local RELAY_HOST = "mtg-relay.nutritiousdeath.workers.dev"
+local DEFAULT_RELAY = "mtg-relay.nutritiousdeath.workers.dev"
 local IMAGE_HOST = "img.klrmngr.com"
 
-local function usingRelay()
-  return RELAY_HOST ~= ""
+-- The relay can be changed per table with !relay <host> (saved with the table); !relay default goes back.
+local function relay()
+  local t = GameState and GameState.data and GameState.data.table
+  local h = t and t.relay
+  if type(h) == "string" and h ~= "" then
+    return h
+  end
+  return DEFAULT_RELAY
 end
 
--- Other modules (Archidekt) use the relay too. Returns "" when there's none.
+local function usingRelay()
+  return relay() ~= ""
+end
+
+-- Other modules (Archidekt, tokens, Planechase) use the relay too. Returns "" when there's none.
 function Importer.relayHost()
-  return RELAY_HOST
+  return relay()
+end
+
+function Importer.defaultRelay()
+  return DEFAULT_RELAY
+end
+
+-- host: "mtg-relay.yourname.workers.dev" (a pasted https:// and trailing / are dropped), or nil for the default.
+function Importer.setRelay(host)
+  host = tostring(host or ""):gsub("^%s+", ""):gsub("%s+$", ""):gsub("^https?://", ""):gsub("/+$", "")
+  GameState.data.table = GameState.data.table or {}
+  if host == "" or host:lower() == "default" or host == DEFAULT_RELAY then
+    GameState.data.table.relay = nil
+  else
+    GameState.data.table.relay = host
+  end
+  Importer.RELAY_HOST = relay()
+  return relay()
+end
+
+-- Is the relay answering? cb(true) or cb(false, why). Any reply at all counts (even "not found").
+function Importer.pingRelay(cb)
+  local host = relay()
+  WebRequest.get("https://" .. host .. "/tokens?q=treasure", function(req)
+    if req.is_error then
+      cb(false, tostring(req.error or "no answer"))
+    elseif (req.response_code or 0) >= 500 then
+      cb(false, "HTTP " .. tostring(req.response_code))
+    else
+      cb(true)
+    end
+  end)
 end
 
 local function imageHost()
   if usingRelay() then
-    return RELAY_HOST
+    return relay()
   end
   return IMAGE_HOST
 end
@@ -851,7 +892,7 @@ function Importer.clearSeat(color)
 end
 
 -- Shared with tokens.lua (token search spawns cards the same way).
-Importer.RELAY_HOST = RELAY_HOST
+Importer.RELAY_HOST = DEFAULT_RELAY   -- kept for older callers; Importer.relayHost() is the live value
 Importer.splitPlain = splitPlain
 Importer.replacePlain = replacePlain
 Importer.fillTemplate = fillTemplate
@@ -881,8 +922,8 @@ end
 -- entries: parsed deck entries. onDone(results) or onDone(nil, error).
 -- results = { cards = {[i] = {card=tpl, entry=tpl}}, missing = {names}, fixed = {names} }
 local function fetchViaRelay(entries, onDone, onProgress)
-  local results = { cards = {}, missing = {}, fixed = {} }
-  local url = "https://" .. RELAY_HOST .. "/cards"
+  local results = { cards = {}, missing = {}, fixed = {}, raw = {} }
+  local url = "https://" .. relay() .. "/cards"
   local done = 0
 
   local function runBatch(first)
@@ -906,6 +947,10 @@ local function fetchViaRelay(entries, onDone, onProgress)
       ["Content-Type"] = "application/json",
       ["Accept"] = "text/plain",
     }, function(req)
+      if req.is_error and (req.response_code == nil or req.response_code == 0) then
+        onDone(nil, "no answer: " .. tostring(req.error or "unreachable"), true)
+        return
+      end
       if req.is_error or req.response_code ~= 200 then
         -- The relay says what went wrong as "ERROR <tab> message".
         local body = tostring(req.text or "")
@@ -918,6 +963,9 @@ local function fetchViaRelay(entries, onDone, onProgress)
         return
       end
       local ok, err = pcall(parseRelayText, req.text, first, results)
+      if ok then
+        table.insert(results.raw, { first = first, text = req.text })
+      end
       if not ok then
         onDone(nil, "couldn't read relay reply: " .. tostring(err))
         return
@@ -931,6 +979,189 @@ local function fetchViaRelay(entries, onDone, onProgress)
   end
 
   runBatch(1)
+end
+
+---------------------------------------------------------------------------
+-- Deck cache: the relay's answer for each deck imported at this table is kept (in the memo of a small
+-- hidden object, so it's saved with the table without slowing every save). Importing the same list
+-- again builds it from there: no relay or Scryfall needed, and no relay requests used up.
+-- Plain text, read with plain finds (TTS's Lua is slow at decoding big JSON):
+--   #DECK <tab> key <tab> label          #BATCH <tab> first          ...relay lines...
+-- !cache shows what's kept, !cache clear empties it, !import fresh <link> skips it once.
+---------------------------------------------------------------------------
+
+local CACHE_TAG = "MTGDeckCache"
+local CACHE_MAX_DECKS = 8
+local CACHE_MAX_BYTES = 3000000
+local cacheObj = nil
+local cacheDecks = nil   -- { { key, label, batches = { { first, text } } } }, newest first
+
+local function cacheHolder(create)
+  if cacheObj and not cacheObj.isDestroyed() then
+    return cacheObj
+  end
+  for _, o in ipairs(getObjectsWithTag(CACHE_TAG) or {}) do
+    cacheObj = o
+    return o
+  end
+  if not create then
+    return nil
+  end
+  cacheObj = spawnObject({
+    type = "BlockSquare",
+    position = { 0, -8, 0 },
+    scale = { 0.1, 0.1, 0.1 },
+    sound = false,
+    callback_function = function(o)
+      o.setName("Deck cache (MTG table)")
+      o.addTag(CACHE_TAG)
+      o.setLock(true)
+      pcall(function() o.interactable = false end)
+      pcall(function() o.setInvisibleTo({ "White", "Red", "Green", "Blue", "Yellow", "Orange", "Purple", "Pink", "Teal", "Brown", "Grey", "Black" }) end)
+    end,
+  })
+  return cacheObj
+end
+
+local function hashKey(text)
+  local h = 5381
+  for i = 1, #text do
+    h = (h * 33 + text:byte(i)) % 4294967296
+  end
+  return string.format("%08x%d", h, #text)
+end
+
+-- The list as the table understood it: the same cards, sets and counts make the same key.
+local function deckKey(entries)
+  local parts = {}
+  for _, e in ipairs(entries) do
+    table.insert(parts, tostring(e.name):lower() .. "|" .. tostring(e.set or "") .. "|" .. tostring(e.collectorNumber or "")
+      .. "|" .. tostring(e.count or 1) .. "|" .. (e.commander and "c" or "") .. (e.token and "t" or ""))
+  end
+  return hashKey(table.concat(parts, "\n"))
+end
+
+local function loadCache()
+  if cacheDecks then
+    return cacheDecks
+  end
+  cacheDecks = {}
+  local o = cacheHolder(false)
+  local memo = o and o.memo or ""
+  if memo == nil or memo == "" then
+    return cacheDecks
+  end
+  local cur, batch = nil, nil
+  local buf = {}
+  local function flush()
+    if batch then
+      batch.text = table.concat(buf, "\n")
+    end
+    buf = {}
+  end
+  local i = 1
+  while i <= #memo do
+    local j = memo:find("\n", i, true) or (#memo + 1)
+    local line = memo:sub(i, j - 1)
+    if line:sub(1, 6) == "#DECK\t" then
+      flush()
+      batch = nil
+      local rest = line:sub(7)
+      local tab = rest:find("\t", 1, true)
+      cur = { key = tab and rest:sub(1, tab - 1) or rest, label = tab and rest:sub(tab + 1) or "", batches = {} }
+      table.insert(cacheDecks, cur)
+    elseif line:sub(1, 7) == "#BATCH\t" and cur then
+      flush()
+      batch = { first = tonumber(line:sub(8)) or 1 }
+      table.insert(cur.batches, batch)
+    elseif batch then
+      table.insert(buf, line)
+    end
+    i = j + 1
+  end
+  flush()
+  return cacheDecks
+end
+
+local function saveCache()
+  local out, size = {}, 0
+  local kept = {}
+  for _, d in ipairs(cacheDecks or {}) do
+    local part = { "#DECK\t" .. d.key .. "\t" .. tostring(d.label or "") }
+    for _, b in ipairs(d.batches) do
+      table.insert(part, "#BATCH\t" .. tostring(b.first))
+      table.insert(part, (tostring(b.text or ""):gsub("\n+$", "")))
+    end
+    local blob = table.concat(part, "\n")
+    if #kept < CACHE_MAX_DECKS and size + #blob <= CACHE_MAX_BYTES then
+      table.insert(out, blob)
+      table.insert(kept, d)
+      size = size + #blob + 1
+    end
+  end
+  cacheDecks = kept
+  local o = cacheHolder(#out > 0)
+  if o then
+    local text = table.concat(out, "\n")
+    if o.isDestroyed and not o.isDestroyed() then
+      o.memo = text
+    else
+      Wait.time(function() if o and not o.isDestroyed() then o.memo = text end end, 1)
+    end
+  end
+end
+
+local function cacheGet(key)
+  for i, d in ipairs(loadCache()) do
+    if d.key == key then
+      table.remove(cacheDecks, i)
+      table.insert(cacheDecks, 1, d)
+      return d
+    end
+  end
+  return nil
+end
+
+local function cachePut(key, label, raw)
+  if raw == nil or #raw == 0 then
+    return
+  end
+  local list = loadCache()
+  for i, d in ipairs(list) do
+    if d.key == key then
+      table.remove(list, i)
+      break
+    end
+  end
+  local batches = {}
+  for _, b in ipairs(raw) do
+    table.insert(batches, { first = b.first, text = b.text })
+  end
+  table.insert(list, 1, { key = key, label = label, batches = batches })
+  pcall(saveCache)
+end
+
+function Importer.cacheInfo()
+  local out = {}
+  for _, d in ipairs(loadCache()) do
+    table.insert(out, d.label ~= "" and d.label or d.key)
+  end
+  return out
+end
+
+function Importer.cacheClear()
+  local n = #loadCache()
+  cacheDecks = {}
+  local o = cacheHolder(false)
+  if o then
+    o.memo = ""
+  end
+  return n
+end
+
+local freshNext = {}   -- [color] = true: the next import skips the cache (!import fresh)
+function Importer.skipCacheOnce(color)
+  freshNext[color] = true
 end
 
 ---------------------------------------------------------------------------
@@ -1283,6 +1514,12 @@ function Importer.importDeck(color, text)
     -- Pass 1: look up by set/number where given. Pass 2: anything that didn't
     -- come back with the right name is looked up again by name alone.
     fetchCollection(entries, function(cards)
+    if #cards == 0 then
+      busy = false
+      broadcastToAll("MTG > " .. color .. "'s import couldn't reach Scryfall (and the relay wasn't usable). Nothing was changed at"
+        .. " the seat. Try again in a few minutes; !relay checks the relay.", { 1, 0.3, 0.3 })
+      return
+    end
     local byName, bySetNum = indexCards(cards)
     local retry, fixed = {}, {}
     for _, e in ipairs(entries) do
@@ -1316,8 +1553,35 @@ function Importer.importDeck(color, text)
   end, nil, onFetchProgress)
   end
 
+  -- A list imported here before: build it from the deck cache.
+  local key = deckKey(entries)
+  local label = color .. ": " .. (deck.commanders[1] and deck.commanders[1].name or ((entries[1] and entries[1].name or "?") .. "..."))
+    .. " (" .. deck.total .. " cards)"
+  local skipCache = freshNext[color]
+  freshNext[color] = nil
+  local cached = (not skipCache) and cacheGet(key) or nil
+  if cached then
+    local results = { cards = {}, missing = {}, fixed = {} }
+    local okc = pcall(function()
+      for _, b in ipairs(cached.batches) do
+        parseRelayText(b.text, b.first, results)
+      end
+    end)
+    local okb, buildErr = false, nil
+    if okc then
+      progress("Using the saved copy of this deck (no download). !import fresh <link> downloads it again.")
+      okb, buildErr = pcall(spawnFromTemplates, results)
+    end
+    if okb then
+      pcall(saveCache)
+      return
+    end
+    progress("The saved copy couldn't be used (" .. tostring(buildErr) .. "). Downloading instead.")
+    busy = true
+  end
+
   if usingRelay() then
-    fetchViaRelay(entries, function(results, err)
+    fetchViaRelay(entries, function(results, err, unreachable)
       if results then
         Wait.frames(function()
           -- If anything in the fast path fails, recover with the built-in import
@@ -1326,10 +1590,18 @@ function Importer.importDeck(color, text)
           if not ok then
             progress("Fast import failed (" .. tostring(buildErr) .. "). Using the slower built-in import.")
             runLocal()
+          else
+            cachePut(key, label, results.raw)
           end
         end, 1)
       else
-        progress("Relay unavailable (" .. tostring(err) .. "). Using the slower built-in import.")
+        if unreachable then
+          broadcastToAll("MTG > The card relay (" .. relay() .. ") isn't answering right now (" .. tostring(err) .. "). "
+            .. color .. "'s import is going straight to Scryfall instead (slower). If that fails too, try again in a few minutes;"
+            .. " !relay checks the relay.", { 1, 0.6, 0.2 })
+        else
+          broadcastToColor("MTG > The card relay had a problem (" .. tostring(err) .. "). Using the slower built-in import.", color, { 1, 0.6, 0.2 })
+        end
         runLocal()
       end
     end, onFetchProgress)

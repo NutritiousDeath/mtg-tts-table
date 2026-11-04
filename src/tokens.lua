@@ -128,7 +128,7 @@ local EXTRA_TOKENS = {
 local function buildTpl(r)
   local e = r.entry
   local id = tostring(e.i)
-  local host = Importer.RELAY_HOST
+  local host = Importer.relayHost()
   local face = e.img or ("https://" .. host .. "/large/front/" .. id:sub(1, 1) .. "/" .. id:sub(2, 2) .. "/" .. id .. ".jpg")
   local types = {}
   local main = tostring(e.t)
@@ -251,7 +251,7 @@ function Tokens.search(color, query)
     return
   end
   status(color, "Searching for \"" .. query .. "\"...")
-  WebRequest.get("https://" .. Importer.RELAY_HOST .. "/tokens?q=" .. urlEncode(query), function(req)
+  WebRequest.get("https://" .. Importer.relayHost() .. "/tokens?q=" .. urlEncode(query), function(req)
     if req.is_error or (req.response_code and req.response_code >= 400) then
       status(color, "Search failed. Has the relay been updated with token search?")
       return
@@ -466,7 +466,7 @@ function Tokens.create(color, spec, n, sourceName, opts)
     return
   end
   local query = ((spec.pt or "") .. " " .. table.concat(spec.words, " ")):gsub("^%s+", "")
-  WebRequest.get("https://" .. Importer.RELAY_HOST .. "/tokens?q=" .. urlEncode(query), function(req)
+  WebRequest.get("https://" .. Importer.relayHost() .. "/tokens?q=" .. urlEncode(query), function(req)
     local list = {}
     if not req.is_error and (req.response_code or 200) < 400 and req.text ~= "NONE" then
       for _, line in ipairs(Importer.splitPlain(req.text or "", "\n")) do

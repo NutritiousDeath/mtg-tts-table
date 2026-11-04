@@ -229,16 +229,64 @@ end
 -- Import a deck list or an Archidekt / Moxfield link to a seat; messages go
 -- to `notify` (the player who asked). Used by the import panel and by
 -- "!import <Color> <link or list>" (solo testing).
+-- The last list each deck link gave (saved with the table): if Archidekt / Moxfield / the relay can't be
+-- reached, the link still imports from it (the deck cache in importer.lua then builds the cards).
+local LINK_KEEP = 12
+local function linkStore()
+  GameState.data.table = GameState.data.table or {}
+  GameState.data.table.linkLists = GameState.data.table.linkLists or {}
+  return GameState.data.table.linkLists
+end
+local function rememberLink(key, list)
+  local store = linkStore()
+  for i = #store, 1, -1 do
+    if store[i].k == key then
+      table.remove(store, i)
+    end
+  end
+  table.insert(store, 1, { k = key, l = list })
+  while #store > LINK_KEEP do
+    table.remove(store)
+  end
+end
+local function savedLink(key)
+  for _, e in ipairs(linkStore()) do
+    if e.k == key then
+      return e.l
+    end
+  end
+  return nil
+end
+
 function TableUI.importFor(color, text, notify)
   notify = notify or color
+  -- "fresh <link>": download everything again (skip the deck cache once).
+  local fresh = tostring(text or ""):match("^%s*fresh%s+(.+)$")
+  if fresh then
+    text = fresh
+    Importer.skipCacheOnce(color)
+  end
+  local function fallback(key, why)
+    local list = savedLink(key)
+    if list then
+      broadcastToColor(why .. " Using the list saved the last time this link was imported here.", notify, { 1, 0.8, 0.3 })
+      Importer.importDeck(color, list)
+      return true
+    end
+    return false
+  end
   local moxId = Archidekt.moxfieldId(text)
   if moxId then
     broadcastToColor("Fetching Moxfield deck " .. moxId .. "...", notify, { 0.7, 0.85, 1 })
     Archidekt.fetchMoxfield(moxId, function(list, nameOrError)
       if list == nil then
+        if fallback("mox:" .. moxId, tostring(nameOrError)) then
+          return
+        end
         broadcastToColor(nameOrError, notify, { 1, 0.3, 0.3 })
         return
       end
+      rememberLink("mox:" .. moxId, list)
       if nameOrError then
         broadcastToColor("Moxfield: " .. nameOrError, notify, { 0.7, 0.85, 1 })
       end
@@ -251,9 +299,13 @@ function TableUI.importFor(color, text, notify)
     broadcastToColor("Fetching Archidekt deck " .. deckId .. "...", notify, { 0.7, 0.85, 1 })
     Archidekt.fetch(deckId, function(list, nameOrError)
       if list == nil then
+        if fallback("arch:" .. deckId, tostring(nameOrError)) then
+          return
+        end
         broadcastToColor(nameOrError, notify, { 1, 0.3, 0.3 })
         return
       end
+      rememberLink("arch:" .. deckId, list)
       if nameOrError then
         broadcastToColor("Archidekt: " .. nameOrError, notify, { 0.7, 0.85, 1 })
       end

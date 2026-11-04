@@ -69,6 +69,8 @@ local CHAPTERS = {
       .. "- Which version is loaded, and which seat you are: " .. C .. "!seats" .. E .. ".\n"
       .. "- A pop-up nobody can answer: " .. C .. "!unstick" .. E .. ".\n"
       .. "- Script errors to report: " .. C .. "!errors" .. E .. ".\n"
+      .. "- An import fails: " .. C .. "!relay" .. E .. " checks the card relay. A deck imported here before comes back from the"
+      .. " deck cache without a download (" .. C .. "!cache" .. E .. "; " .. C .. "!import fresh <link>" .. E .. " downloads it again).\n"
       .. "- Everything the table asked you to do by hand is kept in the Notebook tab MTG By Hand ("
       .. C .. "!byhandclear" .. E .. " empties it).",
     "<b>Handy chat commands</b>\n\n"
@@ -279,7 +281,23 @@ local CHAPTERS = {
       .. " (the search for the partner), " .. C .. "Friend or foe" .. E .. " (the caster picks for each player), and \"your team\""
       .. " (anthems, counters and triggers count both of you). \"Each other player\" includes your teammate.",
   } },
+  { title = "Credits", pages = {
+    "<b>Credits and notice</b>\n\n"
+      .. "This table is unofficial Fan Content permitted under the Wizards of the Coast Fan Content Policy. "
+      .. "Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. "
+      .. "©Wizards of the Coast LLC.\n\n"
+      .. "- Card images and card data: " .. G .. "Scryfall" .. E .. " (scryfall.com). Not produced by or endorsed by Scryfall.\n"
+      .. "- Some card rules are read with data from the " .. G .. "Forge" .. E .. " project (Card-Forge, GPL).\n"
+      .. "- Deck links: Archidekt and Moxfield.\n"
+      .. "- Built for Tabletop Simulator. Music: Heaven is Overrated.\n\n"
+      .. "Type " .. C .. "!credits" .. E .. " in chat to see this again.",
+  } },
 }
+
+-- Shown in chat when the table loads and by !credits.
+Rulebook.CREDITS = "MTG table: unofficial Fan Content permitted under the Wizards of the Coast Fan Content Policy. Not approved/endorsed"
+  .. " by Wizards. Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC."
+  .. " Card images and data from Scryfall (not produced by or endorsed by Scryfall)."
 
 -- Keywords A-Z (the search looks here first).
 local KEYWORDS = {
