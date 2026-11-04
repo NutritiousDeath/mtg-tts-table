@@ -1,0 +1,13 @@
+# Cloudflare Worker settings for the card relay, matching the dashboard.
+# Deploy from this folder:  npx wrangler deploy
+# Secrets (AURA_URL, AURA_KEY) live in Cloudflare, not here, and survive deploys.
+name = "mtg-relay"
+main = "worker.js"
+compatibility_date = "2026-10-04"
+preview_urls = false
+
+[observability]
+enabled = true
+
+[observability.logs]
+enabled = true
