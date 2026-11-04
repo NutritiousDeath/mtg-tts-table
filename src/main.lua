@@ -55,6 +55,7 @@
     !relay <host>        use another relay (e.g. mtg-relay.yourname.workers.dev); !relay default goes back
     !cache / !cache clear  list / empty the decks saved at this table for offline re-imports
     !credits             the fan-content notice and credits
+    !bug <what happened> send a bug report (with the logs) to the table's maker; BUG on the console opens the panel
     !import <link>       import an Archidekt / Moxfield link to your seat
     !import Red <link>   import an Archidekt / Moxfield link (or list) to a seat
     !flip / !unflip   flip the table (just for fun) / put it back
@@ -113,6 +114,7 @@ require("src/planechase")
 require("src/planefx")
 require("src/leave")
 require("src/rulebook")
+require("src/bugreport")
 Pile.install()
 
 local SAMPLE_DECK = [[
@@ -133,7 +135,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.77 (relay setting, deck cache, credits)"
+SCRIPT_VERSION = "2.78 (BUG button: reports to Discord)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -996,6 +998,16 @@ function onChat(message, sender)
   if message == "!cache clear" then
     local n = Importer.cacheClear()
     broadcastToAll("MTG > " .. sender.color .. " emptied the deck cache (" .. n .. " deck" .. (n == 1 and "" or "s") .. ").", { 0.7, 0.85, 1 })
+    return false
+  end
+
+  local bugText = message:match("^!bug%s+(.+)$")
+  if bugText or message == "!bug" then
+    if bugText and BugReport then
+      BugReport.send(sender, bugText, { logs = true, steam = false })
+    else
+      ui_bugOpen(sender)
+    end
     return false
   end
 

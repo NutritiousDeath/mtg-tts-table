@@ -37,7 +37,15 @@
  *    Returns a decklist like /archidekt. Moxfield blocks servers, so TTS
  *    fetches the deck itself and the relay only converts it.
  *
- * Only Scryfall card image paths, /cards, /tokens, /moxfield and /archidekt/<id> are
+ * 6. Bug reports:  POST /bug  (body: JSON from the table's BUG button, src/bugreport.lua)
+ *    Sends the report to the table's owner on Discord with the logs as a text file:
+ *      - as a DM, when the secrets DISCORD_BOT_TOKEN and DISCORD_USER_ID are set (the bot must share a
+ *        server with that user, and the user must allow DMs from that server's members);
+ *      - otherwise to a channel, when the secret DISCORD_WEBHOOK is set.
+ *    Set them in Cloudflare: Workers > this worker > Settings > Variables and Secrets (type Secret).
+ *    One report per IP every 2 minutes; 300 KB max.
+ *
+ * Only Scryfall card image paths, /cards, /tokens, /moxfield, /archidekt/<id> and /bug are
  * accepted, so this can't be used as a general-purpose proxy.
  */
 
@@ -83,6 +91,20 @@ export default {
       }
       try {
         return await handleMoxfield(request);
+      } catch (err) {
+        return new Response("ERROR\t" + String(err && err.message ? err.message : err), {
+          status: 500,
+          headers: { "Content-Type": "text/plain" },
+        });
+      }
+    }
+
+    if (url.pathname === "/bug") {
+      if (request.method !== "POST") {
+        return new Response("POST only", { status: 405 });
+      }
+      try {
+        return await handleBug(request, env);
       } catch (err) {
         return new Response("ERROR\t" + String(err && err.message ? err.message : err), {
           status: 500,
@@ -642,4 +664,99 @@ function archidektToDecklist(deck) {
   if (attractions.length) out.push("", "Attractions", ...attractions);
   if (tokens.length) out.push("", "Tokens", ...tokens);
   return out.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// 6. Bug reports
+// ---------------------------------------------------------------------------
+
+const BUG_GAP_SECONDS = 120;
+const BUG_MAX_BYTES = 300000;
+const DISCORD_API = "https://discord.com/api/v10";
+
+function plain(text, status) {
+  return new Response(text, { status: status || 200, headers: { "Content-Type": "text/plain" } });
+}
+
+function clip(v, n) {
+  return String(v == null ? "" : v).slice(0, n);
+}
+
+async function handleBug(request, env) {
+  const hasDm = env.DISCORD_BOT_TOKEN && env.DISCORD_USER_ID;
+  if (!hasDm && !env.DISCORD_WEBHOOK) {
+    return plain("ERROR\tBug reports aren't set up on this relay.", 503);
+  }
+  const raw = await request.text();
+  if (raw.length > BUG_MAX_BYTES) {
+    return plain("ERROR\tReport too large.", 413);
+  }
+  let r;
+  try {
+    r = JSON.parse(raw);
+  } catch (e) {
+    return plain("ERROR\tNot JSON.", 400);
+  }
+  const what = clip(r.text, 1500).trim();
+  if (!what) {
+    return plain("ERROR\tEmpty report.", 400);
+  }
+
+  // One report per IP every BUG_GAP_SECONDS (Cloudflare's cache as a small timer).
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  const cache = caches.default;
+  const rlKey = new Request("https://bug-rate.invalid/" + encodeURIComponent(ip));
+  if (await cache.match(rlKey)) {
+    return plain("ERROR\tPlease wait a couple of minutes between reports.", 429);
+  }
+  await cache.put(rlKey, new Response("1", { headers: { "Cache-Control": "max-age=" + BUG_GAP_SECONDS } }));
+
+  const who = clip(r.seat, 12) + (r.steam ? " (" + clip(r.steam, 40) + ")" : "");
+  const where = [
+    "v" + clip(r.version, 60),
+    clip(r.layout, 10),
+    clip(r.format, 12),
+    r.started ? "turn " + clip(r.turn, 6) + " · " + clip(r.active, 10) + " · " + clip(r.step, 16) : "no game running",
+    r.planechase ? "Planechase" : "",
+  ].filter(Boolean).join(" · ");
+  let content = "**MTG table bug report** from " + who + "\n" + where + "\n>>> " + what;
+  content = content.slice(0, 1990);
+
+  const report = [
+    "MTG table bug report",
+    "From: " + who,
+    "When: " + new Date().toISOString(),
+    where,
+    "",
+    "What happened:",
+    what,
+    "",
+    r.logs ? clip(r.logs, BUG_MAX_BYTES) : "(no logs attached)",
+  ].join("\n");
+
+  const form = new FormData();
+  // No pings from whatever players type.
+  form.append("payload_json", JSON.stringify({ content, allowed_mentions: { parse: [] } }));
+  form.append("files[0]", new Blob([report], { type: "text/plain" }), "bug-report.txt");
+
+  let res;
+  if (hasDm) {
+    const auth = { Authorization: "Bot " + env.DISCORD_BOT_TOKEN };
+    const dm = await fetch(DISCORD_API + "/users/@me/channels", {
+      method: "POST",
+      headers: { ...auth, "Content-Type": "application/json" },
+      body: JSON.stringify({ recipient_id: String(env.DISCORD_USER_ID) }),
+    });
+    if (!dm.ok) {
+      return plain("ERROR\tCouldn't open the Discord DM (" + dm.status + ").", 502);
+    }
+    const channel = await dm.json();
+    res = await fetch(DISCORD_API + "/channels/" + channel.id + "/messages", { method: "POST", headers: auth, body: form });
+  } else {
+    res = await fetch(env.DISCORD_WEBHOOK, { method: "POST", body: form });
+  }
+  if (!res.ok) {
+    return plain("ERROR\tDiscord refused the report (" + res.status + ").", 502);
+  }
+  return plain("OK");
 }

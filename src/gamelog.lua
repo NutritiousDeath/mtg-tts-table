@@ -210,6 +210,32 @@ function GameLog.clearByHand()
   writeHand()
 end
 
+-- For a bug report (bugreport.lua): the error and by-hand lists, then the last n lines of the game log.
+function GameLog.reportText(n)
+  n = n or 250
+  if errLines == nil then
+    errLines = readTab(ERR_TITLE)
+  end
+  if handLines == nil then
+    handLines = readTab(HAND_TITLE)
+  end
+  local out = { "== MTG Errors (" .. #errLines .. ") ==" }
+  for _, l in ipairs(errLines) do
+    table.insert(out, l)
+  end
+  table.insert(out, "")
+  table.insert(out, "== MTG By Hand (" .. #handLines .. ") ==")
+  for _, l in ipairs(handLines) do
+    table.insert(out, l)
+  end
+  table.insert(out, "")
+  table.insert(out, "== Game log (last " .. math.min(n, #lines) .. " of " .. #lines .. " lines) ==")
+  for i = math.max(1, #lines - n + 1), #lines do
+    table.insert(out, lines[i])
+  end
+  return table.concat(out, "\n")
+end
+
 local function noteHand(msg)
   if GameLog.isByHand(msg) then
     pcall(GameLog.byHand, msg)

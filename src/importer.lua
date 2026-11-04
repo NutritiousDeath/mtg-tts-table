@@ -71,7 +71,7 @@ end
 -- Is the relay answering? cb(true) or cb(false, why). Any reply at all counts (even "not found").
 function Importer.pingRelay(cb)
   local host = relay()
-  WebRequest.get("https://" .. host .. "/tokens?q=treasure", function(req)
+  WebRequest.get("https://" .. host .. "/health", function(req)
     if req.is_error then
       cb(false, tostring(req.error or "no answer"))
     elseif (req.response_code or 0) >= 500 then
