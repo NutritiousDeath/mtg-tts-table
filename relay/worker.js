@@ -38,10 +38,11 @@
  *    fetches the deck itself and the relay only converts it.
  *
  * 6. Bug reports:  POST /bug  (body: JSON from the table's BUG button, src/bugreport.lua)
- *    Sends the report to the table's owner on Discord with the logs as a text file:
- *      - as a DM, when the secrets DISCORD_BOT_TOKEN and DISCORD_USER_ID are set (the bot must share a
- *        server with that user, and the user must allow DMs from that server's members);
- *      - otherwise to a channel, when the secret DISCORD_WEBHOOK is set.
+ *    Sends the report to the table's owner on Discord with the logs as a text file, the first of:
+ *      - through the AuraAI gateway (its bot DMs the owner; the bot token stays on Railway), when the
+ *        secrets AURA_URL (".../api/mtg/table-bug") and AURA_KEY (= Railway's MTG_BUG_KEY) are set;
+ *      - as a DM from a bot of its own, when DISCORD_BOT_TOKEN and DISCORD_USER_ID are set;
+ *      - to a channel, when DISCORD_WEBHOOK is set.
  *    Set them in Cloudflare: Workers > this worker > Settings > Variables and Secrets (type Secret).
  *    One report per IP every 2 minutes; 300 KB max.
  *
@@ -683,8 +684,9 @@ function clip(v, n) {
 }
 
 async function handleBug(request, env) {
+  const hasAura = env.AURA_URL && env.AURA_KEY;
   const hasDm = env.DISCORD_BOT_TOKEN && env.DISCORD_USER_ID;
-  if (!hasDm && !env.DISCORD_WEBHOOK) {
+  if (!hasAura && !hasDm && !env.DISCORD_WEBHOOK) {
     return plain("ERROR\tBug reports aren't set up on this relay.", 503);
   }
   const raw = await request.text();
@@ -733,6 +735,18 @@ async function handleBug(request, env) {
     "",
     r.logs ? clip(r.logs, BUG_MAX_BYTES) : "(no logs attached)",
   ].join("\n");
+
+  if (hasAura) {
+    const res = await fetch(env.AURA_URL, {
+      method: "POST",
+      headers: { Authorization: "Bearer " + env.AURA_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ content, report }),
+    });
+    if (!res.ok) {
+      return plain("ERROR\tAuraAI couldn't deliver the report (" + res.status + ").", 502);
+    }
+    return plain("OK");
+  }
 
   const form = new FormData();
   // No pings from whatever players type.
