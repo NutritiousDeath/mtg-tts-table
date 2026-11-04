@@ -149,7 +149,14 @@ function Effects.parse(text, sourceName)
     if comma then
       swap(sourceName:sub(1, comma - 1))
     end
+    -- "Smaug the Magnificent" is "Smaug" in its own text.
+    local the = sourceName:find(" the ", 1, true) or sourceName:find(" of the ", 1, true)
+    if the and the > 3 and not comma then
+      swap(sourceName:sub(1, the - 1))
+    end
   end
+  -- "Whenever Smaug attacks, he deals ...": the card itself.
+  t = t:gsub(", he deals ", ", ~ deals "):gsub(", she deals ", ", ~ deals "):gsub(", it deals ", ", ~ deals ")
   for _, w in ipairs({ "creature", "land", "enchantment", "artifact", "permanent", "planeswalker", "case", "class", "saga", "aura", "equipment" }) do
     t = t:gsub("this " .. w, "~")
   end
@@ -178,6 +185,27 @@ function Effects.parse(text, sourceName)
     local tt = t:gsub("^%s+", ""):gsub("%s+$", "")
     local function only(list)
       return { optional = false, actions = list, notes = {}, conds = {} }
+    end
+    -- Threaten effects (Act of Treason, Spreading Insurrection, Threaten): "Gain control of target creature
+    -- [you don't control] until end of turn. Untap that creature. It gains haste until end of turn."
+    do
+      local kindW = tt:match("gain control of target ([%a ']-) until end of turn")
+        or tt:match("untap target ([%a ]-) and gain control of it until end of turn")
+      if kindW then
+        local notYours = kindW:find(" you don't control", 1, true) ~= nil or kindW:find(" an opponent controls", 1, true) ~= nil
+        kindW = kindW:gsub(" you don't control", ""):gsub(" an opponent controls", "")
+        local kinds = {}
+        for _, k in ipairs({ "creature", "artifact", "enchantment", "planeswalker", "land", "permanent" }) do
+          if kindW:find(k, 1, true) then
+            kinds[k] = true
+          end
+        end
+        if next(kinds) == nil then
+          kinds.creature = true
+        end
+        return only({ { what = "forgeControl", who = "you", n = 1, kinds = kinds, scope = notYours and "notyou" or "all",
+          on = "tgt", eot = true, untap = tt:find("untap", 1, true) ~= nil, haste = tt:find("haste", 1, true) ~= nil } })
+      end
     end
     -- Sire of Insanity.
     if tt == "each player discards their hand." then
@@ -5810,6 +5838,237 @@ end
 -- "Partner with <name>" (CR 702.124j): when it enters, target player may search their library for a card
 -- named <name>, reveal it, put it into their hand, then shuffle. The controller picks the player (their 2HG
 -- teammate is listed first after themselves); that player gets the library search with the name filled in.
+-- Cards from the Nov 3 game logs that the reader left to the players. Each returns true when it handled `it`.
+local CARD_FX = {}
+
+-- Expressive Iteration: "Look at the top three cards of your library. Put one of them into your hand, put one of
+-- them on the bottom of your library, and exile one of them. You may play the exiled card this turn."
+CARD_FX.lookSplit = function(it, low)
+  if not low:find("put one of them into your hand, put one of them on the bottom of your library, and exile one of them", 1, true) then
+    return false
+  end
+  local seat = it.controller
+  local lib = Library.find(seat)
+  if lib == nil or lib.type ~= "Deck" then
+    broadcastToColor(it.name .. ": fewer than 2 cards in your library - do it by hand.", seat, INFO)
+    return true
+  end
+  local data = lib.getData()
+  local top = {}
+  for i = 1, math.min(3, #(data.ContainedObjects or {})) do
+    local e = data.ContainedObjects[i]
+    table.insert(top, { guid = e.GUID, name = e.Nickname or ("card " .. i) })
+  end
+  local function choices(list)
+    local out = {}
+    for i, c in ipairs(list) do
+      table.insert(out, { label = c.name, value = i })
+    end
+    return out
+  end
+  local function finish(hand, bottom, exile)
+    local s = TableSetup.seat(seat)
+    local function take(c, pos, faceUp, cb)
+      if c == nil then
+        if cb then cb() end
+        return
+      end
+      local live = Library.find(seat)
+      if live == nil or live.type ~= "Deck" then
+        if cb then cb() end
+        return
+      end
+      live.takeObject({ guid = c.guid, position = pos, rotation = { 0, s.yaw, faceUp and 0 or 180 }, smooth = false,
+        callback_function = function(o)
+          Wait.time(function() if not o.isDestroyed() then pcall(Zones.refresh, o) end end, 0.5)
+          if cb then cb(o) end
+        end })
+    end
+    take(hand, Player[seat].getHandTransform().position, true, function()
+      take(exile, TableSetup.slot(seat, "exile", TableSetup.SURFACE_TOP + 2), true, function(o)
+        Wait.time(function()
+          if bottom then
+            Library.moveToBottom(seat, 0)
+          end
+        end, 0.4)
+        printToAll("MTG > " .. it.name .. ": " .. seat .. " puts a card into their hand" .. (bottom and ", one on the bottom" or "")
+          .. (exile and (", and exiles " .. exile.name .. " (they may play it this turn).") or "."), GOOD)
+      end)
+    end)
+  end
+  ask(seat, it.name .. ": into your hand", "Which card goes into your HAND?", choices(top), function(h)
+    local hand = top[h]
+    local rest = {}
+    for i, c in ipairs(top) do
+      if i ~= h then table.insert(rest, c) end
+    end
+    if #rest == 0 then
+      finish(hand, nil, nil)
+      return
+    end
+    if #rest == 1 then
+      finish(hand, rest[1], nil)
+      return
+    end
+    ask(seat, it.name .. ": on the bottom", "Which card goes on the BOTTOM of your library? (The other is exiled; you may play it this turn.)",
+      choices(rest), function(b)
+        finish(hand, rest[b], rest[3 - b])
+      end)
+  end)
+  return true
+end
+
+-- Kassandra, Eagle Bearer: "search your graveyard, hand, and library for a card named X, put it onto the battlefield".
+CARD_FX.namedAnywhere = function(it, low)
+  local a = low:find("search your graveyard, hand, and library for a card named ", 1, true)
+  if not a then
+    return false
+  end
+  local rest = tostring(it.text):sub(a + #"search your graveyard, hand, and library for a card named ")
+  local name = rest:match("^(.-), put it onto the battlefield") or rest:match("^(.-), put it")
+  if name == nil or name == "" then
+    return false
+  end
+  local seat = it.controller
+  local lname = name:lower()
+  local s = TableSetup.seat(seat)
+  local function toField(o)
+    o.setLock(false)
+    o.setRotation({ 0, s.yaw, 0 })
+    o.setPosition(TableSetup.slot(seat, "battlefield", TableSetup.SURFACE_TOP + 2))
+    Wait.time(function() if not o.isDestroyed() then pcall(Zones.refresh, o) end end, 0.6)
+    printToAll("MTG > " .. it.name .. ": " .. seat .. " puts " .. name .. " onto the battlefield.", GOOD)
+  end
+  -- Hand first.
+  local okH, hand = pcall(function() return Player[seat].getHandObjects() end)
+  for _, o in ipairs(okH and hand or {}) do
+    if tostring(o.getName()):lower() == lname then
+      toField(o)
+      return true
+    end
+  end
+  -- Then the graveyard.
+  local pile = Library.pileIn(seat, "graveyard")
+  if pile and pile.type == "Card" and tostring(pile.getName()):lower() == lname then
+    toField(pile)
+    return true
+  elseif pile and pile.type == "Deck" then
+    for _, e in ipairs(pile.getObjects() or {}) do
+      if tostring(e.name or e.nickname or ""):lower() == lname then
+        pile.takeObject({ guid = e.guid, position = TableSetup.slot(seat, "battlefield", TableSetup.SURFACE_TOP + 2),
+          smooth = false, callback_function = toField })
+        return true
+      end
+    end
+  end
+  -- Then the library (the search panel, name filled in; it shuffles when closed).
+  LibSearch.open(seat, name, it.name .. ": take " .. name .. " (it goes onto the battlefield). Close the search when done; the library is shuffled.",
+    "battlefield", false, { limit = 1, fixedDest = true })
+  return true
+end
+
+-- Talon Gates of Madara: "(up to one) target creature phases out" (back in at your next untap step).
+CARD_FX.phaseOut = function(it, low)
+  if not (low:find("target creature phases out", 1, true) or low:find("target permanent phases out", 1, true)
+      or low:find("target nonland permanent phases out", 1, true)) then
+    return false
+  end
+  if not (PlaneFx and PlaneFx.phaseOutUntilUntap) then
+    return false
+  end
+  local seat = it.controller
+  local perm = not low:find("target creature phases out", 1, true)
+  ask(seat, it.name .. ": phase out", "Click TARGET on the " .. (perm and "permanent" or "creature") .. " that phases out, or SKIP.",
+    { { label = "SKIP", value = false } }, function(obj)
+      if obj then
+        local owner = Effects.fieldSeat(obj) or seat
+        PlaneFx.phaseOutUntilUntap(obj, owner, it.name)
+      else
+        printToAll("MTG > " .. it.name .. ": nothing phases out.", INFO)
+      end
+    end, { filter = function(obj, owner)
+      local ty = Effects.cardTypes(obj)
+      return owner ~= nil and (ty.creature or (perm and not (low:find("nonland", 1, true) and ty.land)))
+    end, label = "TARGET" })
+  return true
+end
+
+-- Daring Waverider: "you may cast target instant or sorcery card with mana value N or less from your graveyard without
+-- paying its mana cost. If that spell would be put into your graveyard, exile it instead."
+CARD_FX.castFromYard = function(it, low)
+  local mv = low:match("you may cast target instant or sorcery card with mana value (%d+) or less from your graveyard without paying its mana cost")
+  if not mv or not (PlaneFx and PlaneFx.castFromGraveyard) then
+    return false
+  end
+  mv = tonumber(mv)
+  PlaneFx.castFromGraveyard(it.controller, it.name, function(e)
+    local tl = tostring(e.typeLine or ""):lower()
+    return (tl:find("instant", 1, true) or tl:find("sorcery", 1, true)) and (tonumber(e.gm and e.gm.cmc) or 0) <= mv
+  end, { exileAfter = low:find("exile it instead", 1, true) ~= nil })
+  return true
+end
+
+-- Alania, Divergent Storm: "you may have target opponent draw a card. If you do, copy that spell."
+CARD_FX.drawToCopy = function(it, low)
+  if not low:find("you may have target opponent draw a card. if you do, copy that spell", 1, true) then
+    return false
+  end
+  local seat = it.controller
+  local spell = it.thatCard and getObjectFromGUID(it.thatCard)
+  if spell == nil or spell.isDestroyed() then
+    printToAll("MTG > " .. it.name .. ": that spell is gone - nothing to copy.", INFO)
+    return true
+  end
+  local ch = { { label = "DON'T", value = false } }
+  for _, c in ipairs(players()) do
+    if TableSetup.isOpponent(c, seat) then
+      table.insert(ch, { label = string.upper(c) .. " DRAWS", value = c })
+    end
+  end
+  ask(seat, it.name, "Have an opponent draw a card to copy " .. spell.getName() .. "?", ch, function(c)
+    if not c then
+      printToAll("MTG > " .. it.name .. ": " .. seat .. " doesn't copy " .. spell.getName() .. ".", INFO)
+      return
+    end
+    Actions.draw(c, 1, it.name)
+    if not spell.isDestroyed() then
+      Effects.copySpell(spell, seat, it.name)
+    end
+  end)
+  return true
+end
+
+local CARD_FX_ORDER = { "drawToCopy", "lookSplit", "namedAnywhere", "phaseOut", "castFromYard" }
+
+-- Does cardFx take this text? (Its own prompts pick the targets, so nothing is asked as it goes on the stack.)
+local CARD_FX_KEYS = { "you may have target opponent draw a card. if you do, copy that spell",
+  "put one of them into your hand, put one of them on the bottom of your library, and exile one of them",
+  "search your graveyard, hand, and library for a card named ", "target creature phases out", "target permanent phases out",
+  "you may cast target instant or sorcery card with mana value " }
+function Effects.cardFxTakes(text)
+  local low = tostring(text or ""):lower():gsub("’", "'")
+  for _, k in ipairs(CARD_FX_KEYS) do
+    if low:find(k, 1, true) then
+      return true
+    end
+  end
+  return false
+end
+
+function Effects.cardFx(it)
+  local low = tostring(it and it.text or ""):lower():gsub("’", "'")
+  for _, k in ipairs(CARD_FX_ORDER) do
+    local ok, did = pcall(CARD_FX[k], it, low)
+    if ok and did then
+      return true
+    elseif not ok and Events and Events.noteError then
+      Events.noteError(tostring(it.name) .. " (" .. k .. ")", did)
+      return true
+    end
+  end
+  return false
+end
+
 function Effects.partnerWith(it, name)
   local seat = it.controller
   name = tostring(name or ""):gsub("%s+$", "")
@@ -7495,6 +7754,10 @@ function Effects.resolve(it)
       end, 1)
     end
     clearLater()
+  end
+  -- Cards the reader can't split up itself (Expressive Iteration, Kassandra, Talon Gates, Daring Waverider, Alania).
+  if Effects.cardFx and Effects.cardFx(it) then
+    return
   end
   -- Battlebond "Partner with <name>": its enters trigger.
   if tostring(it.text or ""):sub(1, 13) == "Partner with " then
@@ -9964,7 +10227,8 @@ end
 
 -- Does a permanent fit a Forge target ("creature/nonland", control, another)?
 local function kindsFit(obj, owner, a, seat, src)
-  if (a.scope == "you" and owner ~= seat) or (a.scope == "opp" and not TableSetup.isOpponent(owner, seat)) then
+  if (a.scope == "you" and owner ~= seat) or (a.scope == "opp" and not TableSetup.isOpponent(owner, seat))
+      or (a.scope == "notyou" and owner == seat) then
     return false
   end
   if a.other and src and obj.getGUID() == src then
@@ -10615,6 +10879,9 @@ function Effects.chooseTargets(it, done)
   end
   if it.kind ~= "card" and (not it.auto or it.copyOf or it.planar or it.ninjutsu or it.planeFx
       or tostring(it.text or ""):sub(1, 13) == "Partner with ") then
+    return finish()
+  end
+  if it.kind ~= "card" and Effects.cardFxTakes and Effects.cardFxTakes(it.text) then
     return finish()
   end
   if not TableSetup.isActive(it.controller) then

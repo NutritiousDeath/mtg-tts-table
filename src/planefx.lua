@@ -4397,3 +4397,68 @@ function PlaneFx.friendOrFoe(it)
   end)
   return true
 end
+
+---------------------------------------------------------------------------
+-- Tools other cards use (effects.lua): phasing a creature out until its controller's next untap step
+-- (Talon Gates of Madara...), and casting a card from your graveyard for free (Daring Waverider...).
+---------------------------------------------------------------------------
+
+-- Phase obj out; it phases back in at the start of `seat`'s next untap step (or at a planeswalk).
+function PlaneFx.phaseOutUntilUntap(obj, seat, why)
+  if obj == nil or obj.isDestroyed() then
+    return
+  end
+  phaseOut(obj, why)
+  local s = st()
+  s.phaseUntil = s.phaseUntil or {}
+  s.phaseUntil[obj.getGUID()] = seat
+  printToAll("MTG > " .. tostring(why or "Phasing") .. ": " .. obj.getName() .. " phases out (it phases back in at "
+    .. tostring(seat) .. "'s next untap step).", GOOD)
+end
+
+Events.on("stepStarted", function(d)
+  if d == nil or d.step ~= "untap" or d.seat == nil then
+    return
+  end
+  local s = st()
+  local n = 0
+  for g, seat in pairs(s.phaseUntil or {}) do
+    if Turns.isActiveSeat(seat) then
+      s.phaseUntil[g] = nil
+      local o = getObjectFromGUID(g)
+      if s.phasedSet then
+        s.phasedSet[g] = nil
+      end
+      if o and not o.isDestroyed() then
+        showPhased(o, false)
+        n = n + 1
+      end
+    end
+  end
+  if n > 0 then
+    printToAll("MTG > " .. n .. " phased-out permanent" .. (n == 1 and "" or "s") .. " phase back in.", GOOD)
+    if Statics and Statics.soon then
+      Statics.soon()
+    end
+  end
+end)
+
+-- Pick a card in `color`'s graveyard that fits (entry: guid, name, typeLine, gm) and cast it for free.
+-- opts.exileAfter: if it would go to the graveyard afterwards, it's exiled instead.
+function PlaneFx.castFromGraveyard(color, title, fits, opts)
+  opts = opts or {}
+  pickGrave(color, title, fits, function(e)
+    takeFrom(color, "graveyard", { e.guid }, "battlefield", function(card)
+      GameState.data.freeCast = GameState.data.freeCast or {}
+      GameState.data.freeCast[card.getGUID()] = true
+      if opts.exileAfter then
+        local s = st()
+        s.exileAfter = s.exileAfter or {}
+        s.exileAfter[card.getGUID()] = color
+      end
+      castFrom(card, color)
+      printToAll("MTG > " .. title .. ": " .. color .. " casts " .. card.getName() .. " from their graveyard without paying its mana cost"
+        .. (opts.exileAfter and " (it's exiled afterwards)." or "."), GOOD)
+    end)
+  end)
+end

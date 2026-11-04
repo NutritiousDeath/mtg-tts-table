@@ -122,6 +122,11 @@ local function normalize(text, name)
   if comma then
     swap(name:sub(1, comma - 1))
   end
+  -- "Smaug the Magnificent" is "Smaug" in its own text.
+  local the = name and name:find(" the ", 1, true)
+  if the and the > 3 and not comma then
+    swap(name:sub(1, the - 1))
+  end
   for _, w in ipairs({ "creature", "permanent", "artifact", "enchantment", "land", "planeswalker", "card", "token", "vehicle", "case", "class", "saga", "aura", "equipment" }) do
     t = t:gsub("this " .. w, "~")
   end
@@ -2179,11 +2184,67 @@ function Triggers.onUnblocked(list)
   pushAll(found)
 end
 
+-- "if it's the first instant spell, the first sorcery spell, or the first Otter spell other than Alania you've
+-- cast this turn" (Alania, Divergent Storm): true when the spell just cast is the first of one of those kinds.
+-- earlier = the type lines and names of the spells this player cast before it this turn.
+local function firstOfKinds(text, card, earlier)
+  local low = tostring(text or ""):lower()
+  local seg = low:match("if it's the first (.-) you've cast this turn") or low:match("if it is the first (.-) you've cast this turn")
+  if seg == nil then
+    return nil
+  end
+  local d = cardData(card) or {}
+  local tl = tostring(d.typeLine or ""):lower()
+  local name = tostring(d.name or card.getName()):lower()
+  seg = seg:gsub(", or ", ", "):gsub(" or the first ", ", the first ")
+  for raw in (seg .. ","):gmatch("([^,]+),") do
+    local item = raw:gsub("^%s+", ""):gsub("^or ", ""):gsub("^the first ", ""):gsub("%s+$", "")
+    local other = item:match(" other than (.+)$")
+    local kind = item:gsub(" other than .+$", ""):gsub(" spell$", ""):gsub("^%s+", "")
+    local function fits(t, n)
+      if other and n:find(other, 1, true) == 1 then
+        return false
+      end
+      return kind ~= "" and t:find(kind, 1, true) ~= nil
+    end
+    if fits(tl, name) then
+      local seen = false
+      for _, e in ipairs(earlier or {}) do
+        if fits(e.tl, e.name) then
+          seen = true
+        end
+      end
+      if not seen then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 Events.on("spellCast", function(d)
   if not enabled() or not GameState.data.started or d.card == nil then
     return
   end
   local found = {}
+  -- The spells each player cast this turn (type line + name), for "the first ... spell you've cast this turn".
+  local earlierCasts
+  do
+    local gd = GameState.data
+    local turnNo = gd.turn and gd.turn.taken
+    local cl = gd.castKinds
+    if cl == nil or cl.turn ~= turnNo then
+      cl = { turn = turnNo, by = {} }
+      gd.castKinds = cl
+    end
+    cl.by[d.controller] = cl.by[d.controller] or {}
+    earlierCasts = {}
+    for _, e in ipairs(cl.by[d.controller]) do
+      table.insert(earlierCasts, e)
+    end
+    local cd = cardData(d.card) or {}
+    table.insert(cl.by[d.controller], { tl = tostring(cd.typeLine or ""):lower(), name = tostring(cd.name or d.card.getName()):lower() })
+  end
   local seatNo
   do
     local gd = GameState.data
@@ -2251,6 +2312,12 @@ Events.on("spellCast", function(d)
             firstOk = false
           end
         end
+        if firstOk and tostring(a.text):lower():find("you've cast this turn", 1, true) then
+          local okF, first = pcall(firstOfKinds, a.text, d.card, earlierCasts)
+          if okF and first == false then
+            firstOk = false
+          end
+        end
         if firstOk and (t.who == "each" or (t.who == "you" and mine) or (t.who == "opp" and TableSetup.isOpponent(p.controller, oppOf))) and spellMatches(d.card, t.spellType, p.obj)
             and (t.spell == nil or spellSpecMatches(d.card, t.spell)) and not (t.mvMax and (tonumber((cardData(d.card) or {}).cmc) or 0) > t.mvMax) then
           -- "That spell" (Gandalf copies it) is the spell that was cast.
@@ -2296,6 +2363,14 @@ Events.on("spellCast", function(d)
       table.insert(found, { obj = d.card, controller = d.controller, name = "Cascade (" .. d.card.getName() .. ")", guid = gid, face = face,
         text = "Cascade: exile cards from the top of your library until you exile a nonland card with mana value less than "
           .. tostring(mv or "that spell's") .. ". You may cast it without paying its mana cost. Put the exiled cards on the bottom of your library in a random order." })
+    end
+    -- The keyword list too (in case the rules text reached the table without its line breaks).
+    if not storm and dd and type(dd.keywords) == "table" then
+      for _, kw in ipairs(dd.keywords) do
+        if tostring(kw):lower() == "storm" then
+          storm = true
+        end
+      end
     end
     if Statics and Statics.spellGrantCount and not storm then
       local oks, extraS = pcall(Statics.spellGrantCount, d.card, d.controller, "storm")

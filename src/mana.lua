@@ -861,12 +861,37 @@ Events.on("spellCast", function(d)
     return
   end
   if cost and cost ~= "" and d.controller and TableSetup.isActive(d.controller) then
+    -- Cost reductions / increases on the table (Geist of Saint Thalia, Bureau Headmaster, Thalia...): applied
+    -- to the generic part of what's taken from the pool.
+    if Statics and Statics.costChange then
+      local okc, n = pcall(Statics.costChange, d.card, d.controller)
+      if okc and type(n) == "number" and n ~= 0 then
+        cost = ManaChips.adjustGeneric(cost, -n)
+      end
+    end
+    if cost == "" then
+      return
+    end
     if ManaChips.assist(d.controller, cost, d.card) then
       return
     end
     ManaChips.pay(d.controller, cost, d.card.getName(), d.card)
   end
 end)
+
+-- Add delta to a cost's generic mana ("{2}{U}" -1 -> "{1}{U}"); never below {0}. Coloured symbols stay.
+function ManaChips.adjustGeneric(cost, delta)
+  local generic, rest = 0, {}
+  for sym in tostring(cost):gmatch("{([^}]*)}") do
+    if sym:match("^%d+$") then
+      generic = generic + tonumber(sym)
+    else
+      table.insert(rest, "{" .. sym .. "}")
+    end
+  end
+  generic = math.max(0, generic + delta)
+  return (generic > 0 and ("{" .. generic .. "}") or "") .. table.concat(rest)
+end
 
 -- Assist (Battlebond, CR 702.132): in 2HG the caster's teammate may pay some of the spell's generic cost.
 -- The teammate is asked how much (tapping lands first fills their pool); that comes out of their pool and

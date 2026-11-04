@@ -1511,7 +1511,7 @@ Events.on("spellCast", function(d)
   local ok, n, from = pcall(Statics.costChange, d.card, d.controller)
   if ok and n and #from > 0 and n ~= 0 then
     printToAll("MTG > " .. d.card.getName() .. " costs {" .. math.abs(n) .. "} " .. (n > 0 and "less" or "more")
-      .. " (" .. table.concat(from, ", ") .. "). Adjust the payment by hand.", { 0.75, 0.8, 0.9 })
+      .. " (" .. table.concat(from, ", ") .. "); the table takes that off what it pays from the mana pool.", { 0.75, 0.8, 0.9 })
   end
 end)
 

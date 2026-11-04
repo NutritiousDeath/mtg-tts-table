@@ -135,7 +135,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.79 (bug report: format and step fixed)"
+SCRIPT_VERSION = "2.80 (game fixes: Alania, threaten, storm, cost reductions, Nov 3 cards)"
 
 function onLoad(saved)
   GameLog.setup()
