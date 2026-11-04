@@ -972,7 +972,7 @@ local function lockBlocks()
     for _, ag in ipairs(c.order) do
       local a = live(ag)
       if a and not c.blocked[ag] then
-        table.insert(unblocked, { obj = a, controller = controller(a) or turn().activeSeat })
+        table.insert(unblocked, { obj = a, controller = controller(a) or turn().activeSeat, target = targetSeat(c.attackers[ag]) })
       end
     end
     if #unblocked > 0 then

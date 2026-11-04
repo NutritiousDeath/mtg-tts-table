@@ -1020,6 +1020,7 @@ function Triggers.unrecognized(obj)
         and not low:find("becomes tapped, it deals %d+ damage to you")   -- City of Brass: handled when a player taps it (actions.lua)
         and not low:find("is tapped for mana, its controller adds an additional", 1, true)   -- Wild Growth: mana.lua adds it
         and not low:find("when this class becomes level", 1, true)
+        and not (CardWatch and CardWatch.handles and CardWatch.handles(low))
         and not low:find("when the fourth plan counter is put on", 1, true) then   -- Claim the Kingdom (effects.lua planCounter)   -- said when the Class levels up (effects.lua)
       table.insert(out, para)
     end
@@ -1656,6 +1657,10 @@ Events.on("cardMoved", function(d)
         end
       end
     end
+    -- Wedding Ring and other cards watched in cardwatch.lua.
+    if CardWatch and CardWatch.drew then
+      pcall(CardWatch.drew, d.to.seat, card)
+    end
     do
       local gd = GameState.data
       local turnNo = gd.turn and gd.turn.taken
@@ -1893,6 +1898,9 @@ end
 function Triggers.onLife(seat, delta)
   if not enabled() or not GameState.data.started or delta == 0 then
     return
+  end
+  if CardWatch and CardWatch.life then
+    pcall(CardWatch.life, seat, delta)
   end
   local dir = delta > 0 and "gain" or "loss"
   local found = {}
@@ -2156,6 +2164,9 @@ function Triggers.onUnblocked(list)
   if not enabled() or not GameState.data.started then
     return
   end
+  if CardWatch and CardWatch.unblocked then
+    pcall(CardWatch.unblocked, list)
+  end
   local found = {}
   for _, u in ipairs(list) do
     for _, a in ipairs(abilitiesOf(u.obj)) do
@@ -2227,6 +2238,9 @@ Events.on("spellCast", function(d)
     return
   end
   local found = {}
+  -- "If it was cast" (Wedding Ring): the permanent that resolves from this spell was cast.
+  GameState.data.wasCast = GameState.data.wasCast or {}
+  GameState.data.wasCast[d.card.getGUID()] = true
   -- The spells each player cast this turn (type line + name), for "the first ... spell you've cast this turn".
   local earlierCasts
   do

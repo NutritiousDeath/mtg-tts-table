@@ -112,6 +112,7 @@ require("src/music")
 require("src/planechase_data")
 require("src/planechase")
 require("src/planefx")
+require("src/cardwatch")
 require("src/leave")
 require("src/rulebook")
 require("src/bugreport")
@@ -135,7 +136,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.80 (game fixes: Alania, threaten, storm, cost reductions, Nov 3 cards)"
+SCRIPT_VERSION = "2.81 (Three Tree City, Yes Man, Aerith, The Sentry, Wedding Ring, Coveted Jewel)"
 
 function onLoad(saved)
   GameLog.setup()

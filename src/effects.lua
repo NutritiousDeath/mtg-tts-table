@@ -5878,6 +5878,9 @@ CARD_FX.lookSplit = function(it, low)
         if cb then cb() end
         return
       end
+      -- Not a draw (nothing that watches draws should fire).
+      GameState.data.searched = GameState.data.searched or {}
+      GameState.data.searched[c.guid] = true
       live.takeObject({ guid = c.guid, position = pos, rotation = { 0, s.yaw, faceUp and 0 or 180 }, smooth = false,
         callback_function = function(o)
           Wait.time(function() if not o.isDestroyed() then pcall(Zones.refresh, o) end end, 0.5)
@@ -6038,13 +6041,234 @@ CARD_FX.drawToCopy = function(it, low)
   return true
 end
 
-local CARD_FX_ORDER = { "drawToCopy", "lookSplit", "namedAnywhere", "phaseOut", "castFromYard" }
+-- Three Tree City: "{2}, {T}: Choose a color. Add an amount of mana of that color equal to the number of creatures
+-- you control of the chosen type." (The type was chosen as it entered.)
+CARD_FX.manaPerType = function(it, low)
+  if not low:find("add an amount of mana of that color equal to the number of creatures you control of the chosen type", 1, true) then
+    return false
+  end
+  local seat = it.controller
+  local src = it.source and getObjectFromGUID(it.source)
+  local ty = src and Statics and Statics.chosenType and Statics.chosenType(src)
+  if ty == nil or ty == "" then
+    broadcastToColor(it.name .. ": no creature type was chosen for it - add the mana by hand.", seat, INFO)
+    return true
+  end
+  local want = tostring(ty):lower()
+  local n = 0
+  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+    if o.type == "Card" and not o.isDestroyed() and Effects.fieldSeat(o) == seat and Effects.cardTypes(o).creature then
+      local d = CardData.get(o)
+      local tl = tostring(d.typeLine or ""):lower()
+      local changeling = false
+      for _, k in ipairs(type(d.keywords) == "table" and d.keywords or {}) do
+        if tostring(k):lower() == "changeling" then changeling = true end
+      end
+      if changeling or tl:find(want, 1, true) then
+        n = n + 1
+      end
+    end
+  end
+  if n == 0 then
+    printToAll("MTG > " .. it.name .. ": " .. seat .. " controls no " .. ty .. " creatures - no mana.", INFO)
+    return true
+  end
+  ask(seat, it.name .. ": color", "Add " .. n .. " mana (one per " .. ty .. " you control) of which color?",
+    { { label = "WHITE", value = "W" }, { label = "BLUE", value = "U" }, { label = "BLACK", value = "B" },
+      { label = "RED", value = "R" }, { label = "GREEN", value = "G" } }, function(k)
+      ManaChips.add(seat, k, n)
+      printToAll("MTG > " .. it.name .. ": " .. seat .. " adds " .. n .. " " .. k .. " (" .. n .. " " .. ty .. ").", GOOD)
+    end)
+  return true
+end
+
+-- Yes Man, Personal Securitron: "Target opponent gains control of Yes Man. When they do, you draw two cards and put a
+-- quest counter on Yes Man."
+CARD_FX.giveAway = function(it, low)
+  if not (low:find("target opponent gains control of", 1, true) and low:find("you draw two cards and put a quest counter on", 1, true)) then
+    return false
+  end
+  local seat = it.controller
+  local src = it.source and getObjectFromGUID(it.source)
+  if src == nil or src.isDestroyed() or not Effects.fieldSeat(src) then
+    printToAll("MTG > " .. it.name .. ": it isn't on the battlefield any more.", INFO)
+    return true
+  end
+  local ch = {}
+  for _, c in ipairs(players()) do
+    if TableSetup.isOpponent(c, seat) then
+      table.insert(ch, { label = string.upper(c), value = c })
+    end
+  end
+  ask(seat, it.name, "Which opponent gains control of " .. src.getName() .. "?", ch, function(c)
+    if Effects.ownerOf(src) == nil then
+      Effects.setOwner(src, seat)
+    end
+    Effects.moveToSeat(src, c)
+    Actions.draw(seat, 2, it.name)
+    Wait.time(function()
+      if not src.isDestroyed() then
+        Counters.place(src, "other", 1, seat)
+      end
+    end, 1.5)
+    printToAll("MTG > " .. it.name .. ": " .. c .. " gains control of " .. src.getName() .. "; " .. seat .. " draws two and puts a quest"
+      .. " counter on it.", GOOD)
+  end)
+  return true
+end
+
+-- "its owner creates a tapped 1/1 white Soldier creature token for each quest counter on it" (Yes Man leaving):
+-- counted from the counters it had as it left.
+CARD_FX.tokensPerCounter = function(it, low)
+  local spec = low:match("creates? (a tapped [^.]- token) for each %a+ counter on it")
+    or low:match("creates? (an? [^.]- token) for each %a+ counter on it")
+  if not spec then
+    return false
+  end
+  local seat = it.controller
+  local lk = Counters.lastKnown and it.source and Counters.lastKnown[it.source]
+  local src = it.source and getObjectFromGUID(it.source)
+  local c = lk or (src and Counters.get(src)) or {}
+  local n = (c.other or 0)
+  if low:find("+1/+1 counter on it", 1, true) then
+    n = c.plus or 0
+  end
+  local who = seat
+  if low:find("its owner creates", 1, true) and src then
+    who = Effects.ownerOf(src) or seat
+  end
+  if n <= 0 then
+    printToAll("MTG > " .. it.name .. ": no counters on it - no tokens.", INFO)
+    return true
+  end
+  for _ = 1, n do
+    Effects.resolve({ name = it.name, controller = who, text = "Create " .. spec .. ".", auto = true, trigger = true, kind = "ability" })
+  end
+  return true
+end
+
+-- Aerith Gainsborough: "When ~ dies, put X +1/+1 counters on each legendary creature you control, where X is the
+-- number of +1/+1 counters on ~."
+CARD_FX.countersOnLegends = function(it, low)
+  if not low:find("put x +1/+1 counters on each legendary creature you control, where x is the number of +1/+1 counters on", 1, true) then
+    return false
+  end
+  local seat = it.controller
+  local lk = Counters.lastKnown and it.source and Counters.lastKnown[it.source]
+  local x = lk and lk.plus or 0
+  if x <= 0 then
+    printToAll("MTG > " .. it.name .. ": it had no +1/+1 counters - nothing to put.", INFO)
+    return true
+  end
+  local n = 0
+  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+    if o.type == "Card" and not o.isDestroyed() and Effects.fieldSeat(o) == seat and Effects.cardTypes(o).creature
+        and tostring(CardData.get(o).typeLine or ""):lower():find("legendary", 1, true) then
+      Counters.place(o, "plus", x, seat)
+      n = n + 1
+    end
+  end
+  printToAll("MTG > " .. it.name .. ": " .. x .. " +1/+1 counter" .. (x == 1 and "" or "s") .. " on each of " .. seat .. "'s "
+    .. n .. " legendary creature" .. (n == 1 and "" or "s") .. ".", GOOD)
+  return true
+end
+
+-- The Sentry, Golden Guardian: "target opponent creates The Void, a legendary 5/5 black Horror Villain creature token
+-- with flying, indestructible, and "The Void attacks each combat if able."" (and others worded like it).
+CARD_FX.oppToken = function(it, low)
+  local name, spec = tostring(it.text):match("[Tt]arget opponent creates ([^,]+), (an? [^.]- token[^.\"]*)")
+  if not name then
+    return false
+  end
+  local seat = it.controller
+  spec = spec:gsub(', and "[^"]*"', ""):gsub("%s+$", ""):gsub(", and$", ""):gsub(",$", "")
+  spec = spec:gsub(" with ([%a ]+), ([%a ]+)$", " with %1 and %2")
+  local ch = {}
+  for _, c in ipairs(players()) do
+    if TableSetup.isOpponent(c, seat) then
+      table.insert(ch, { label = string.upper(c), value = c })
+    end
+  end
+  ask(seat, it.name, "Which opponent creates " .. name .. "?", ch, function(c)
+    Effects.resolve({ name = it.name, controller = c, text = "Create " .. spec .. ".", auto = true, trigger = true, kind = "ability" })
+    local extra = tostring(it.text):match('"([^"]+)"')
+    printToAll("MTG > " .. it.name .. ": " .. c .. " gets " .. name .. (extra and (" (" .. extra .. ")") or "") .. ".", GOOD)
+  end)
+  return true
+end
+
+-- Wedding Ring: "When this artifact enters, if it was cast, target opponent creates a token that's a copy of it."
+CARD_FX.ringCopy = function(it, low)
+  if not low:find("if it was cast, target opponent creates a token that's a copy of it", 1, true) then
+    return false
+  end
+  local seat = it.controller
+  local src = it.source and getObjectFromGUID(it.source)
+  local cast = GameState.data.wasCast and it.source and GameState.data.wasCast[it.source]
+  if src == nil or not cast then
+    printToAll("MTG > " .. it.name .. ": it wasn't cast - no copy.", INFO)
+    return true
+  end
+  GameState.data.wasCast[it.source] = nil
+  local ch = {}
+  for _, c in ipairs(players()) do
+    if TableSetup.isOpponent(c, seat) then
+      table.insert(ch, { label = string.upper(c), value = c })
+    end
+  end
+  ask(seat, it.name, "Which opponent gets a token copy of " .. src.getName() .. "?", ch, function(c)
+    Effects.copyCard(src, c, { toField = true, noMods = true }, it.name)
+  end)
+  return true
+end
+
+-- Wedding Ring's watched halves (cardwatch.lua puts them on the stack): you draw / gain that much.
+CARD_FX.ringWatch = function(it, low)
+  if not low:find("who controls an artifact named wedding ring", 1, true) then
+    return false
+  end
+  if low:find("draws a card during their turn, you draw a card", 1, true) then
+    Actions.draw(it.controller, 1, it.name)
+  elseif low:find("gains life during their turn, you gain that much life", 1, true) then
+    local n = tonumber(it.amount) or 0
+    if n > 0 then
+      Trackers.changeLife(it.controller, n, it.name)
+    end
+  end
+  return true
+end
+
+-- Coveted Jewel: "that player draws three cards and gains control of this artifact. Untap it."
+CARD_FX.jewel = function(it, low)
+  if not low:find("that player draws three cards and gains control of this artifact", 1, true) then
+    return false
+  end
+  local who = it.that
+  local src = it.source and getObjectFromGUID(it.source)
+  if who == nil or src == nil or src.isDestroyed() then
+    broadcastToColor(it.name .. ": do it by hand (couldn't tell who attacked or where the artifact is).", it.controller, INFO)
+    return true
+  end
+  Actions.draw(who, 3, it.name)
+  if Effects.ownerOf(src) == nil then
+    Effects.setOwner(src, it.controller)
+  end
+  Effects.moveToSeat(src, who)
+  Wait.time(function() if not src.isDestroyed() then Effects.untapObj(src) end end, 1.4)
+  printToAll("MTG > " .. it.name .. ": " .. who .. " draws three cards and gains control of it (untapped).", GOOD)
+  return true
+end
+
+local CARD_FX_ORDER = { "drawToCopy", "lookSplit", "namedAnywhere", "phaseOut", "castFromYard", "manaPerType", "giveAway",
+  "tokensPerCounter", "countersOnLegends", "oppToken", "ringCopy", "ringWatch", "jewel" }
 
 -- Does cardFx take this text? (Its own prompts pick the targets, so nothing is asked as it goes on the stack.)
 local CARD_FX_KEYS = { "you may have target opponent draw a card. if you do, copy that spell",
   "put one of them into your hand, put one of them on the bottom of your library, and exile one of them",
   "search your graveyard, hand, and library for a card named ", "target creature phases out", "target permanent phases out",
-  "you may cast target instant or sorcery card with mana value " }
+  "you may cast target instant or sorcery card with mana value ", "target opponent gains control of",
+  "if it was cast, target opponent creates a token that's a copy of it", "who controls an artifact named wedding ring",
+  "that player draws three cards and gains control of this artifact" }
 function Effects.cardFxTakes(text)
   local low = tostring(text or ""):lower():gsub("’", "'")
   for _, k in ipairs(CARD_FX_KEYS) do
