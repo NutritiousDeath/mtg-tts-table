@@ -135,7 +135,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.78 (BUG button: reports to Discord)"
+SCRIPT_VERSION = "2.79 (bug report: format and step fixed)"
 
 function onLoad(saved)
   GameLog.setup()

@@ -129,11 +129,11 @@ function BugReport.send(player, what, opts)
     version = tostring(SCRIPT_VERSION or "?"),
     seat = c,
     layout = TableSetup.layout and TableSetup.layout() or "?",
-    format = GameState.format and GameState.format() or "?",
+    format = tostring((d.table and d.table.format) or d.format or "commander"),
     started = d.started and true or false,
     turn = t.number or t.taken,
     active = t.activeSeat,
-    step = t.step,
+    step = (Turns and Turns.STEPS and t.stepIndex and Turns.STEPS[t.stepIndex] and Turns.STEPS[t.stepIndex].id) or t.step,
     planechase = (d.planechase and d.planechase.on) and true or nil,
   }
   if opts and opts.steam then
