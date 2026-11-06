@@ -737,6 +737,19 @@ function Trackers.render(color)
       font_color = { 0.4, 0.9, 1 }, color = { 0, 0, 0, 0 } }, 2.6, 1.95)
   end
 
+  -- Dungeons (effects.lua): where they are, and how many they've completed, between the two badges.
+  if Effects and Effects.dungeonOf then
+    local dn, room = Effects.dungeonOf(color)
+    local done = (Effects.completedDungeons(color))
+    if dn or done > 0 then
+      local short = dn and ((Effects.DUNGEONS and Effects.DUNGEONS[dn] and Effects.DUNGEONS[dn].short) or dn) or nil
+      local label = (short and (string.upper(short) .. ": " .. string.upper(room)) or "") .. (done > 0 and ((short and "  " or "") .. "DONE " .. done) or "")
+      button(tile, { label = label, click_function = "trk_noop", tooltip = (dn and ("In " .. dn .. ", room: " .. room .. ". ") or "")
+        .. "Dungeons completed: " .. done .. ".", width = 0, height = 0, font_size = 120,
+        font_color = { 0.75, 0.6, 1 }, color = { 0, 0, 0, 0 } }, 0, 1.95)
+    end
+  end
+
   -- Poison on the drop.
   outlined(tile, tostring(p.poison), POISON_SLOT.x, POISON_SLOT.z + POISON_NUMBER_DZ, 300,
     p.poison >= poisonLethal() - 3 and WARN or INK,

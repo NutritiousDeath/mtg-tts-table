@@ -204,6 +204,14 @@ local CHAPTERS = {
       .. "Taking the initiative (and the start of your upkeep while you have it) " .. C .. "ventures into Undercity" .. E .. ": "
       .. "Secret Entrance, then Forge or Lost Well, and on down to the Throne of the Dead Three. "
       .. "Combat damage to the player with the initiative passes it on. Shown on the tracker.",
+    "<b>Dungeons</b>\n\n"
+      .. C .. "Venture into the dungeon" .. E .. ": with no dungeon, you choose Lost Mine of Phandelver, Dungeon of the Mad Mage or "
+      .. "Tomb of Annihilation and enter its first room; otherwise you move to the next room (you pick at a fork). "
+      .. "Each room's ability goes on the stack. One dungeon at a time.\n"
+      .. "- When the last room's ability resolves, the dungeon is " .. G .. "completed" .. E .. " (\"if you've completed a dungeon\" cards "
+      .. "count it) and your next venture starts a new one.\n"
+      .. "- Undercity is only entered through the initiative; venturing into Undercity while in another dungeon moves you on there.\n"
+      .. "- Your tracker shows your dungeon, room and how many you've completed. Hama Pashar-style cards make rooms trigger twice.",
     "<b>The legend rule</b>\n\nIf you control two or more legendary permanents with the same name, you choose one and the rest go to the graveyard. "
       .. "(Two players can each have their own copy.)\n\n"
       .. "<b>Turn order and choices</b>\n\nPlay goes clockwise. When several players choose or trigger at once, the active player goes first, "
@@ -315,6 +323,7 @@ local KEYWORDS = {
   { "Crew", "Tap creatures with that much total power: this Vehicle becomes a creature until end of turn." },
   { "Cycling", "Pay the cost, discard it: draw a card." },
   { "Deathtouch", "Any damage it deals to a creature is enough to destroy it." },
+  { "Dungeon", "Rooms you move through when you venture. The last room completes it. See Multiplayer, page 2." },
   { "Defender", "Can't attack." },
   { "Delve", "Exile cards from your graveyard to pay {1} each." },
   { "Demonstrate", "When you cast it, you may copy it; if you do, an opponent you choose copies it too." },
@@ -335,6 +344,7 @@ local KEYWORDS = {
   { "Haste", "Can attack and tap the turn it comes under your control." },
   { "Hexproof", "Can't be the target of spells or abilities your opponents control." },
   { "Indestructible", "Isn't destroyed by damage or \"destroy\" effects. (0 toughness still kills it.)" },
+  { "Initiative", "Take it: venture into Undercity, and again at your upkeep while you have it. Combat damage to you passes it on." },
   { "Infect", "Deals damage to creatures as -1/-1 counters and to players as poison counters." },
   { "Kicker", "An optional extra cost for an extra effect." },
   { "Landfall", "Triggers whenever a land enters under your control." },
@@ -364,6 +374,7 @@ local KEYWORDS = {
   { "Trample", "Combat damage beyond what's lethal to its blockers goes to the player or planeswalker." },
   { "Undying", "When it dies without a +1/+1 counter, return it with a +1/+1 counter." },
   { "Unearth", "Return it from your graveyard to the battlefield with haste; exile it at the next end step or if it would leave." },
+  { "Venture into the dungeon", "Enter a dungeon's first room, or move to its next room; each room's ability goes on the stack." },
   { "Vigilance", "Attacking doesn't tap it." },
   { "Ward", "When an opponent targets it, their spell or ability is countered unless they pay the ward cost." },
   { "Wither", "Deals damage to creatures as -1/-1 counters." },

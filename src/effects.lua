@@ -1746,6 +1746,22 @@ function Effects.parse(text, sourceName)
   if t:find("you take the initiative", 1, true) then
     table.insert(actions, { what = "initiative", who = "you", n = 1 })
   end
+  -- Dungeons (CR 701.49): "venture into the dungeon" (each time it's said), "venture into Undercity".
+  do
+    local vn = 0
+    for _ in t:gmatch("venture into the dungeon") do
+      vn = vn + 1
+    end
+    if t:find("venture into the dungeon twice", 1, true) then
+      vn = vn + 1
+    end
+    for _ = 1, vn do
+      table.insert(actions, { what = "venture", who = "you", n = 1 })
+    end
+    if t:find("venture into undercity", 1, true) then
+      table.insert(actions, { what = "venture", who = "you", n = 1, undercity = true })
+    end
+  end
   -- Goad: "goad target creature [an opponent controls]" (Baeloth, Disrupt Decorum).
   if t:find("goad target creature", 1, true) or t:find("goad up to one target creature", 1, true) then
     table.insert(actions, { what = "goad", who = "you", n = 1 })
@@ -2925,6 +2941,8 @@ local function describe(a, target, controller)
     return "becomes the monarch"
   elseif a.what == "initiative" then
     return "takes the initiative"
+  elseif a.what == "venture" then
+    return a.undercity and "ventures into Undercity" or "ventures into the dungeon"
   elseif a.what == "bounceSelf" then
     return "it returns to its owner's hand"
   elseif a.what == "copySelf" then
@@ -3416,6 +3434,23 @@ local function apply(it, plan, target)
           Effects.setMonarch(seat, it.name)
         elseif a.what == "initiative" then
           Effects.setInitiative(seat, it.name)
+        elseif a.what == "venture" then
+          -- One venture at a time: a second waits for the first's room choice.
+          local vseat, vu = seat, a.undercity
+          local wait = 0
+          for _, b in ipairs(plan.actions) do
+            if b == a then
+              break
+            end
+            if b.what == "venture" then
+              wait = wait + 1
+            end
+          end
+          if wait == 0 then
+            Effects.venture(vseat, vu)
+          else
+            Wait.condition(function() Effects.venture(vseat, vu) end, function() return not Effects.busy() end, 120)
+          end
         elseif a.what == "goad" then
           Effects.askChoice(seat, it.name .. ": goad a creature", "Click GOAD on the creature (it attacks each combat if able, and a player other than " .. seat .. " if able).",
             { { label = "SKIP", value = false } }, function(obj)
@@ -6073,6 +6108,262 @@ CARD_FX.drawToCopy = function(it, low)
   return true
 end
 
+-- Dungeon rooms (and cards worded like them) the reader can't run on its own.
+local function pickPermanentToSac(seat, title, kinds, cb)
+  local any = false
+  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+    if o.type == "Card" and not o.isDestroyed() and Effects.fieldSeat(o) == seat then
+      local ty = Effects.cardTypes(o)
+      for k in pairs(kinds) do
+        if ty[k] then any = true end
+      end
+    end
+  end
+  if not any then
+    cb(nil)
+    return
+  end
+  local what = {}
+  for k in pairs(kinds) do table.insert(what, k) end
+  table.sort(what)
+  ask(seat, title, "Click SACRIFICE on a " .. table.concat(what, " / ") .. " you control.", { { label = "NONE", value = false } }, function(obj)
+    if obj then
+      Combat.sacrifice(obj)
+      printToAll("MTG > " .. title .. ": " .. seat .. " sacrifices " .. obj.getName() .. ".", INFO)
+    end
+    cb(obj)
+  end, { filter = function(o, owner)
+    if owner ~= seat then return false end
+    local ty = Effects.cardTypes(o)
+    for k in pairs(kinds) do
+      if ty[k] then return true end
+    end
+    return false
+  end, label = "SACRIFICE", protect = false })
+end
+
+local function discardOne(seat, title, cb)
+  local okH, hand = pcall(function() return Player[seat].getHandObjects() end)
+  local list = {}
+  for _, o in ipairs(okH and hand or {}) do
+    if o.type == "Card" and o.hasTag("MTGCard") then table.insert(list, o) end
+  end
+  if #list == 0 then
+    cb(nil)
+    return
+  end
+  local ch = {}
+  for i, o in ipairs(list) do
+    if i <= 9 then table.insert(ch, { label = o.getName():sub(1, 20), value = i }) end
+  end
+  ask(seat, title, "Discard which card?", ch, function(i)
+    local card = list[i or 1]
+    if card and not card.isDestroyed() then
+      local st = TableSetup.seat(seat)
+      card.setPosition(TableSetup.slot(seat, "graveyard", TableSetup.SURFACE_TOP + 2))
+      card.setRotation({ 0, st.yaw, 0 })
+      Wait.time(function() if not card.isDestroyed() then pcall(Zones.refresh, card) end end, 0.6)
+      printToAll("MTG > " .. title .. ": " .. seat .. " discards " .. card.getName() .. ".", INFO)
+    end
+    cb(card)
+  end)
+end
+
+local function untilNext(entry)
+  GameState.data.untilNext = GameState.data.untilNext or {}
+  table.insert(GameState.data.untilNext, entry)
+  if Statics and Statics.soon then Statics.soon() end
+end
+
+-- "Target creature gets -4/-0 until your next turn" (Fungi Cavern) / "can't attack until your next turn" (Twisted Caverns).
+CARD_FX.untilNextTurn = function(it, low)
+  local p, t = low:match("target creature gets ([%+%-]%d+)/([%+%-]%d+) until your next turn")
+  local noAtk = low:find("target creature can't attack until your next turn", 1, true)
+  if not p and not noAtk then
+    return false
+  end
+  local seat = it.controller
+  ask(seat, it.name, "Click TARGET on the creature.", { { label = "SKIP", value = false } }, function(obj)
+    if not obj then return end
+    if p then
+      untilNext({ kind = "pump", guid = obj.getGUID(), seat = seat, p = tonumber(p), t = tonumber(t) })
+      printToAll("MTG > " .. it.name .. ": " .. obj.getName() .. " gets " .. p .. "/" .. t .. " until " .. seat .. "'s next turn.", GOOD)
+    else
+      untilNext({ kind = "noAttack", guid = obj.getGUID(), seat = seat, why = it.name .. " (until " .. seat .. "'s next turn)" })
+      printToAll("MTG > " .. it.name .. ": " .. obj.getName() .. " can't attack until " .. seat .. "'s next turn.", GOOD)
+    end
+  end, { filter = function(o, owner) return owner ~= nil and Effects.cardTypes(o).creature == true end, label = "TARGET" })
+  return true
+end
+
+-- Runestone Caverns: "Exile the top two cards of your library. You may play them."
+CARD_FX.exileTopPlay = function(it, low)
+  local w = low:match("^%s*exile the top (%w+) cards of your library%. you may play them")
+  if not w then return false end
+  local NUM = { two = 2, three = 3, four = 4, five = 5 }
+  local n = tonumber(w) or NUM[w] or 2
+  local seat = it.controller
+  local st = TableSetup.seat(seat)
+  local names = {}
+  local function one(k)
+    if k > n then
+      printToAll("MTG > " .. it.name .. ": " .. seat .. " exiles " .. table.concat(names, ", ") .. " and may play them.", GOOD)
+      return
+    end
+    local lib = Library.find(seat)
+    if lib == nil then return one(n + 1) end
+    local pos = TableSetup.slot(seat, "exile", TableSetup.SURFACE_TOP + 2 + k * 0.3)
+    if lib.type == "Card" then
+      table.insert(names, lib.getName())
+      lib.setPosition(pos)
+      lib.setRotation({ 0, st.yaw, 0 })
+      Wait.time(function() if not lib.isDestroyed() then pcall(Zones.refresh, lib) end end, 0.5)
+      return one(n + 1)
+    end
+    GameState.data.searched = GameState.data.searched or {}
+    lib.takeObject({ index = 0, position = pos, rotation = { 0, st.yaw, 0 }, smooth = false, callback_function = function(o)
+      table.insert(names, o.getName())
+      Wait.time(function() if not o.isDestroyed() then pcall(Zones.refresh, o) end end, 0.5)
+      Wait.time(function() one(k + 1) end, 0.3)
+    end })
+  end
+  one(1)
+  return true
+end
+
+-- Mad Wizard's Lair: "Draw three cards and reveal them. You may cast one of them without paying its mana cost."
+CARD_FX.drawCastFree = function(it, low)
+  local w = low:match("^%s*draw (%w+) cards and reveal them%. you may cast one of them without paying its mana cost")
+  if not w then return false end
+  local NUM = { two = 2, three = 3, four = 4 }
+  local n = tonumber(w) or NUM[w] or 3
+  local seat = it.controller
+  local before = {}
+  pcall(function() for _, o in ipairs(Player[seat].getHandObjects()) do before[o.getGUID()] = true end end)
+  Actions.draw(seat, n, it.name)
+  Wait.time(function()
+    local new, names = {}, {}
+    pcall(function()
+      for _, o in ipairs(Player[seat].getHandObjects()) do
+        if not before[o.getGUID()] then
+          table.insert(new, o)
+          table.insert(names, o.getName())
+        end
+      end
+    end)
+    printToAll("MTG > " .. it.name .. ": " .. seat .. " draws and reveals " .. (#names > 0 and table.concat(names, ", ") or "nothing") .. ".", GOOD)
+    if #new == 0 then return end
+    local ch = { { label = "NONE", value = false } }
+    for i, o in ipairs(new) do
+      table.insert(ch, { label = o.getName():sub(1, 20), value = i })
+    end
+    ask(seat, it.name, "Cast one of them without paying its mana cost? (Pick it, then drop it on the stack: no mana is taken.)", ch, function(i)
+      local c = i and new[i]
+      if c then
+        GameState.data.freeCast = GameState.data.freeCast or {}
+        GameState.data.freeCast[c.getGUID()] = true
+        printToAll("MTG > " .. it.name .. ": " .. seat .. " may cast " .. c.getName() .. " for free (drop it on the stack).", GOOD)
+      end
+    end)
+  end, 2)
+  return true
+end
+
+-- Veils of Fear / Sandfall Cell: "Each player loses 2 life unless they discard a card / sacrifice a ...".
+CARD_FX.eachUnless = function(it, low)
+  local n, rest = low:match("^%s*each player loses (%d+) life unless they (.-)%.")
+  if not n then return false end
+  n = tonumber(n)
+  local kinds
+  if rest:find("sacrifice", 1, true) then
+    kinds = {}
+    for _, k in ipairs({ "creature", "artifact", "land", "enchantment", "planeswalker" }) do
+      if rest:find(k, 1, true) then kinds[k] = true end
+    end
+  end
+  local order = players()
+  local function step(i)
+    local c = order[i]
+    if c == nil then return end
+    local label = kinds and "SACRIFICE" or "DISCARD"
+    ask(c, it.name, "Lose " .. n .. " life, or " .. rest .. "?", { { label = label, value = "pay" }, { label = "LOSE " .. n, value = "lose" } },
+      function(v)
+        local function lose()
+          Trackers.changeLife(c, -n, it.name)
+          step(i + 1)
+        end
+        if v ~= "pay" then return lose() end
+        if kinds then
+          pickPermanentToSac(c, it.name, kinds, function(obj) if obj then step(i + 1) else lose() end end)
+        else
+          discardOne(c, it.name, function(card) if card then step(i + 1) else lose() end end)
+        end
+      end)
+  end
+  step(1)
+  return true
+end
+
+-- Oubliette: "Discard a card and sacrifice a creature, an artifact, and a land."
+CARD_FX.oubliette = function(it, low)
+  if not low:find("discard a card and sacrifice a creature, an artifact, and a land", 1, true) then return false end
+  local seat = it.controller
+  discardOne(seat, it.name, function()
+    pickPermanentToSac(seat, it.name, { creature = true }, function()
+      pickPermanentToSac(seat, it.name, { artifact = true }, function()
+        pickPermanentToSac(seat, it.name, { land = true }, function() end)
+      end)
+    end)
+  end)
+  return true
+end
+
+-- Throne of the Dead Three: "Reveal the top ten cards of your library. Put a creature card from among them onto the
+-- battlefield with three +1/+1 counters on it. It gains hexproof until your next turn. Then shuffle."
+CARD_FX.throne = function(it, low)
+  if not low:find("reveal the top ten cards of your library. put a creature card from among them onto the battlefield with three +1/+1 counters", 1, true) then
+    return false
+  end
+  local seat = it.controller
+  LibSearch.open(seat, "creature", it.name .. ": pick a creature from the top ten; it enters with three +1/+1 counters"
+    .. " (hexproof until your next turn). Then CLOSE (the library is shuffled).", "battlefield", false,
+    { topN = 10, picks = 1, typeOnly = true, onTake = function(card)
+      Wait.time(function()
+        if not card.isDestroyed() then
+          Counters.place(card, "plus", 3, seat)
+          untilNext({ kind = "kw", guid = card.getGUID(), seat = seat, kw = "hexproof" })
+          printToAll("MTG > " .. it.name .. ": " .. card.getName() .. " enters with three +1/+1 counters and has hexproof until "
+            .. seat .. "'s next turn.", GOOD)
+        end
+      end, 1.2)
+    end })
+  return true
+end
+
+-- Acererak the Archlich: "When Acererak enters, if you haven't completed Tomb of Annihilation, return Acererak to its
+-- owner's hand and venture into the dungeon."
+CARD_FX.acererak = function(it, low)
+  if not low:find("if you haven't completed tomb of annihilation, return", 1, true) then return false end
+  local seat = it.controller
+  local _, names = Effects.completedDungeons(seat)
+  if names["Tomb of Annihilation"] then
+    printToAll("MTG > " .. it.name .. ": " .. seat .. " has completed Tomb of Annihilation - it stays.", INFO)
+    return true
+  end
+  local src = it.source and getObjectFromGUID(it.source)
+  if src and not src.isDestroyed() and Effects.fieldSeat(src) then
+    local owner = Effects.ownerOf(src) or seat
+    local ok, hp = pcall(function() return Player[owner].getHandTransform().position end)
+    if ok and hp then
+      src.setPosition(hp)
+      Wait.time(function() if not src.isDestroyed() then pcall(Zones.refresh, src) end end, 0.6)
+    end
+    printToAll("MTG > " .. it.name .. " returns to " .. owner .. "'s hand.", INFO)
+  end
+  Effects.venture(seat)
+  return true
+end
+
 -- Geyadrone Dihada: "Gain control of each permanent with a corruption counter on it."
 CARD_FX.controlCountered = function(it, low)
   local name = low:match("gain control of each permanent with an? (%a+) counter on it")
@@ -6371,7 +6662,7 @@ CARD_FX.jewel = function(it, low)
   return true
 end
 
-local CARD_FX_ORDER = { "controlCountered", "graveExile", "peekTop", "drawToCopy", "lookSplit", "namedAnywhere", "phaseOut", "castFromYard", "manaPerType", "giveAway",
+local CARD_FX_ORDER = { "acererak", "throne", "oubliette", "eachUnless", "drawCastFree", "exileTopPlay", "untilNextTurn", "controlCountered", "graveExile", "peekTop", "drawToCopy", "lookSplit", "namedAnywhere", "phaseOut", "castFromYard", "manaPerType", "giveAway",
   "tokensPerCounter", "countersOnLegends", "oppToken", "ringCopy", "ringWatch", "jewel" }
 
 -- Does cardFx take this text? (Its own prompts pick the targets, so nothing is asked as it goes on the stack.)
@@ -6380,13 +6671,17 @@ local CARD_FX_KEYS = { "you may have target opponent draw a card. if you do, cop
   "search your graveyard, hand, and library for a card named ", "target creature phases out", "target permanent phases out",
   "you may cast target instant or sorcery card with mana value ", "target opponent gains control of",
   "if it was cast, target opponent creates a token that's a copy of it", "who controls an artifact named wedding ring",
-  "that player draws three cards and gains control of this artifact", "card from a graveyard.", "look at the top card of target player's library" }
+  "that player draws three cards and gains control of this artifact", "card from a graveyard.", "look at the top card of target player's library",
+  "target creature can't attack until your next turn", "if you haven't completed tomb of annihilation" }
 function Effects.cardFxTakes(text)
   local low = tostring(text or ""):lower():gsub("’", "'")
   for _, k in ipairs(CARD_FX_KEYS) do
     if low:find(k, 1, true) then
       return true
     end
+  end
+  if low:find("target creature gets [%+%-]%d+/[%+%-]%d+ until your next turn") then
+    return true
   end
   return false
 end
@@ -9977,6 +10272,34 @@ end
 -- true / false for the conditions it knows, nil for the rest (asked as YES / NO).
 function Effects.condValue(cond, seat, name)
   do
+    -- Dungeons: "you've completed a dungeon", "you haven't completed Tomb of Annihilation".
+    local c2 = cond:gsub("’", "'")
+    if c2 == "you've completed a dungeon" or c2 == "you have completed a dungeon" then
+      return (Effects.completedDungeons(seat)) > 0
+    end
+    if c2 == "you haven't completed a dungeon" or c2 == "you have not completed a dungeon" then
+      return (Effects.completedDungeons(seat)) == 0
+    end
+    local dn = c2:match("^you haven't completed (.+)$") or c2:match("^you have not completed (.+)$")
+    if dn then
+      local _, names = Effects.completedDungeons(seat)
+      for k in pairs(names) do
+        if k:lower() == dn then
+          return false
+        end
+      end
+      return true
+    end
+    local dy = c2:match("^you've completed (.+)$") or c2:match("^you have completed (.+)$")
+    if dy then
+      local _, names = Effects.completedDungeons(seat)
+      for k in pairs(names) do
+        if k:lower() == dy then
+          return true
+        end
+      end
+      return false
+    end
     -- Eminence: the trigger only happens from the command zone or the battlefield, so it holds.
     if cond:find("is in the command zone or on the battlefield", 1, true) then
       return true
@@ -11732,55 +12055,193 @@ function Effects.setMonarch(seat, why)
   badgeRefresh()
 end
 
--- Undercity (the initiative's dungeon): room -> { text, next rooms }.
-local UNDERCITY = {
-  ["Secret Entrance"] = { "Search your library for a basic land card, reveal it, put it into your hand, then shuffle.", { "Forge", "Lost Well" } },
-  ["Forge"] = { "Put two +1/+1 counters on target creature.", { "Trap!", "Arena" } },
-  ["Lost Well"] = { "Scry 2.", { "Arena", "Stash" } },
-  ["Trap!"] = { "Target player loses 5 life.", { "Archives" } },
-  ["Arena"] = { "Goad target creature.", { "Archives", "Catacombs" } },
-  ["Stash"] = { "Create a Treasure token.", { "Catacombs" } },
-  ["Archives"] = { "Draw a card.", { "Throne of the Dead Three" } },
-  ["Catacombs"] = { "Create a 4/1 black Skeleton creature token with menace.", { "Throne of the Dead Three" } },
-  ["Throne of the Dead Three"] = { "Reveal the top ten cards of your library. Put a creature card from among them onto the battlefield with three +1/+1 counters on it. It gains hexproof until your next turn. Then shuffle.", {} },
+-- Dungeons (CR 309): venturing moves a player through a dungeon's rooms; each room's ability is a triggered
+-- ability (on the stack). One dungeon at a time per player. "Venture into the dungeon": with none, choose
+-- Lost Mine of Phandelver, Dungeon of the Mad Mage or Tomb of Annihilation; Undercity only through the
+-- initiative ("venture into Undercity", which moves you on in a dungeon you're already in). A dungeon is
+-- completed when its last room's ability resolves (counted for "if you've completed a dungeon").
+-- dungeon -> { first room, rooms = { room -> { text, next rooms } } }
+local DUNGEONS = {
+  ["Lost Mine of Phandelver"] = { first = "Cave Entrance", short = "Lost Mine", rooms = {
+    ["Cave Entrance"] = { "Scry 1.", { "Goblin Lair", "Mine Tunnels" } },
+    ["Goblin Lair"] = { "Create a 1/1 red Goblin creature token.", { "Storeroom", "Dark Pool" } },
+    ["Mine Tunnels"] = { "Create a Treasure token.", { "Dark Pool", "Fungi Cavern" } },
+    ["Storeroom"] = { "Put a +1/+1 counter on target creature.", { "Temple of Dumathoin" } },
+    ["Dark Pool"] = { "Each opponent loses 1 life and you gain 1 life.", { "Temple of Dumathoin" } },
+    ["Fungi Cavern"] = { "Target creature gets -4/-0 until your next turn.", { "Temple of Dumathoin" } },
+    ["Temple of Dumathoin"] = { "Draw a card.", {} },
+  } },
+  ["Dungeon of the Mad Mage"] = { first = "Yawning Portal", short = "Mad Mage", rooms = {
+    ["Yawning Portal"] = { "You gain 1 life.", { "Dungeon Level" } },
+    ["Dungeon Level"] = { "Scry 1.", { "Goblin Bazaar", "Twisted Caverns" } },
+    ["Goblin Bazaar"] = { "Create a Treasure token.", { "Lost Level" } },
+    ["Twisted Caverns"] = { "Target creature can't attack until your next turn.", { "Lost Level" } },
+    ["Lost Level"] = { "Scry 2.", { "Runestone Caverns", "Muiral's Graveyard" } },
+    ["Runestone Caverns"] = { "Exile the top two cards of your library. You may play them.", { "Deep Mines" } },
+    ["Muiral's Graveyard"] = { "Create two 1/1 black Skeleton creature tokens.", { "Deep Mines" } },
+    ["Deep Mines"] = { "Scry 3.", { "Mad Wizard's Lair" } },
+    ["Mad Wizard's Lair"] = { "Draw three cards and reveal them. You may cast one of them without paying its mana cost.", {} },
+  } },
+  ["Tomb of Annihilation"] = { first = "Trapped Entry", short = "Tomb", rooms = {
+    ["Trapped Entry"] = { "Each player loses 1 life.", { "Veils of Fear", "Oubliette" } },
+    ["Veils of Fear"] = { "Each player loses 2 life unless they discard a card.", { "Sandfall Cell" } },
+    ["Sandfall Cell"] = { "Each player loses 2 life unless they sacrifice a creature, artifact, or land of their choice.", { "Cradle of the Death God" } },
+    ["Oubliette"] = { "Discard a card and sacrifice a creature, an artifact, and a land.", { "Cradle of the Death God" } },
+    ["Cradle of the Death God"] = { "Create The Atropal, a legendary 4/4 black God Horror creature token with deathtouch.", {} },
+  } },
+  ["Undercity"] = { first = "Secret Entrance", short = "Undercity", initiativeOnly = true, rooms = {
+    ["Secret Entrance"] = { "Search your library for a basic land card, reveal it, put it into your hand, then shuffle.", { "Forge", "Lost Well" } },
+    ["Forge"] = { "Put two +1/+1 counters on target creature.", { "Trap!", "Arena" } },
+    ["Lost Well"] = { "Scry 2.", { "Arena", "Stash" } },
+    ["Trap!"] = { "Target player loses 5 life.", { "Archives" } },
+    ["Arena"] = { "Goad target creature.", { "Archives", "Catacombs" } },
+    ["Stash"] = { "Create a Treasure token.", { "Catacombs" } },
+    ["Archives"] = { "Draw a card.", { "Throne of the Dead Three" } },
+    ["Catacombs"] = { "Create a 4/1 black Skeleton creature token with menace.", { "Throne of the Dead Three" } },
+    ["Throne of the Dead Three"] = { "Reveal the top ten cards of your library. Put a creature card from among them onto the battlefield with three +1/+1 counters on it. It gains hexproof until your next turn. Then shuffle.", {} },
+  } },
 }
+local DUNGEON_ORDER = { "Lost Mine of Phandelver", "Dungeon of the Mad Mage", "Tomb of Annihilation" }
+Effects.DUNGEONS = DUNGEONS
 
-local function enterRoom(seat, room)
-  GameState.data.undercity = GameState.data.undercity or {}
-  GameState.data.undercity[seat] = room
-  local r = UNDERCITY[room]
-  printToAll("MTG > " .. seat .. " ventures into Undercity: " .. room .. ".", { 0.55, 0.9, 0.6 })
-  if room == "Throne of the Dead Three" then
-    printToAll("MTG > Throne of the Dead Three: " .. r[1] .. " (by hand). Undercity is complete; the next venture starts over.", { 1, 0.85, 0.3 })
-    GameState.data.undercity[seat] = "done"
-    return
-  end
-  -- The room's ability is a triggered ability: on the stack, targets and all.
-  Stack.pushAbility(seat, "Undercity: " .. room, r[1], nil, { trigger = true, room = room })
+local function dstate()
+  GameState.data.dungeon = GameState.data.dungeon or {}
+  GameState.data.dungeonsDone = GameState.data.dungeonsDone or {}
+  return GameState.data.dungeon, GameState.data.dungeonsDone
 end
 
-function Effects.venture(seat)
-  GameState.data.undercity = GameState.data.undercity or {}
-  local at = GameState.data.undercity[seat]
-  if at == nil or at == "done" then
-    return enterRoom(seat, "Secret Entrance")
+-- The dungeon a player is in and their room (nil when none).
+function Effects.dungeonOf(seat)
+  local cur = dstate()
+  local d = cur[seat]
+  if d then
+    return d.name, d.room
   end
-  local nexts = (UNDERCITY[at] or { nil, {} })[2]
+  return nil
+end
+
+-- How many dungeons a player has completed, and which (names set).
+function Effects.completedDungeons(seat)
+  local _, done = dstate()
+  local d = done[seat] or { n = 0, names = {} }
+  return d.n or 0, d.names or {}
+end
+
+local function roomTimes(seat)
+  -- Hama Pashar / Ruin Seeker / Dungeon Delver: "Room abilities of dungeons you own trigger an additional time."
+  local n = 1
+  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+    if o.type == "Card" and not o.isDestroyed() and Effects.fieldSeat(o) == seat then
+      local orc = tostring(CardData.get(o).oracle or ""):lower()
+      if orc:find("room abilities of dungeons you own trigger an additional time", 1, true) then
+        n = n + 1
+      end
+    end
+  end
+  return n
+end
+
+local function dungeonWatchers(seat, phrase, dungeonName)
+  -- "Whenever you venture into the dungeon" / "Whenever you complete a dungeon" (Nadaar, Sefris, Varis...).
+  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+    if o.type == "Card" and not o.isDestroyed() and Effects.fieldSeat(o) == seat then
+      local orc = tostring(CardData.get(o).oracle or "")
+      for line in (orc .. "\n"):gmatch("([^\n]*)\n") do
+        local low = line:lower():gsub("^[^—]-— ", "")
+        if low:find(phrase, 1, true) then
+          local face = ""
+          pcall(function() for _, cd in pairs(o.getData().CustomDeck or {}) do face = cd.FaceURL break end end)
+          Stack.pushAbility(seat, o.getName(), line, face, { trigger = true, source = o.getGUID(), dungeon = dungeonName })
+        end
+      end
+    end
+  end
+end
+
+local function enterRoom(seat, name, room)
+  local cur = dstate()
+  local dg = DUNGEONS[name]
+  local r = dg and dg.rooms[room]
+  if r == nil then
+    return
+  end
+  cur[seat] = { name = name, room = room }
+  local final = #r[2] == 0
+  printToAll("MTG > " .. seat .. " ventures into " .. name .. ": " .. room .. (final and " (the last room)." or "."), { 0.55, 0.9, 0.6 })
+  -- The room's ability is a triggered ability: on the stack, targets and all (twice with Hama Pashar).
+  local times = roomTimes(seat)
+  for k = 1, times do
+    Stack.pushAbility(seat, name .. ": " .. room, r[1], nil, { trigger = true, room = room, dungeon = name,
+      dungeonFinal = final and k == times })
+  end
+  if Trackers and Trackers.render then
+    pcall(Trackers.render, seat)
+  end
+  dungeonWatchers(seat, "whenever you venture into the dungeon", name)
+end
+
+-- The last room's ability resolved: the dungeon is completed and leaves the game.
+function Effects.completeDungeon(seat, name)
+  local cur, done = dstate()
+  if cur[seat] and cur[seat].name == name then
+    cur[seat] = nil
+  end
+  done[seat] = done[seat] or { n = 0, names = {} }
+  done[seat].n = (done[seat].n or 0) + 1
+  done[seat].names[name] = true
+  local n = done[seat].n
+  broadcastToAll(seat .. " completes " .. name .. " (" .. n .. " dungeon" .. (n == 1 and "" or "s") .. " completed).", { 1, 0.85, 0.3 })
+  if Trackers and Trackers.render then
+    pcall(Trackers.render, seat)
+  end
+  if Statics and Statics.soon then
+    Statics.soon()
+  end
+  dungeonWatchers(seat, "whenever you complete a dungeon", name)
+end
+
+local function nextRoom(seat, name, at)
+  local dg = DUNGEONS[name]
+  local nexts = (dg.rooms[at] or { nil, {} })[2]
   if #nexts == 0 then
-    return enterRoom(seat, "Secret Entrance")
+    return
   elseif #nexts == 1 then
-    return enterRoom(seat, nexts[1])
+    return enterRoom(seat, name, nexts[1])
   end
-  local choices = {}
+  local choices, lines = {}, {}
   for _, n in ipairs(nexts) do
     table.insert(choices, { label = string.upper(n), value = n })
+    table.insert(lines, n .. ": " .. dg.rooms[n][1])
   end
-  local lines = {}
-  for _, n in ipairs(nexts) do
-    table.insert(lines, n .. ": " .. UNDERCITY[n][1])
+  ask(seat, "Venture into " .. name, "You're in " .. at .. ". Which room next?\n" .. table.concat(lines, "\n"), choices, function(n)
+    enterRoom(seat, name, n or nexts[1])
+  end)
+end
+
+-- Venture into the dungeon (undercity = the initiative's "venture into Undercity").
+function Effects.venture(seat, undercity)
+  local cur = dstate()
+  local d = cur[seat]
+  -- Still standing in a completed dungeon's last room (its ability hasn't resolved yet): a new one starts.
+  if d and DUNGEONS[d.name] and #(DUNGEONS[d.name].rooms[d.room] or { nil, {} })[2] == 0 then
+    d = nil
   end
-  ask(seat, "Venture into Undercity", "You're in " .. at .. ". Which room next?\n" .. table.concat(lines, "\n"), choices, function(n)
-    enterRoom(seat, n or nexts[1])
+  if d and DUNGEONS[d.name] then
+    return nextRoom(seat, d.name, d.room)
+  end
+  if undercity then
+    return enterRoom(seat, "Undercity", DUNGEONS["Undercity"].first)
+  end
+  local done = select(2, Effects.completedDungeons(seat))
+  local choices, lines = {}, {}
+  for _, nm in ipairs(DUNGEON_ORDER) do
+    local dg = DUNGEONS[nm]
+    table.insert(choices, { label = string.upper(dg.short) .. (done[nm] and " (done)" or ""), value = nm })
+    table.insert(lines, nm .. ": starts with " .. dg.first .. " (" .. dg.rooms[dg.first][1] .. ")")
+  end
+  ask(seat, "Venture into the dungeon", "Choose a dungeon to enter:\n" .. table.concat(lines, "\n"), choices, function(nm)
+    nm = nm or DUNGEON_ORDER[1]
+    enterRoom(seat, nm, DUNGEONS[nm].first)
   end)
 end
 
@@ -11791,7 +12252,7 @@ function Effects.setInitiative(seat, why)
   GameState.data.initiative = seat
   broadcastToAll(seat .. " takes the initiative" .. (why and (" (" .. why .. ")") or "") .. " and ventures into Undercity.", { 0.4, 0.9, 1 })
   badgeRefresh()
-  Effects.venture(seat)
+  Effects.venture(seat, true)
 end
 
 -- A player left the game (leave.lua): the monarch / initiative goes to the active player (or the next one).
@@ -11857,7 +12318,7 @@ Events.on("stepStarted", function(d)
   end
   if d.step == "upkeep" and GameState.data.initiative and GameState.data.initiative == d.seat then
     printToAll("MTG > " .. d.seat .. " has the initiative: they venture into Undercity.", { 0.4, 0.9, 1 })
-    Effects.venture(d.seat)
+    Effects.venture(d.seat, true)
   end
 end)
 

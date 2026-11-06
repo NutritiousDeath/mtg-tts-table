@@ -668,6 +668,47 @@ function Statics.compute()
       end
     end
   end
+  -- Dungeons: "As long as you've completed a dungeon, ~ gets +3/+0 and has flying" (Cloister Gargoyle), and
+  -- Ellywick's emblem "... get +2/+2 for each differently named dungeon you've completed".
+  if Effects and Effects.completedDungeons then
+    for _, p in ipairs(list) do
+      if not p.plane and p.oracle:find("dungeon", 1, true) then
+        local n, names = Effects.completedDungeons(p.seat)
+        for line in (p.oracle .. "\n"):gmatch("([^\n]*)\n") do
+          if n > 0 and line:find("as long as you've completed a dungeon", 1, true) then
+            local a, b = line:match("gets? ([%+%-]%d+)/([%+%-]%d+)")
+            if a and not line:find("enchanted creature", 1, true) and not line:find("it gets an additional", 1, true) then
+              add(p, tonumber(a), tonumber(b))
+            end
+          end
+          local ea, eb = line:match("creatures you control [^.]-get %+(%d+)/%+(%d+) for each differently named dungeon you've completed")
+          if ea then
+            local k = 0
+            for _ in pairs(names) do
+              k = k + 1
+            end
+            if k > 0 then
+              for _, q in ipairs(list) do
+                if q.seat == p.seat and q.tl:find("creature", 1, true) then
+                  add(q, tonumber(ea) * k, tonumber(eb) * k)
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  -- "Until your next turn" changes (dungeon rooms: Fungi Cavern's -4/-0).
+  for _, e in ipairs(GameState.data.untilNext or {}) do
+    if e.kind == "pump" then
+      for _, q in ipairs(list) do
+        if q.obj.getGUID() == e.guid then
+          add(q, e.p or 0, e.t or 0)
+        end
+      end
+    end
+  end
   -- Redraw the cards whose numbers changed.
   local changed = {}
   for g, b in pairs(new) do
@@ -1131,6 +1172,46 @@ function Statics.grants(obj)
       end
     end
   end
+  -- Dungeons: "As long as you've completed a dungeon, ~ has double strike" (Gloom Stalker) / "... and has flying".
+  if Effects and Effects.completedDungeons then
+    local own = tostring(d.oracle or ""):lower()
+    if own:find("as long as you've completed a dungeon", 1, true) and (Effects.completedDungeons(loc.seat)) > 0 then
+      for line in (own .. "\n"):gmatch("([^\n]*)\n") do
+        if line:find("as long as you've completed a dungeon", 1, true) and not line:find("enchanted creature", 1, true) then
+          local at = line:find(" has ", 1, true) or line:find(" have ", 1, true)
+          if at then
+            for _, k in ipairs({ "double strike", "first strike", "flying", "trample", "haste", "lifelink", "deathtouch", "vigilance",
+                "menace", "hexproof", "indestructible", "reach" }) do
+              if line:find(k, at, true) and not seenK[k] then
+                seenK[k] = true
+                table.insert(out.kws, k)
+              end
+            end
+          end
+        end
+      end
+    end
+    -- "Until your next turn" keywords (Throne of the Dead Three's hexproof).
+    for _, e in ipairs(GameState.data.untilNext or {}) do
+      if e.kind == "kw" and e.guid == obj.getGUID() and not seenK[e.kw] then
+        seenK[e.kw] = true
+        table.insert(out.kws, e.kw)
+      end
+    end
+    -- Ellywick's emblem: "Creatures you control have trample and haste and get +2/+2 for each ... dungeon you've completed."
+    if q.tl:find("creature", 1, true) then
+      for _, p in ipairs(perms()) do
+        if p.seat == loc.seat and p.oracle:find("for each differently named dungeon you've completed", 1, true) then
+          for _, k in ipairs({ "trample", "haste" }) do
+            if p.oracle:find("creatures you control have trample and haste", 1, true) and not seenK[k] then
+              seenK[k] = true
+              table.insert(out.kws, k)
+            end
+          end
+        end
+      end
+    end
+  end
   for _, g in ipairs(srcs) do
     local sideOk = g.scope == "all" or g.seat == loc.seat or (g.scope == "team" and TableSetup.sameTeam(g.seat, loc.seat))
     local fits
@@ -1437,6 +1518,12 @@ function Statics.cantAttack(card)
   local pf = planeForbids(card, "attack")
   if pf then
     return pf
+  end
+  -- "Target creature can't attack until your next turn" (Twisted Caverns).
+  for _, e in ipairs(GameState.data.untilNext or {}) do
+    if e.kind == "noAttack" and card and card.getGUID() == e.guid then
+      return e.why or "can't attack until its caster's next turn"
+    end
   end
   local q = asQ(card)
   for _, s in ipairs(combatStatics()) do

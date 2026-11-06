@@ -18,6 +18,9 @@ local JEWEL = "Whenever one or more creatures an opponent controls attack you an
 -- Lines handled here: triggers.lua doesn't call them "can't watch".
 function CardWatch.handles(low)
   return low:find("who controls an artifact named wedding ring", 1, true) ~= nil
+    -- Dungeons: effects.lua puts these on the stack as you venture / complete one.
+    or low:find("whenever you venture into the dungeon", 1, true) ~= nil
+    or low:find("whenever you complete a dungeon", 1, true) ~= nil
     or low:find("attack you and aren't blocked, that player draws three cards and gains control of this artifact", 1, true) ~= nil
 end
 
@@ -111,4 +114,27 @@ Events.on("stepStarted", function(d)
     end
   end
   GameState.data.upkeepDraws = keep
+end)
+
+-- "Until your next turn" effects (effects.lua untilNext: dungeon rooms) end as that player's turn begins.
+Events.on("stepStarted", function(d)
+  if d == nil or d.step ~= "untap" then
+    return
+  end
+  local list = GameState.data and GameState.data.untilNext
+  if not list or #list == 0 then
+    return
+  end
+  local keep, ended = {}, 0
+  for _, e in ipairs(list) do
+    if Turns.isActiveSeat(e.seat) then
+      ended = ended + 1
+    else
+      table.insert(keep, e)
+    end
+  end
+  GameState.data.untilNext = keep
+  if ended > 0 and Statics and Statics.soon then
+    Statics.soon()
+  end
 end)

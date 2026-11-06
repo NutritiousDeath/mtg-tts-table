@@ -137,7 +137,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.82 (Nov 3 game fixes: Ral, Door, Widow, Bauble, Fauna, Deathrite, named counters, secret commanders)"
+SCRIPT_VERSION = "2.83 (dungeons: venture, all four dungeons, completed-dungeon cards)"
 
 function onLoad(saved)
   GameLog.setup()

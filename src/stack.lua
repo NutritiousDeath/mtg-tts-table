@@ -336,6 +336,7 @@ function Stack.pushAbility(controller, sourceName, text, image, opts)
     text = text, trigger = opts.trigger, that = opts.that, source = opts.source, thatCard = opts.thatCard,
     amount = opts.amount, copyOf = opts.copyOf, ninjutsu = opts.ninjutsu, planar = opts.planar,
     ward = opts.ward, room = opts.room, planeFx = opts.planeFx, owner = opts.owner, cards = opts.cards,
+    dungeon = opts.dungeon, dungeonFinal = opts.dungeonFinal,
     auto = (opts.trigger or opts.loyalty or opts.activated or opts.copyOf) and true or nil }
   table.insert(items(), item)
   Stack.render()
@@ -459,6 +460,10 @@ function resolveTopNow()
   if it.kind == "ability" then
     log(it.name .. "'s ability resolves.")
     obj.destruct()
+    -- A dungeon's last room leaving the stack completes the dungeon (CR 309.7), even if it does nothing.
+    if it.dungeonFinal and Effects and Effects.completeDungeon then
+      pcall(Effects.completeDungeon, it.controller, it.dungeon)
+    end
     -- The planar die's planeswalker symbol: planeswalk now (the next plane turns face up).
     if it.planar == "walk" then
       if Planechase and Planechase.planeswalk then

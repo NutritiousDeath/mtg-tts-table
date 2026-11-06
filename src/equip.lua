@@ -163,6 +163,17 @@ local function modsOf(att)
         table.insert(out.lines, t)
       end
     end
+    -- Precipitous Drop: "It gets an additional -5/-5 as long as you've completed a dungeon."
+    do
+      local ap, at = line:match("^it gets an additional ([%+%-]%d+)/([%+%-]%d+) as long as you've completed a dungeon")
+      if ap and Effects and Effects.completedDungeons then
+        local who = (Effects.ownerOf and Effects.ownerOf(att)) or nil
+        if who and (Effects.completedDungeons(who)) > 0 then
+          out.dp = out.dp + tonumber(ap)
+          out.dt = out.dt + tonumber(at)
+        end
+      end
+    end
     if head == "equipped creature" or line:sub(1, 17) == "enchanted creatur" then
       if not line:find("whenever", 1, true) and not line:find("when ", 1, true) then
         local p, q = line:match("gets? ([%+%-]%d+)/([%+%-]%d+)")
