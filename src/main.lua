@@ -137,7 +137,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.83 (dungeons: venture, all four dungeons, completed-dungeon cards)"
+SCRIPT_VERSION = "2.84 (table reset: unfinished flips undone on load, 30 s table and hand-zone watchdog)"
 
 function onLoad(saved)
   GameLog.setup()

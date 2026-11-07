@@ -249,6 +249,18 @@ runChaos = function(color)
     end
   end
   Flip.chaosOn = true
+  -- Remember where everything lives, in the save too: a save or a Save and Play while it's all in the
+  -- air would otherwise keep the table and the pieces wherever they landed (Flip.recover puts them back).
+  local home = { pieces = {}, table = {}, at = os.time() }
+  for _, e in ipairs(list) do
+    table.insert(home.pieces, { g = e.obj.getGUID(), p = e.pos, r = e.rot, l = e.locked == true })
+  end
+  for _, e in ipairs(pieces) do
+    table.insert(home.table, { g = e.obj.getGUID(), p = e.pos, r = e.rot })
+  end
+  if GameState.data then
+    GameState.data.flipHome = home
+  end
   local unpaint
   for _, e in ipairs(pieces) do
     if e.obj.hasTag("PlaySurface") then
@@ -323,6 +335,9 @@ runChaos = function(color)
           end
         end)
       end
+      if GameState.data then
+        GameState.data.flipHome = nil
+      end
       Wait.time(function()
         Flip.chaosOn = false
       end, 0.5)
@@ -351,7 +366,145 @@ function Flip.fixTable()
   end
 end
 
+-- A flip that never finished (saved, or Save and Play, while the pieces were in the air): put every
+-- piece back where it was before the flip. Returns how many went back.
+function Flip.recover()
+  local home = GameState.data and GameState.data.flipHome
+  if home == nil then
+    return 0
+  end
+  local n = 0
+  for _, e in ipairs(home.table or {}) do
+    local o = getObjectFromGUID(e.g)
+    if o and not o.isDestroyed() then
+      pcall(function()
+        o.setVelocity({ 0, 0, 0 })
+        o.setAngularVelocity({ 0, 0, 0 })
+        o.setLock(true)
+        o.setPosition(e.p)
+        o.setRotation(e.r)
+      end)
+    end
+  end
+  pcall(Flip.fixTable)
+  for _, e in ipairs(home.pieces or {}) do
+    local o = getObjectFromGUID(e.g)
+    if o and not o.isDestroyed() then
+      pcall(function()
+        o.setVelocity({ 0, 0, 0 })
+        o.setAngularVelocity({ 0, 0, 0 })
+        o.setPosition(e.p)
+        o.setRotation(e.r)
+        o.setLock(e.l == true)
+      end)
+      n = n + 1
+    end
+  end
+  GameState.data.flipHome = nil
+  -- A farewell painted under the surface by the unfinished flip goes too.
+  local st = GameState.data.table or {}
+  local surf = st.surface and getObjectFromGUID(st.surface)
+  if surf and not surf.isDestroyed() then
+    pcall(function()
+      local bs = surf.getButtons() or {}
+      for i = #bs, 1, -1 do
+        if bs[i].click_function == "flip_noop" then
+          surf.removeButton(bs[i].index)
+        end
+      end
+    end)
+  end
+  pcall(function() Zones.drawIcons() end)
+  return n
+end
+
+-- Is the surface or the stone frame out of place (moved, tipped, unlocked)?
+local function tableDrift()
+  local st = GameState.data and GameState.data.table or {}
+  for _, g in ipairs({ st.surface, st.frame }) do
+    local o = g and getObjectFromGUID(g)
+    if o and not o.isDestroyed() then
+      local p, r = o.getPosition(), o.getRotation()
+      local function tilt(a)
+        a = (a or 0) % 360
+        return math.min(a, 360 - a)
+      end
+      if math.abs(p.x) > 0.05 or math.abs(p.z) > 0.05 or tilt(r.x) > 0.5 or tilt(r.y) > 0.5 or tilt(r.z) > 0.5
+          or not o.getLock() then
+        return true
+      end
+      if g == st.frame and math.abs(p.y) > 0.05 then
+        return true
+      end
+      if g == st.surface then
+        local b = o.getBounds()
+        if math.abs((b.center.y + b.size.y / 2) - TableSetup.SURFACE_TOP) > 0.05 then
+          return true
+        end
+      end
+    end
+  end
+  return false
+end
+
+-- Everything back to normal: an unfinished flip undone, the table and frame in place, the hand zones on
+-- the table edges. look = true also points seated players' cameras back at their seats.
+local lastReset, lastResetAt
+function Flip.reset(look, quiet)
+  if Flip.chaosOn then
+    return false
+  end
+  local back = Flip.recover()
+  local drift = tableDrift()
+  pcall(Flip.fixTable)
+  local hands = {}
+  pcall(function() hands = TableSetup.handsOff() end)
+  if #hands > 0 then
+    pcall(TableSetup.fixHands, hands)
+  end
+  if look then
+    pcall(TableSetup.lookAtAll, 0.5)
+  end
+  local did = back > 0 or drift or #hands > 0
+  if did and not quiet then
+    local bits = {}
+    if back > 0 then
+      table.insert(bits, back .. " piece" .. (back == 1 and "" or "s") .. " from an unfinished flip put back")
+    end
+    if drift then
+      table.insert(bits, "the table put back in place")
+    end
+    if #hands > 0 then
+      table.insert(bits, "hand zones fixed (" .. table.concat(hands, ", ") .. ")")
+    end
+    -- The same fix over and over (something TTS keeps undoing) is only reported every 5 minutes.
+    local msg = "MTG > Table reset: " .. table.concat(bits, "; ") .. "."
+    if msg ~= lastReset or os.time() - (lastResetAt or 0) > 300 then
+      print(msg)
+      lastReset, lastResetAt = msg, os.time()
+    end
+  end
+  return did
+end
+
+-- On load (and Save and Play): undo any unfinished flip, square the table up, then point everyone at
+-- their seat once it's all back (main.lua points them again at 8 s for slow loaders).
+Wait.time(function() pcall(Flip.reset, false, false) end, 2.5)
 Wait.time(function() pcall(Flip.fixTable) end, 3)
+Wait.time(function() pcall(TableSetup.lookAtAll, 0.1) end, 4)
+Wait.time(function() pcall(TableSetup.lookAtAll, 0.1) end, 15)
+
+-- The watchdog: every 30 seconds, if no flip is running, check the table, the frame and the hand
+-- zones, and put back whatever is off. Quiet unless it had to fix something.
+local function watchdog()
+  pcall(function()
+    if not Flip.chaosOn then
+      Flip.reset(false, false)
+    end
+  end)
+  Wait.time(watchdog, 30)
+end
+Wait.time(watchdog, 30)
 
 function Flip.flip(color)
   pcall(Flip.fixTable)
@@ -368,13 +521,18 @@ end
 
 -- !fixtable: put the table and every table tile (trackers, action tiles, console strips, turn strips,
 -- mana tiles, the stack mat, importers) back where they belong, e.g. after something got knocked off.
-function Flip.repair()
+function Flip.repair(color)
+  pcall(Flip.reset, false, false)
   pcall(Flip.fixTable)
   pcall(TableSetup.ensure)
   for _, f in ipairs({ "Trackers.ensureTableDisplay", "Actions.ensure", "Turns.ensureStrips", "ManaChips.ensure",
     "Stack.ensure", "ImportCards.ensure", "Planechase.placeChest", "TableSetup.placeTorches", "Fires.place" }) do
     local mod, fn = f:match("^(%w+)%.(%w+)$")
     pcall(function() _G[mod][fn]() end)
+  end
+  pcall(function() TableSetup.fixHands() end)
+  if color and TableSetup.isActive(color) then
+    Wait.time(function() pcall(TableSetup.lookAtSeat, color) end, 1)
   end
   print("MTG > Table tiles put back in place.")
 end
@@ -391,8 +549,8 @@ function Flip.chat(message, color)
   elseif m == "!tableinfo" then
     print("MTG > " .. TableSetup.tableInfo())
     return true
-  elseif m == "!fixtable" then
-    Flip.repair()
+  elseif m == "!fixtable" or m == "!resettable" then
+    Flip.repair(color)
     return true
   elseif m == "!unflip" or m == "!tableunflip" then
     Flip.unflip(color)

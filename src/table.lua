@@ -1200,6 +1200,40 @@ end
 
 -- Point every seated player's camera at their seat, after a short wait (so it lands after any
 -- seat changes, table resizes or reloads that are still going on).
+-- Seats whose hand zone isn't where it belongs (a flip, a Save and Play mid-flip, or TTS itself can
+-- leave one off the table edge, and a player's camera and cards then start in the wrong place).
+function TableSetup.handsOff()
+  local off = {}
+  for _, color in ipairs(TableSetup.activeSeats()) do
+    local ok, h = pcall(function() return Player[color].getHandTransform() end)
+    local t = handTarget(color)
+    if not (ok and h and near(h.position, t.position)) then
+      table.insert(off, color)
+    end
+  end
+  return off
+end
+
+-- Quietly put those hand zones back (no report lines: the watchdog calls this).
+function TableSetup.fixHands(colors)
+  local objs
+  for _, color in ipairs(colors or TableSetup.handsOff()) do
+    local t = handTarget(color)
+    local ok = pcall(function() Player[color].setHandTransform(t) end)
+    if not ok then
+      objs = objs or handObjectsByColor()
+      local obj = objs[color]
+      if obj then
+        pcall(function()
+          obj.setPosition(t.position)
+          obj.setRotation(t.rotation)
+          obj.setScale(t.scale)
+        end)
+      end
+    end
+  end
+end
+
 function TableSetup.lookAtAll(delay)
   Wait.time(function()
     for _, color in ipairs(TableSetup.activeSeats()) do
