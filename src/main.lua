@@ -137,7 +137,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.84 (table reset: unfinished flips undone on load, 30 s table and hand-zone watchdog)"
+SCRIPT_VERSION = "2.86 (!passturn for a stuck turn; NEXT STEP passes a stuck cleanup; table reset after flips)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -1088,6 +1088,11 @@ function onChat(message, sender)
   end
 
   if Attractions and Attractions.chat(message, sender.color) then
+    return false
+  end
+
+  if message == "!passturn" then
+    Turns.forcePassTurn(sender.color)
     return false
   end
 

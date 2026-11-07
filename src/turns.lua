@@ -852,7 +852,7 @@ function Turns.onStackEmpty()
     Combat.onStackEmpty()
   end
   local id = Turns.STEPS[t.stepIndex].id
-  if id == "untap" or id == "draw" or (id == "end" and t.autoThrough) then
+  if id == "untap" or id == "draw" or id == "cleanup" or (id == "end" and t.autoThrough) then
     autoAdvance(0.6)
   end
 end
@@ -1222,7 +1222,19 @@ function Turns.next(color)
     return
   end
   local id = Turns.STEPS[turn().stepIndex].id
-  if id == "untap" or id == "draw" or id == "cleanup" then
+  if id == "cleanup" then
+    -- Cleanup moves on by itself, but something on the stack or a question during it could leave it
+    -- sitting there: NEXT STEP then passes the turn (a discard-to-7 still waiting is asked again).
+    local hand = Actions and Actions.discardPending and Actions.discardPending(color)
+    if hand then
+      broadcastToColor("Discard down to 7 first (the DISCARD panel).", color, WARN)
+      return
+    end
+    broadcastToAll(color .. " passes the turn from cleanup.", INFO)
+    commit("next")
+    return
+  end
+  if id == "untap" or id == "draw" then
     return   -- these move on by themselves
   end
   -- Combat (combat.lua): NEXT STEP in ATTACK declares the attack first;
@@ -1292,6 +1304,31 @@ function Turns.skipStep(color)
     return
   end
   commit("next")
+end
+
+-- !passturn: the way out when the turn won't move (a question nobody can answer, a trigger stuck half way):
+-- the player whose turn it is passes straight to the next player's turn. Whatever is still on the stack
+-- stays there to resolve or remove by hand; end-of-turn effects still end (the next turn starts normally).
+function Turns.forcePassTurn(color)
+  local t = turn()
+  if not GameState.data.started then
+    broadcastToColor("No game running.", color, WARN)
+    return
+  end
+  if not Turns.isActiveSeat(color) then
+    broadcastToColor("Only the player whose turn it is (" .. tostring(t.activeSeat) .. ") can use !passturn.", color, WARN)
+    return
+  end
+  t.pending = nil
+  t.autoThrough = nil
+  t.resume = nil
+  GameState.data.responding = nil
+  pcall(dropHeld)
+  broadcastToAll(color .. " used !passturn: the turn passes now (stuck step skipped).", WARN)
+  if GameLog and GameLog.add then
+    pcall(GameLog.add, "TURN", color .. " forced the turn to pass from " .. tostring(Turns.STEPS[t.stepIndex] and Turns.STEPS[t.stepIndex].id))
+  end
+  nextTurn()
 end
 
 function Turns.reverse(color)

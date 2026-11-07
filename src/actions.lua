@@ -632,6 +632,11 @@ local function renderDiscard(color)
 end
 
 -- Called by the turn engine in cleanup. onDone runs when the hand is legal.
+-- Is seat c still choosing cards to discard down to 7?
+function Actions.discardPending(c)
+  return discard[c] ~= nil
+end
+
 function Actions.cleanupDiscard(color, onDone)
   local hand = handCards(color)
   local need = #hand - MAX_HAND
