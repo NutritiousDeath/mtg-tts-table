@@ -694,6 +694,39 @@ function Stack.removeGuid(guid)
   Stack.render()
 end
 
+-- Exile a spell from the stack (Mindbreak Trap): it doesn't resolve and goes to exile. Exiling isn't
+-- countering, so "can't be countered" doesn't stop it.
+function Stack.exileGuid(guid, byName)
+  local i = indexOf(guid)
+  if i == nil then
+    return nil
+  end
+  local it = items()[i]
+  local obj = getObjectFromGUID(it.guid)
+  removeAt(i)
+  log(it.name .. (it.kind == "ability" and "'s ability" or "") .. " is exiled from the stack (by " .. tostring(byName) .. ").", WARN)
+  if obj then
+    if it.kind == "ability" then
+      obj.destruct()
+    else
+      local color = TableSetup.isActive(it.controller) and it.controller or nil
+      obj.setLock(false)
+      if color then
+        local s = TableSetup.seat(color)
+        obj.setRotation({ 0, s.yaw, 0 })
+        obj.setPosition(TableSetup.slot(color, "exile", 2))
+        Wait.time(function()
+          if not obj.isDestroyed() then
+            Zones.refresh(obj)
+          end
+        end, 0.6)
+      end
+    end
+  end
+  Stack.render()
+  return it
+end
+
 function Stack.removeRow(r, byColor)
   local list = items()
   local i = #list - r + 1

@@ -2057,9 +2057,31 @@ function Effects.parse(text, sourceName)
     cn, ckind = t:match("put (%w+) ([%w%+/%-]+) counters? on it[%.%s]")
     onIt = cn ~= nil
   end
+  -- Aurelia, the Warleader, Moraug: "After this phase, there is an additional combat phase."
+  if t:find("after this phase, there is an additional combat phase", 1, true) then
+    table.insert(actions, { what = "extraCombatPhase", who = "you", n = 1 })
+  end
+  -- Gitaxian Probe, Peek, Telepathy: "look at target player's hand" (only the caster sees it).
+  if not t:find("you choose a", 1, true) then
+    local lw = (t:find("look at target opponent's hand", 1, true) and "targetOpponent")
+      or (t:find("look at target player's hand", 1, true) and "target")
+      or (t:find("look at that player's hand", 1, true) and "that") or nil
+    if lw then
+      table.insert(actions, 1, { what = "lookHand", who = lw, n = 1 })
+    end
+  end
+  -- Tarrian's Soulcleaver, Bloodforged Battle-Axe style: "put a +1/+1 counter on equipped creature".
+  local onHost = false
+  if not cn then
+    cn, ckind = t:match("put (%w+) ([%w%+/%-]+) counters? on equipped creature")
+    if not cn then
+      cn, ckind = t:match("put (%w+) ([%w%+/%-]+) counters? on enchanted creature")
+    end
+    onHost = cn ~= nil
+  end
   if cn and num(cn) then
     local kind = Counters.kindOf(ckind)
-    table.insert(actions, { what = "counter", who = "you", n = num(cn), kind = kind, label = ckind, onThat = onIt })
+    table.insert(actions, { what = "counter", who = "you", n = num(cn), kind = kind, label = ckind, onThat = onIt, onHost = onHost })
   end
   -- "put three +1/+1 counters on target creature (you control)": pick it on the table.
   do
@@ -2156,6 +2178,52 @@ function Effects.parse(text, sourceName)
     table.insert(notes, convergeNote)
   end
   return { optional = optional, actions = actions, notes = notes, conds = conds }
+end
+
+
+-- Fix-ups that apply whichever reader handled the text (some return early).
+local parseInner = Effects.parse
+function Effects.parse(text, sourceName)
+  local r = parseInner(text, sourceName)
+  if type(r) ~= "table" or type(r.actions) ~= "table" then
+    return r
+  end
+  r.notes = r.notes or {}
+  local t = tostring(text or ""):lower():gsub("’", "'")
+  -- Winter, Tormented Loner: "you may sacrifice a creature or planeswalker. When you do, each opponent
+  -- sacrifices...": the edict waits for the controller's own sacrifice.
+  do
+    local sk = t:match("you may sacrifice an? ([%a ]-)%. when you do, ")
+    if sk then
+      local kinds = {}
+      for w in sk:gmatch("%a+") do
+        if w ~= "or" and w ~= "another" then
+          table.insert(kinds, (w:gsub("s$", "")))
+        end
+      end
+      for _, ac in ipairs(r.actions) do
+        if ac.what == "edict" and #kinds > 0 then
+          ac.selfFirst = kinds
+          r.optional = false
+        end
+      end
+    end
+  end
+  -- Kokusho, Gray Merchant style: "You gain life equal to the life lost this way."
+  if t:find("you gain life equal to the life lost this way", 1, true) then
+    for _, ac in ipairs(r.actions) do
+      if ac.what == "lose" and ac.who ~= "you" then
+        ac.gainLost = true
+        for i = #r.notes, 1, -1 do
+          if tostring(r.notes[i]):find("you gain life equal to the life lost this way", 1, true) then
+            table.remove(r.notes, i)
+          end
+        end
+        break
+      end
+    end
+  end
+  return r
 end
 
 ---------------------------------------------------------------------------
@@ -2854,6 +2922,8 @@ local function describe(a, target, controller)
     return "X Treasure tokens and X damage, X = the descent counters on this card"
   elseif a.what == "wheelMisfortune" then
     return "every player secretly picks a number; highest takes that much damage, everyone but the lowest discards their hand and draws seven"
+  elseif a.what == "extraCombatPhase" then
+    return "an additional combat phase after this one"
   elseif a.what == "extraCombat" then
     return "an additional combat phase and postcombat main phase follow this turn's postcombat main phase"
   elseif a.what == "manaCount" then
@@ -2862,6 +2932,8 @@ local function describe(a, target, controller)
     return "a creature card from any graveyard comes back under your control" .. (a.loseMV and ", you lose life equal to its mana value" or "")
   elseif a.what == "palantir" then
     return "influence counter, scry 2, then the opponent picks: you draw, or you mill and they lose life"
+  elseif a.what == "lookHand" then
+    return "you look at " .. who .. "'s hand"
   elseif a.what == "handPick" then
     return "look at the hand and choose a card to discard"
   elseif a.what == "sylvan" then
@@ -2928,7 +3000,7 @@ local function describe(a, target, controller)
     if a.n < 0 then
       return (-a.n) .. " " .. tostring(a.label) .. " counter" .. (a.n == -1 and "" or "s") .. " removed"
     end
-    return a.n .. " " .. tostring(a.label) .. " counter" .. (a.n == 1 and "" or "s") .. " added"
+    return a.n .. " " .. tostring(a.label) .. " counter" .. (a.n == 1 and "" or "s") .. (a.onHost and " on the equipped creature" or " added")
   elseif a.what == "exactLife" then
     return "players with exactly " .. a.life .. " life lose the game, then everyone " .. (a.dir == "gain" and "gains " or "loses ") .. a.n .. " life"
   elseif a.what == "oppMayDraw" then
@@ -3204,6 +3276,11 @@ local function watched(kind, subject, n, controller, name, run)
     run(n)
     return
   end
+  -- Lightning's Stagger: damage to that player is doubled until Lightning's controller's next turn.
+  if kind == "damage" and Effects.staggered and Effects.staggered(subject) then
+    printToAll("MTG > " .. tostring(subject) .. " is staggered (" .. Effects.staggered(subject) .. "): " .. n .. " damage becomes " .. (n * 2) .. ".", { 1, 0.6, 0.2 })
+    n = n * 2
+  end
   local names = {}
   if Statics and Statics.replacers then
     local ok, list = pcall(Statics.replacers, kind, subject, controller)
@@ -3282,6 +3359,9 @@ local function apply(it, plan, target)
             watched(isDamage and "damage" or "lose", seat, lost, controller, it.name, function(v)
               if v > 0 then
                 Trackers.changeLife(seat, -v, it.name)
+                if a.gainLost and controller then
+                  Trackers.changeLife(controller, v, it.name)
+                end
                 -- Noncombat damage: "whenever a source you control deals noncombat damage to an opponent"...
                 if isDamage and Triggers and Triggers.onDamage then
                   local src = (it.source and getObjectFromGUID(it.source)) or (it.card and getObjectFromGUID(it.card)) or nil
@@ -3324,7 +3404,17 @@ local function apply(it, plan, target)
           if a.onThat and it.thatCard then
             src = getObjectFromGUID(it.thatCard) or src
           end
-          if src and not src.isDestroyed() then
+          if a.onHost then
+            -- On the creature this Equipment / Aura is attached to.
+            local host = src and Equip and Equip.hostOf and Equip.hostOf(src)
+            if host then
+              Counters.place(host, a.kind, a.n, seat)
+              printToAll("MTG > " .. it.name .. ": " .. a.n .. " " .. tostring(a.label) .. " counter" .. (a.n == 1 and "" or "s")
+                .. " on " .. host.getName() .. ".", GOOD)
+            else
+              broadcastToColor(it.name .. " isn't attached to a creature: no counter added.", seat, INFO)
+            end
+          elseif src and not src.isDestroyed() then
             Counters.place(src, a.kind, a.n, seat)
           else
             broadcastToColor(it.name .. " isn't on the table any more: no counter added.", seat, INFO)
@@ -4054,6 +4144,8 @@ local function apply(it, plan, target)
           Effects.wheelMisfortune(controller, it)
         elseif a.what == "extraCombat" then
           Turns.addExtraCombatAfterMain(seat, a.untap)
+        elseif a.what == "extraCombatPhase" then
+          Turns.addExtraCombat(seat)
         elseif a.what == "manaCount" then
           local k = Effects.countPermanents(seat, a.word, a.scope, a.tapped)
           if k > 0 then
@@ -4067,6 +4159,8 @@ local function apply(it, plan, target)
           Effects.palantir(seat, it)
         elseif a.what == "handPick" then
           Effects.handPick(controller, seat, a, it)
+        elseif a.what == "lookHand" then
+          Effects.lookHand(controller, seat, it)
         elseif a.what == "arcum" then
           Effects.arcum(seat, it)
         elseif a.what == "jeska" then
@@ -4916,6 +5010,39 @@ Effects.orderFrom = orderFrom
 
 -- "Each opponent sacrifices N creatures": each victim picks their own.
 function Effects.edict(seat, a, it)
+  -- Winter, Tormented Loner: "You may sacrifice a creature or planeswalker. When you do, each opponent
+  -- sacrifices a creature": the controller sacrifices first, or nothing happens.
+  if a.selfFirst and not a.selfDone then
+    local kinds = a.selfFirst
+    ask(seat, it.name .. ": sacrifice first?", "You may sacrifice a " .. table.concat(kinds, " or ")
+      .. ". When you do, the rest happens. Click SACRIFICE on one of yours, or NO.",
+      { { label = "NO", value = false } }, function(obj)
+        if not obj then
+          printToAll("MTG > " .. it.name .. ": " .. seat .. " doesn't sacrifice, so nothing else happens.", INFO)
+          return
+        end
+        printToAll("MTG > " .. seat .. " sacrifices " .. obj.getName() .. " (" .. it.name .. ").", GOOD)
+        Combat.sacrifice(obj)
+        local b = {}
+        for k, v in pairs(a) do
+          b[k] = v
+        end
+        b.selfDone = true
+        Wait.time(function() Effects.edict(seat, b, it) end, 0.8)
+      end, { filter = function(obj, owner)
+        if owner ~= seat then
+          return false
+        end
+        local ty = Effects.cardTypes(obj)
+        for _, k in ipairs(kinds) do
+          if ty[k] then
+            return true
+          end
+        end
+        return false
+      end, label = "SACRIFICE", protect = false })
+    return
+  end
   local victims = {}
   local function others()
     for _, c in ipairs(players()) do
@@ -5334,6 +5461,31 @@ function Effects.handPick(caster, target, a, it)
   local hint = (a.noncreature and "a noncreature, " or "a ") .. (a.nonland and "nonland " or "") .. "card"
     .. (a.mvMax and (" with mana value " .. a.mvMax .. " or less") or "")
   Actions.chooseFromHand(caster, target, it.name, pred, hint, nil)
+end
+
+-- Gitaxian Probe: the caster sees the names of the cards in that player's hand (nobody else does).
+function Effects.lookHand(caster, target, it)
+  if caster == nil or target == nil or Player[target] == nil then
+    return
+  end
+  local names = {}
+  for _, o in ipairs(Player[target].getHandObjects() or {}) do
+    if o.type == "Card" and not o.isDestroyed() then
+      table.insert(names, o.getName())
+    elseif o.type == "Deck" then
+      for _, e in ipairs(o.getObjects() or {}) do
+        table.insert(names, e.name or e.nickname or "?")
+      end
+    end
+  end
+  table.sort(names)
+  printToAll("MTG > " .. it.name .. ": " .. caster .. " looks at " .. target .. "'s hand (" .. #names .. " card" .. (#names == 1 and "" or "s") .. ").", INFO)
+  if #names == 0 then
+    broadcastToColor(target .. "'s hand is empty.", caster, INFO)
+    return
+  end
+  printToColor("MTG > " .. target .. "'s hand: " .. table.concat(names, ", "), caster, { 1, 0.85, 0.3 })
+  broadcastToColor(target .. "'s hand is in your chat (only you see it).", caster, INFO)
 end
 
 -- Windfall: everyone discards their hand, then draws as many cards as the most anyone discarded.
@@ -6199,15 +6351,52 @@ end
 -- Runestone Caverns: "Exile the top two cards of your library. You may play them."
 CARD_FX.exileTopPlay = function(it, low)
   local w = low:match("^%s*exile the top (%w+) cards of your library%. you may play them")
+  -- Korvold and the Noble Thief III: "Exile the top three cards of target opponent's library. You may
+  -- play those cards this turn." They go to that player's exile; the caster may play them this turn.
+  local opp = nil
+  if not w then
+    w = low:match("exile the top (%w+) cards of target opponent's library%. you may play those cards this turn")
+    if w then
+      for _, e in ipairs(it.preTargets or {}) do
+        if e.kind == "player" and e.seat then
+          opp = e.seat
+        end
+      end
+      opp = opp or it.that
+      if opp == nil or not TableSetup.isActive(opp) then
+        local ch = {}
+        for _, c in ipairs(players()) do
+          if TableSetup.isOpponent(c, it.controller) then
+            table.insert(ch, { label = string.upper(c), value = c })
+          end
+        end
+        ask(it.controller, it.name .. ": which opponent?", "Exile the top " .. w .. " cards of whose library?", ch, function(c)
+          local b = {}
+          for k, v in pairs(it) do b[k] = v end
+          b.that = c
+          b.preTargets = { { kind = "player", seat = c } }
+          CARD_FX.exileTopPlay(b, low)
+        end)
+        return true
+      end
+    end
+  end
   if not w then return false end
   local NUM = { two = 2, three = 3, four = 4, five = 5 }
   local n = tonumber(w) or NUM[w] or 2
-  local seat = it.controller
+  local seat = opp or it.controller
+  local player = it.controller
   local st = TableSetup.seat(seat)
   local names = {}
   local function one(k)
     if k > n then
-      printToAll("MTG > " .. it.name .. ": " .. seat .. " exiles " .. table.concat(names, ", ") .. " and may play them.", GOOD)
+      if opp then
+        printToAll("MTG > " .. it.name .. ": " .. table.concat(names, ", ") .. " exiled from " .. opp .. "'s library. "
+          .. player .. " may play them this turn (they wait in " .. opp .. "'s exile).", GOOD)
+        broadcastToColor("You may play " .. table.concat(names, ", ") .. " from " .. opp .. "'s exile this turn.", player, GOOD)
+      else
+        printToAll("MTG > " .. it.name .. ": " .. seat .. " exiles " .. table.concat(names, ", ") .. " and may play them.", GOOD)
+      end
       return
     end
     local lib = Library.find(seat)
@@ -6662,7 +6851,215 @@ CARD_FX.jewel = function(it, low)
   return true
 end
 
-local CARD_FX_ORDER = { "acererak", "throne", "oubliette", "eachUnless", "drawCastFree", "exileTopPlay", "untilNextTurn", "controlCountered", "graveExile", "peekTop", "drawToCopy", "lookSplit", "namedAnywhere", "phaseOut", "castFromYard", "manaPerType", "giveAway",
+-- Molten Note: "deals damage to target creature equal to the amount of mana spent to cast this spell.
+-- Untap all creatures you control." The caster types how much mana went in.
+CARD_FX.moltenNote = function(it, low)
+  if not low:find("damage to target creature equal to the amount of mana spent to cast this spell", 1, true) then
+    return false
+  end
+  local seat = it.controller
+  local tgt
+  for _, e in ipairs(it.preTargets or {}) do
+    if e.kind == "card" then
+      tgt = getObjectFromGUID(e.guid)
+      break
+    end
+  end
+  local src = (it.card and getObjectFromGUID(it.card)) or (it.source and getObjectFromGUID(it.source)) or nil
+  local function untap()
+    if low:find("untap all creatures you control", 1, true) then
+      Effects.untapAllOf(seat, "creature", it.name)
+    end
+  end
+  if tgt == nil or tgt.isDestroyed() or not Effects.fieldSeat(tgt) then
+    printToAll("MTG > " .. it.name .. ": its target is gone, so no damage.", INFO)
+    untap()
+    return true
+  end
+  Effects.askNumber(seat, it.name .. ": mana spent?", "Type the total mana you spent to cast it (X plus {R}{W}, or the flashback cost), then OK.", function(n)
+    n = tonumber(n) or 0
+    if n > 0 then
+      Effects.damageCreature(tgt, n, src, it.name, seat)
+    end
+    untap()
+  end)
+  return true
+end
+
+-- Demonic Consultation: name a card, exile the top six, then reveal until that card turns up (the caster
+-- says each time whether it's the one): it goes to the hand, every other revealed card is exiled.
+CARD_FX.consult = function(it, low)
+  if not (low:find("choose a card name", 1, true) and low:find("exile the top six cards of your library, then reveal cards from the top of your library until you reveal a card with the chosen name", 1, true)) then
+    return false
+  end
+  local seat = it.controller
+  local function finish(card)
+    if card and not card.isDestroyed() then
+      local s = TableSetup.seat(seat)
+      card.setLock(false)
+      card.setRotation({ 0, s.yaw, 0 })
+      card.setPositionSmooth(Player[seat].getHandTransform().position, false, true)
+      Wait.time(function() if not card.isDestroyed() then Zones.refresh(card) end end, 1.2)
+      printToAll("MTG > " .. it.name .. ": " .. seat .. " finds " .. card.getName() .. " and puts it into their hand.", GOOD)
+    end
+  end
+  local revealed = 0
+  local function revealNext()
+    if Library.count(seat) == 0 then
+      printToAll("MTG > " .. it.name .. ": " .. seat .. "'s library ran out before the named card turned up (" .. revealed .. " exiled).", { 1, 0.6, 0.2 })
+      return
+    end
+    Library.exileUntilNonland(seat, true, function(_, exiled)
+      local card = exiled and exiled[1]
+      if card == nil then
+        return
+      end
+      revealed = revealed + 1
+      printToAll("MTG > " .. it.name .. ": " .. seat .. " reveals " .. card.getName() .. ".", INFO)
+      ask(seat, it.name .. ": the named card?", "Revealed: " .. card.getName() .. ". Is this the card you named?",
+        { { label = "YES: TO HAND", value = true }, { label = "NO: KEEP GOING", value = false } }, function(yes)
+          if yes then
+            finish(card)
+          else
+            Wait.time(revealNext, 0.4)
+          end
+        end)
+    end)
+  end
+  ask(seat, it.name .. ": name a card", "Say the card's name out loud (or in chat) first, then GO: the top six are exiled and cards are revealed until it turns up.",
+    { { label = "GO", value = true }, { label = "CANCEL", value = false } }, function(go)
+      if not go then
+        printToAll("MTG > " .. it.name .. ": " .. seat .. " cancelled it (do it by hand).", INFO)
+        return
+      end
+      printToAll("MTG > " .. it.name .. ": " .. seat .. " exiles the top six cards of their library.", INFO)
+      local k = 0
+      local function six()
+        k = k + 1
+        if k > 6 or Library.count(seat) == 0 then
+          Wait.time(revealNext, 0.5)
+          return
+        end
+        Library.exileUntilNonland(seat, true, function() six() end)
+      end
+      six()
+    end)
+  return true
+end
+
+-- Mindbreak Trap: "Exile any number of target spells." Each spell on the stack, yes or no.
+CARD_FX.mindbreak = function(it, low)
+  if not low:find("exile any number of target spells", 1, true) then
+    return false
+  end
+  local seat = it.controller
+  local list = {}
+  for _, e in ipairs(Stack.entries()) do
+    if e.kind == "card" and e.guid ~= it.card and e.guid ~= it.guid then
+      table.insert(list, e)
+    end
+  end
+  if #list == 0 then
+    printToAll("MTG > " .. it.name .. ": no spells on the stack to exile.", INFO)
+    return true
+  end
+  local i = #list + 1
+  local n = 0
+  local function nextOne()
+    i = i - 1
+    local e = list[i]
+    if e == nil then
+      printToAll("MTG > " .. it.name .. ": " .. n .. " spell" .. (n == 1 and "" or "s") .. " exiled.", GOOD)
+      return
+    end
+    ask(seat, it.name .. ": exile it?", "Exile " .. e.name .. " (" .. tostring(e.controller) .. "'s spell) from the stack?",
+      { { label = "EXILE", value = true }, { label = "LEAVE IT", value = false } }, function(yes)
+        if yes and Stack.exileGuid(e.guid, it.name) then
+          n = n + 1
+        end
+        nextOne()
+      end)
+  end
+  nextOne()
+  return true
+end
+
+-- Avacyn, Angel of Horror: "return that card to the battlefield under your control at the beginning of
+-- the next end step" (from the graveyard, if it's still there then).
+CARD_FX.endReturn = function(it, low)
+  if not low:find("return that card to the battlefield under your control at the beginning of the next end step", 1, true) then
+    return false
+  end
+  local g = it.thatCard
+  if g == nil then
+    broadcastToColor(it.name .. ": couldn't tell which card died - return it by hand at the next end step.", it.controller, INFO)
+    return true
+  end
+  local obj = getObjectFromGUID(g)
+  local name = obj and obj.getName() or "that card"
+  Effects.addDelayed({ seat = it.controller, anySeat = true, step = "end", kind = "returnYard", guid = g, owner = it.controller, name = it.name })
+  printToAll("MTG > " .. it.name .. ": " .. name .. " returns to the battlefield under " .. it.controller .. "'s control at the beginning of the next end step.", GOOD)
+  return true
+end
+
+-- Firion, Wild Rose Warrior: a token copy of the Equipment that entered, sacrificed at the next upkeep.
+CARD_FX.firionCopy = function(it, low)
+  if not (low:find("create a token that's a copy of it", 1, true) and low:find("sacrifice that token at the beginning of the next upkeep", 1, true)) then
+    return false
+  end
+  local seat = it.controller
+  local obj = it.thatCard and getObjectFromGUID(it.thatCard)
+  if obj == nil or obj.isDestroyed() then
+    broadcastToColor(it.name .. ": couldn't find what entered - make the token copy by hand.", seat, INFO)
+    return true
+  end
+  local c = Effects.copyCard(obj, seat, { toField = true, noMods = true }, it.name)
+  if c then
+    Effects.addDelayed({ seat = seat, anySeat = true, step = "upkeep", kind = "sacToken", guid = c.getGUID(), name = it.name })
+    local cut = low:match("equip abilities cost {(%d+)} less") or "2"
+    broadcastToColor(it.name .. ": the token's equip costs {" .. cut .. "} less (pay the lower cost); it's sacrificed at the next upkeep.", seat, GOOD)
+  end
+  return true
+end
+
+-- Lightning, Army of One's Stagger: until your next turn, damage to that player or their permanents is doubled.
+function Effects.staggered(seat)
+  local st = GameState.data and GameState.data.stagger
+  local e = st and seat and st[seat]
+  return e and e.name or nil
+end
+
+CARD_FX.stagger = function(it, low)
+  if not low:find("until your next turn, if a source would deal damage to that player or a permanent that player controls, it deals double that damage instead", 1, true) then
+    return false
+  end
+  local who = it.that
+  if who == nil or not TableSetup.isActive(who) then
+    broadcastToColor(it.name .. ": couldn't tell which player was hit - double their damage by hand until your next turn.", it.controller, INFO)
+    return true
+  end
+  GameState.data.stagger = GameState.data.stagger or {}
+  GameState.data.stagger[who] = { by = it.controller, name = it.name }
+  printToAll("MTG > " .. it.name .. ": until " .. it.controller .. "'s next turn, damage to " .. who .. " and their permanents is doubled.", GOOD)
+  broadcastToAll(who .. " is STAGGERED: damage to them and their permanents is doubled until " .. it.controller .. "'s next turn.", { 1, 0.6, 0.2 })
+  return true
+end
+
+-- Stagger ends when its controller's next turn begins.
+Events.on("stepStarted", function(d)
+  local st = GameState.data and GameState.data.stagger
+  if st == nil or d.step ~= "untap" then
+    return
+  end
+  for victim, e in pairs(st) do
+    if e.by == d.seat then
+      st[victim] = nil
+      printToAll("MTG > " .. tostring(e.name) .. ": " .. victim .. " is no longer staggered.", INFO)
+    end
+  end
+end)
+
+local CARD_FX_ORDER = { "stagger", "moltenNote", "consult", "mindbreak", "endReturn", "firionCopy", "acererak", "throne", "oubliette", "eachUnless", "drawCastFree", "exileTopPlay", "untilNextTurn", "controlCountered", "graveExile", "peekTop", "drawToCopy", "lookSplit", "namedAnywhere", "phaseOut", "castFromYard", "manaPerType", "giveAway",
   "tokensPerCounter", "countersOnLegends", "oppToken", "ringCopy", "ringWatch", "jewel" }
 
 -- Does cardFx take this text? (Its own prompts pick the targets, so nothing is asked as it goes on the stack.)
@@ -6672,7 +7069,8 @@ local CARD_FX_KEYS = { "you may have target opponent draw a card. if you do, cop
   "you may cast target instant or sorcery card with mana value ", "target opponent gains control of",
   "if it was cast, target opponent creates a token that's a copy of it", "who controls an artifact named wedding ring",
   "that player draws three cards and gains control of this artifact", "card from a graveyard.", "look at the top card of target player's library",
-  "target creature can't attack until your next turn", "if you haven't completed tomb of annihilation" }
+  "target creature can't attack until your next turn", "if you haven't completed tomb of annihilation",
+  "exile any number of target spells" }
 function Effects.cardFxTakes(text)
   local low = tostring(text or ""):lower():gsub("’", "'")
   for _, k in ipairs(CARD_FX_KEYS) do
@@ -7823,15 +8221,24 @@ Events.on("cardMoved", function(d)
 end)
 
 -- Put an exiled card back onto the battlefield (a real move, so enters triggers fire).
-function Effects.returnFromExile(guid, owner, why)
+function Effects.returnFromExile(guid, owner, why, fromZone)
+  fromZone = fromZone or "exile"
   local obj = getObjectFromGUID(guid)
+  -- From the graveyard (Avacyn, Angel of Horror): only if it is still there.
+  if fromZone == "graveyard" and obj and not obj.isDestroyed() then
+    local okr, loc = pcall(function() return Zones.regionAt(obj.getPosition()) end)
+    if not (okr and loc and loc.region == "graveyard") then
+      printToAll("MTG > " .. obj.getName() .. " isn't in a graveyard any more: it doesn't return" .. (why and (" (" .. why .. ")") or "") .. ".", INFO)
+      return
+    end
+  end
   if obj == nil or obj.isDestroyed() then
     -- It may have merged into the exile pile: take it back out (Worldgorger Dragon returns a whole board).
     if owner and TableSetup.isActive(owner) then
       for _, deck in ipairs(getObjects()) do
         if deck.type == "Deck" and not deck.isDestroyed() then
           local loc = Zones.regionAt(deck.getPosition())
-          if loc.region == "exile" then
+          if loc.region == fromZone then
             for _, e in ipairs(deck.getObjects()) do
               if e.guid == guid then
                 local isLand = tostring(e.gm_notes or ""):find('"typeLine":"[^"]*Land', 1) ~= nil
@@ -8132,6 +8539,14 @@ Events.on("stepStarted", function(d)
       table.remove(list, i)
       if r.kind == "returnCard" then
         Effects.returnFromExile(r.guid, r.owner, r.name)
+      elseif r.kind == "returnYard" then
+        Effects.returnFromExile(r.guid, r.owner, r.name, "graveyard")
+      elseif r.kind == "sacToken" then
+        local obj = getObjectFromGUID(r.guid)
+        if obj and not obj.isDestroyed() and Effects.fieldSeat(obj) then
+          printToAll("MTG > " .. r.name .. ": " .. obj.getName() .. " (the token copy) is sacrificed.", GOOD)
+          Combat.sacrifice(obj)
+        end
       elseif r.kind == "nikoEnd" then
         for _, g in ipairs(r.clones or {}) do
           local o = getObjectFromGUID(g)
@@ -10739,6 +11154,14 @@ end
 function Effects.damageCreature(obj, n, src, sourceName, controller)
   if obj == nil or obj.isDestroyed() or n <= 0 then
     return
+  end
+  do
+    local victim = Effects.fieldSeat(obj)
+    local by = victim and Effects.staggered(victim)
+    if by then
+      printToAll("MTG > " .. victim .. " is staggered (" .. by .. "): " .. n .. " damage to " .. obj.getName() .. " becomes " .. (n * 2) .. ".", { 1, 0.6, 0.2 })
+      n = n * 2
+    end
   end
   local name = obj.getName()
   local ty = cardTypes(obj)

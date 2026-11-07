@@ -114,6 +114,7 @@ require("src/planechase_data")
 require("src/planechase")
 require("src/planefx")
 require("src/cardwatch")
+require("src/saga")
 require("src/leave")
 require("src/rulebook")
 require("src/bugreport")
@@ -137,7 +138,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.86 (!passturn for a stuck turn; NEXT STEP passes a stuck cleanup; table reset after flips)"
+SCRIPT_VERSION = "2.87 (Sagas; tonight's bug reports: Soulcleaver, Aurelia, Winter, Avacyn, Firion, Stagger and more)"
 
 function onLoad(saved)
   GameLog.setup()

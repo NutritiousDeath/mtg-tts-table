@@ -165,6 +165,13 @@ function Counters.stats(obj)
   if (c.bp or 0) > 0 or (c.bt or 0) > 0 then
     baseP, baseT = c.bp, c.bt
   end
+  -- An attachment that sets the base (Aettir and Priwen: X/X where X is your life total).
+  if Equip and Equip.baseOf then
+    local okb, ep, et = pcall(Equip.baseOf, obj)
+    if okb and ep then
+      baseP, baseT = ep, et
+    end
+  end
   return {
     power = baseP and apply(baseP, c.tp + c.pc + eqP + sP) or nil,
     toughness = baseT and apply(baseT, c.tt + c.tc + eqT + sT) or nil,

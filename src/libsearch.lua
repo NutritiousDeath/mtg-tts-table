@@ -319,6 +319,7 @@ function LibSearch.run(color)
 end
 
 local held = {}   -- [color] = card taken to go on top of the library after the shuffle
+local heldHidden = {}   -- [color] = true: that card isn't revealed (Vampiric Tutor, Imperial Seal)
 
 local function renderDest(color)
   local d = dest[color] or { where = "hand" }
@@ -476,7 +477,17 @@ function LibSearch.close(color, quiet)
   -- the library until its owner puts it on top (or draws).
   local h = held[color]
   held[color] = nil
-  if h and not h.isDestroyed() then
+  local hidden = heldHidden[color]
+  heldHidden[color] = nil
+  if h and not h.isDestroyed() and hidden then
+    -- Not revealed: straight onto the top, face down.
+    Wait.time(function()
+      local okp, errp = pcall(Library.putAt, color, h, 0)
+      if not okp then
+        print("LibSearch: could not put the card on top: " .. tostring(errp))
+      end
+    end, 0.8)
+  elseif h and not h.isDestroyed() then
     local okh, errh = pcall(Library.holdRevealed, color, h)
     if not okh then
       print("LibSearch: could not hold the revealed card: " .. tostring(errh))
@@ -504,17 +515,26 @@ local function take(color, slot, toBattlefield, tapped, toTop, toYard)
   local s = TableSetup.seat(color)
   local name = "a card"
   if toTop then
+    -- "Search ... reveal it, then shuffle and put the card on top" (Enlightened Tutor) shows it; without
+    -- "reveal" (Vampiric Tutor, Imperial Seal) it stays face down and only its owner knows it.
+    local hide = not (filters[color] and filters[color].reveal)
     if lib.type == "Deck" then
       local card = lib.takeObject({ index = index, position = Library.revealSpot(color),
-        rotation = { 0, s.yaw, 0 }, smooth = true })
+        rotation = { 0, s.yaw, hide and 180 or 0 }, smooth = true })
       if card then
         held[color] = card
+        heldHidden[color] = hide or nil
         name = card.getName()
       end
     else
       name = lib.getName()   -- the only card: it is already on top
     end
-    printToAll("MTG > " .. color .. " reveals " .. name .. " and will put it on top of their library after the shuffle.", INFO)
+    if hide then
+      printToAll("MTG > " .. color .. " sets a card aside face down: it goes on top of their library after the shuffle.", INFO)
+      broadcastToColor("You chose " .. name .. ": it goes on top of your library, face down.", color, INFO)
+    else
+      printToAll("MTG > " .. color .. " reveals " .. name .. " and will put it on top of their library after the shuffle.", INFO)
+    end
   elseif toYard then
     -- Entomb, Buried Alive: into the graveyard (merged into the pile).
     local gpos = TableSetup.slot(color, "graveyard", TableSetup.SURFACE_TOP + 2)

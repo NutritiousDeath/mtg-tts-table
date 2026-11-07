@@ -1715,6 +1715,15 @@ Events.on("cardMoved", function(d)
   local entering = IN_PLAY[d.to.region] and not IN_PLAY[d.from.region]
   local leaving = IN_PLAY[d.from.region] and not IN_PLAY[d.to.region]
   local dying = IN_PLAY[d.from.region] and d.to.region == "graveyard" and (typesOf(card).creature or typesOf(card).artifact)
+  -- A commander that died and went to the command zone (combat.lua marks it) still died.
+  local dc = Triggers.diedToCommand and Triggers.diedToCommand[card.getGUID()]
+  if dc and IN_PLAY[d.from.region] and tostring(d.to.region):find("^command") then
+    Triggers.diedToCommand[card.getGUID()] = nil
+    if os.time() - dc < 10 then
+      dying = typesOf(card).creature or typesOf(card).artifact
+      leaving = true
+    end
+  end
   -- A card discarded (hand -> graveyard): "whenever you discard a card", madness-style "when you discard ~".
   if d.from.region == "hand" and d.to.region == "graveyard" and d.from.seat then
     Triggers.onDiscard(card, d.from.seat)
@@ -2337,7 +2346,9 @@ Events.on("spellCast", function(d)
   for _, p in ipairs(sources) do
     for _, a in ipairs(abilitiesOf(p.obj)) do
       local t = a.trig
-      if t.kind == "cast" and not (t.other and p.obj == d.card) then
+      -- The spell being cast never sees itself ("whenever you cast a black spell" on K'rrik: casting K'rrik
+      -- doesn't count, it isn't on the battlefield yet; "when you cast this spell" is castSelf, above).
+      if t.kind == "cast" and p.obj ~= d.card then
         local mine = ours(t, d.controller, p.controller)
         local oppOf = d.controller
         local firstOk = true

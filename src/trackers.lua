@@ -255,6 +255,14 @@ function Trackers.changeLife(color, delta, byColor)
   if Triggers and Triggers.onLife then
     Triggers.onLife(color, delta)
   end
+  -- Aettir and Priwen: the equipped creature's base P/T is its controller's life total.
+  if Equip and Equip.lifeHosts then
+    pcall(function()
+      for _, host in ipairs(Equip.lifeHosts(color)) do
+        Counters.render(host)
+      end
+    end)
+  end
 end
 
 function Trackers.changePoison(color, delta, byColor)

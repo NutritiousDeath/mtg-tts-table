@@ -203,6 +203,50 @@ local function modsOf(att)
 end
 Equip.modsOf = modsOf
 
+-- A base power and toughness an attachment sets (Aettir and Priwen: "Equipped creature has base power and
+-- toughness X/X, where X is your life total"; "Equipped creature has base power and toughness 5/5").
+-- Returns bp, bt or nil. The last attached one wins.
+function Equip.baseOf(creature)
+  local bp, bt
+  for _, a in ipairs(Equip.attachments(creature)) do
+    local oracle = tostring(cardData(a).oracle or ""):lower()
+    if oracle:find("has base power and toughness x/x, where x is your life total", 1, true) then
+      local seat = (Effects and Effects.fieldSeat and Effects.fieldSeat(a)) or nil
+      local p = seat and GameState.player(seat)
+      if p and tonumber(p.life) then
+        bp, bt = math.max(0, tonumber(p.life)), math.max(0, tonumber(p.life))
+      end
+    else
+      local np, nt = oracle:match("equipped creature has base power and toughness (%d+)/(%d+)")
+      if not np then
+        np, nt = oracle:match("enchanted creature has base power and toughness (%d+)/(%d+)")
+      end
+      if np then
+        bp, bt = tonumber(np), tonumber(nt)
+      end
+    end
+  end
+  return bp, bt
+end
+
+-- Creatures whose base P/T follows their controller's life (re-shown when life changes).
+function Equip.lifeHosts(seat)
+  local out = {}
+  for ag in pairs(attached()) do
+    local o = getObjectFromGUID(ag)
+    if o and o.type == "Card" and not o.isDestroyed() then
+      local oracle = tostring(cardData(o).oracle or ""):lower()
+      if oracle:find("where x is your life total", 1, true) then
+        local host = Equip.hostOf(o)
+        if host and (seat == nil or (Effects and Effects.fieldSeat and Effects.fieldSeat(o) == seat)) then
+          table.insert(out, host)
+        end
+      end
+    end
+  end
+  return out
+end
+
 -- Total +power / +toughness the attachments give this creature.
 function Equip.bonus(creature)
   local dp, dt = 0, 0

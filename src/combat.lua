@@ -1024,6 +1024,19 @@ local function buildRows(phase)
   local c = state()
   local rows = {}
   local function add(row)
+    -- Lightning's Stagger: damage to that player or their permanents is doubled.
+    if row.amount > 0 and Effects and Effects.staggered then
+      local victim = row.kind == "player" and row.dst or nil
+      if victim == nil then
+        local o = getObjectFromGUID(row.dst)
+        victim = o and Effects.fieldSeat and Effects.fieldSeat(o) or nil
+      end
+      local by = victim and Effects.staggered(victim)
+      if by then
+        row.amount = row.amount * 2
+        row.note = (row.note and (row.note .. "; ") or "") .. "doubled (" .. by .. ")"
+      end
+    end
     if row.amount > 0 then
       table.insert(rows, row)
     end
@@ -1475,6 +1488,12 @@ local function sendToGraveyard(card, zone)
   card.setLock(false)
   local key, owner, slot = commanderKey(card)
   if key then
+    -- A commander that dies still dies (CR 903.9a: it goes to the graveyard, then to the command zone):
+    -- its "dies" triggers and "whenever a creature dies" still see it (Avacyn, Blood Artist).
+    if zone == "graveyard" and Triggers then
+      Triggers.diedToCommand = Triggers.diedToCommand or {}
+      Triggers.diedToCommand[card.getGUID()] = os.time()
+    end
     card.setRotation({ 0, TableSetup.seat(owner).yaw, 0 })
     card.setPosition(TableSetup.slot(owner, "command" .. math.min(slot, 2), TableSetup.SURFACE_TOP + 1))
     Wait.time(function()
