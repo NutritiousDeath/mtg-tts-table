@@ -704,10 +704,12 @@ async function handleBug(request, env) {
     return plain("ERROR\tEmpty report.", 400);
   }
 
-  // One report per IP every BUG_GAP_SECONDS (Cloudflare's cache as a small timer).
+  // One report per seat every BUG_GAP_SECONDS (Cloudflare's cache as a small timer). TTS sends every
+  // web request from the host's machine, so the whole table shares one IP: the limit is per IP and seat.
   const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  const seatKey = clip(r.seat, 16).replace(/[^A-Za-z]/g, "") || "none";
   const cache = caches.default;
-  const rlKey = new Request("https://bug-rate.invalid/" + encodeURIComponent(ip));
+  const rlKey = new Request("https://bug-rate.invalid/" + encodeURIComponent(ip) + "/" + seatKey);
   if (await cache.match(rlKey)) {
     return plain("ERROR\tPlease wait a couple of minutes between reports.", 429);
   }
