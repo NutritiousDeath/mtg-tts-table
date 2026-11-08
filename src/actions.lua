@@ -362,7 +362,9 @@ function Actions.onRotate(obj, spin, oldSpin, color)
       return
     end
     local painAsked = false
-    text = text:gsub(nm:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "~")
+    -- Current Oracle wording says "This land deals 2 damage to you" (Ancient Tomb, the pain lands) instead
+    -- of the card's name: both read as "~".
+    text = text:gsub(nm:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "~"):gsub("this land", "~"):gsub("this artifact", "~")
     local function hurt(n)
       if n and n > 0 and Trackers and Trackers.changeLife then
         Trackers.changeLife(loc.seat, -n, obj.getName())

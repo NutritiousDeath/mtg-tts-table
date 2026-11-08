@@ -4463,6 +4463,66 @@ function PlaneFx.castFromGraveyard(color, title, fits, opts)
   end)
 end
 
+-- Exile every card in seat's graveyard that fits(entry) (Yggdrasil: "exile all creature cards from your
+-- graveyard"). done(cards) once they're all out (cards = the card objects, now in that seat's exile).
+function PlaneFx.exileAllFromGraveyard(seat, fits, title, done)
+  local pile = Library.pileIn(seat, "graveyard")
+  local guids, names = {}, {}
+  if pile and pile.type == "Deck" then
+    for _, e in ipairs(pile.getObjects() or {}) do
+      local okd, dd = pcall(function() return JSON.decode(e.gm_notes or "{}") end)
+      local gm = okd and type(dd) == "table" and dd or {}
+      local ent = { guid = e.guid, name = e.name or e.nickname or "?", gm = gm, typeLine = tostring(gm.typeLine or ""):lower() }
+      if fits(ent) then
+        table.insert(guids, e.guid)
+        table.insert(names, ent.name)
+      end
+    end
+  elseif pile and pile.type == "Card" then
+    local ent = { guid = pile.getGUID(), name = pile.getName(), gm = data(pile), typeLine = tostring(typeLine(pile) or ""):lower() }
+    if fits(ent) then
+      table.insert(guids, ent.guid)
+      table.insert(names, ent.name)
+    end
+  end
+  if #guids == 0 then
+    printToAll("MTG > " .. title .. ": nothing in " .. seat .. "'s graveyard to exile.", INFO)
+    if done then done({}) end
+    return
+  end
+  local s = TableSetup.seat(seat)
+  local got = {}
+  local function place(card, k)
+    card.setRotation({ 0, s.yaw, 0 })
+    local p = TableSetup.slot(seat, "exile", TableSetup.SURFACE_TOP + 1 + k * 0.25)
+    card.setPosition(p)
+    table.insert(got, card)
+    Wait.time(function() if not card.isDestroyed() then Zones.refresh(card) end end, 0.6)
+  end
+  if pile.type == "Card" then
+    place(pile, 1)
+  else
+    local want = {}
+    for _, g in ipairs(guids) do want[g] = true end
+    for k, g in ipairs(guids) do
+      if pile.isDestroyed() then
+        break
+      end
+      local okt = pcall(function()
+        pile.takeObject({ guid = g, position = TableSetup.slot(seat, "exile", TableSetup.SURFACE_TOP + 2 + k * 0.3),
+          rotation = { 0, s.yaw, 0 }, smooth = false, callback_function = function(c) place(c, k) end })
+      end)
+      -- The last card of a deck becomes a loose card (its remainder).
+      if pile.remainder and want[pile.remainder.getGUID()] then
+        place(pile.remainder, k + 1)
+        break
+      end
+    end
+  end
+  printToAll("MTG > " .. title .. ": " .. seat .. " exiles " .. table.concat(names, ", ") .. " from their graveyard.", GOOD)
+  Wait.time(function() if done then done(got) end end, 1.2)
+end
+
 -- Pick a card from ANY player's graveyard (Deathrite Shaman: "exile target land card from a graveyard") and exile it.
 -- chooser picks; fits(entry) with entry = { guid, name, typeLine, gm }; done(entry, ownerSeat) after it's exiled.
 function PlaneFx.exileFromAnyGraveyard(chooser, title, fits, done)

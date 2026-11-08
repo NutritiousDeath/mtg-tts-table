@@ -138,7 +138,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.87 (Sagas; tonight's bug reports: Soulcleaver, Aurelia, Winter, Avacyn, Firion, Stagger and more)"
+SCRIPT_VERSION = "2.88 (2-player bug reports: Yggdrasil, Frantic Search, Brainstorm, Ancient Tomb, Talismans, Sword of War and Peace, Tymna, Fatal Push)"
 
 function onLoad(saved)
   GameLog.setup()

@@ -652,7 +652,23 @@ function Effects.parse(text, sourceName)
     do
       local w = t:match("untap up to (%w+) lands")
       if w and num(w) and not t:find("target", 1, true) then
-        return { optional = false, notes = {}, conds = {}, actions = { { what = "untapLands", who = "you", n = num(w) } } }
+        local plan = { optional = false, notes = {}, conds = {}, actions = { { what = "untapLands", who = "you", n = num(w) } } }
+        -- Frantic Search: "Draw two cards, then discard two cards. Untap up to three lands." - the rest too.
+        local rest = t:gsub("untap up to %w+ lands%.?", ""):gsub("^%s+", ""):gsub("%s+$", "")
+        if rest:find("%a") and not rest:find("^when") and not rest:find("^whenever") then
+          local sub = Effects.parse(rest, sourceName)
+          if sub and sub.actions and #sub.actions > 0 then
+            for i = #sub.actions, 1, -1 do
+              table.insert(plan.actions, 1, sub.actions[i])
+            end
+            for _, nn in ipairs(sub.notes or {}) do
+              table.insert(plan.notes, nn)
+            end
+          elseif rest ~= "" then
+            table.insert(plan.notes, rest)
+          end
+        end
+        return plan
       end
     end
     -- Patient Naturalist: "mill three cards. Put a land card from among the milled cards into your hand. If you can't,
@@ -1634,6 +1650,29 @@ function Effects.parse(text, sourceName)
               upTo = how == "up to one target" })
           end
         end
+        -- "Exile all creature cards from your graveyard" (Yggdrasil, Rebirth Engine), "exile all cards from
+        -- target player's graveyard": cards in a graveyard, not permanents on the battlefield.
+        if verb == "exile" and (how == "all" or how == "each") and phrase:find("graveyard", 1, true) then
+          local whose = "you"
+          if phrase:find("each opponent's graveyard", 1, true) or phrase:find("your opponents' graveyards", 1, true) then
+            whose = "opponents"
+          elseif phrase:find("all graveyards", 1, true) or phrase:find("each graveyard", 1, true) then
+            whose = "all"
+          elseif phrase:find("target player's graveyard", 1, true) or phrase:find("target opponent's graveyard", 1, true) then
+            whose = "target"
+          end
+          local yt = {}
+          for _, w in ipairs({ "creature", "artifact", "enchantment", "instant", "sorcery", "land", "planeswalker" }) do
+            if phrase:find(w, 1, true) then
+              table.insert(yt, w)
+            end
+          end
+          if phrase:find("nonland", 1, true) then
+            yt = { "nonland" }
+          end
+          table.insert(actions, { what = "yardExile", who = whose, n = 1, types = yt })
+          types = {}
+        end
         if #types > 0 then
           local scope = "any"
           if phrase:find("you don't control", 1, true) or phrase:find("opponents control", 1, true)
@@ -2207,6 +2246,25 @@ function Effects.parse(text, sourceName)
           r.optional = false
         end
       end
+    end
+  end
+  -- Yggdrasil: "Put a creature card exiled with ~ onto the battlefield... It gains haste": the return gives
+  -- the haste itself, so a separate "it gains haste" pump (which can't tell which creature) goes.
+  do
+    local hasteReturn = false
+    for _, ac in ipairs(r.actions) do
+      if ac.what == "returnExiledWith" and ac.haste then
+        hasteReturn = true
+      end
+    end
+    if hasteReturn then
+      for i = #r.actions, 1, -1 do
+        local ac = r.actions[i]
+        if ac.what == "pump" and ac.scope == "that" and (ac.p or 0) == 0 and (ac.q or 0) == 0 then
+          table.remove(r.actions, i)
+        end
+      end
+      r.optional = false
     end
   end
   -- Kokusho, Gray Merchant style: "You gain life equal to the life lost this way."
@@ -2934,6 +2992,8 @@ local function describe(a, target, controller)
     return "influence counter, scry 2, then the opponent picks: you draw, or you mill and they lose life"
   elseif a.what == "lookHand" then
     return "you look at " .. who .. "'s hand"
+  elseif a.what == "yardExile" then
+    return "exile " .. (#(a.types or {}) > 0 and (table.concat(a.types, "/") .. " cards") or "all cards") .. " from " .. who .. "'s graveyard"
   elseif a.what == "handPick" then
     return "look at the hand and choose a card to discard"
   elseif a.what == "sylvan" then
@@ -3306,6 +3366,7 @@ end
 local function apply(it, plan, target)
   local controller = it.controller
   local done = {}
+  local drewEarlier = false   -- a draw in this plan: a discard / put-back after it waits for the cards to arrive
   for _, a in ipairs(plan.actions) do
     local seats
     if a.who == "you" then
@@ -3371,6 +3432,7 @@ local function apply(it, plan, target)
             end)
           end
         elseif a.what == "draw" then
+          drewEarlier = true
           watched("draw", seat, a.n, controller, it.name, function(v)
             if v > 0 then
               Actions.draw(seat, v, it.name)
@@ -3617,7 +3679,12 @@ local function apply(it, plan, target)
         elseif a.what == "mill" then
           Actions.mill(seat, a.n)
         elseif a.what == "discard" then
-          Actions.forceDiscard(seat, a.n, it.name)
+          -- Brainstorm, Frantic Search: the drawn cards must be in hand before choosing.
+          if drewEarlier then
+            Wait.time(function() Actions.forceDiscard(seat, a.n, it.name) end, 1.8)
+          else
+            Actions.forceDiscard(seat, a.n, it.name)
+          end
         elseif a.what == "untapAll" then
           Effects.untapAllOf(seat, a.type, it.name)
         elseif a.what == "ringTempts" then
@@ -3668,7 +3735,11 @@ local function apply(it, plan, target)
         elseif a.what == "bullies" then
           Effects.bullies(seat, it)
         elseif a.what == "handToTop" then
-          Actions.forceDiscard(seat, a.n, it.name, nil, "top")
+          if drewEarlier then
+            Wait.time(function() Actions.forceDiscard(seat, a.n, it.name, nil, "top") end, 1.8)
+          else
+            Actions.forceDiscard(seat, a.n, it.name, nil, "top")
+          end
         elseif a.what == "winIfHand" then
           local okh, hand = pcall(function() return Player[seat].getHandObjects() end)
           local n = okh and hand and #hand or 0
@@ -4161,6 +4232,8 @@ local function apply(it, plan, target)
           Effects.handPick(controller, seat, a, it)
         elseif a.what == "lookHand" then
           Effects.lookHand(controller, seat, it)
+        elseif a.what == "yardExile" then
+          Effects.yardExile(seat, a, it)
         elseif a.what == "arcum" then
           Effects.arcum(seat, it)
         elseif a.what == "jeska" then
@@ -5463,6 +5536,39 @@ function Effects.handPick(caster, target, a, it)
   Actions.chooseFromHand(caster, target, it.name, pred, hint, nil)
 end
 
+-- "Exile all creature cards from your graveyard": the matching cards in that seat's graveyard go to its
+-- exile, remembered as exiled with the source (Yggdrasil's "creature card exiled with ~").
+function Effects.yardExile(seat, a, it)
+  if not (PlaneFx and PlaneFx.exileAllFromGraveyard) then
+    return
+  end
+  local want = a.types or {}
+  PlaneFx.exileAllFromGraveyard(seat, function(e)
+    if #want == 0 then
+      return true
+    end
+    for _, w in ipairs(want) do
+      if w == "nonland" then
+        if not e.typeLine:find("land", 1, true) then
+          return true
+        end
+      elseif e.typeLine:find(w, 1, true) then
+        return true
+      end
+    end
+    return false
+  end, it.name, function(cards)
+    if it.source and #cards > 0 then
+      GameState.data.exiledWith = GameState.data.exiledWith or {}
+      local list = GameState.data.exiledWith[it.source] or {}
+      for _, c in ipairs(cards) do
+        table.insert(list, c.getGUID())
+      end
+      GameState.data.exiledWith[it.source] = list
+    end
+  end)
+end
+
 -- Gitaxian Probe: the caster sees the names of the cards in that player's hand (nobody else does).
 function Effects.lookHand(caster, target, it)
   if caster == nil or target == nil or Player[target] == nil then
@@ -5485,7 +5591,7 @@ function Effects.lookHand(caster, target, it)
     return
   end
   printToColor("MTG > " .. target .. "'s hand: " .. table.concat(names, ", "), caster, { 1, 0.85, 0.3 })
-  broadcastToColor(target .. "'s hand is in your chat (only you see it).", caster, INFO)
+  broadcastToColor(target .. "'s hand: " .. table.concat(names, ", ") .. "  (only you see this; it's in your chat too)", caster, { 1, 0.85, 0.3 })
 end
 
 -- Windfall: everyone discards their hand, then draws as many cards as the most anyone discarded.
@@ -7059,7 +7165,143 @@ Events.on("stepStarted", function(d)
   end
 end)
 
-local CARD_FX_ORDER = { "stagger", "moltenNote", "consult", "mindbreak", "endReturn", "firionCopy", "acererak", "throne", "oubliette", "eachUnless", "drawCastFree", "exileTopPlay", "untilNextTurn", "controlCountered", "graveExile", "peekTop", "drawToCopy", "lookSplit", "namedAnywhere", "phaseOut", "castFromYard", "manaPerType", "giveAway",
+-- Cut a Deal: "Each opponent draws a card. Then draw a card for each opponent who drew a card this way."
+CARD_FX.cutDeal = function(it, low)
+  if not low:find("each opponent draws a card. then draw a card for each opponent who drew a card this way", 1, true) then
+    return false
+  end
+  local seat = it.controller
+  local n = 0
+  for _, c in ipairs(players()) do
+    if TableSetup.isOpponent(c, seat) and Library.count(c) > 0 then
+      Library.draw(c, 1)
+      n = n + 1
+    end
+  end
+  printToAll("MTG > " .. it.name .. ": each opponent draws 1, then " .. seat .. " draws " .. n .. ".", GOOD)
+  if n > 0 then
+    Wait.time(function() Library.draw(seat, n) end, 0.8)
+  end
+  return true
+end
+
+-- Fatal Push: "Destroy target creature if it has mana value 2 or less. Revolt - ... 4 or less instead if a
+-- permanent left the battlefield under your control this turn."
+CARD_FX.fatalPush = function(it, low)
+  if not low:find("destroy target creature if it has mana value 2 or less", 1, true) then
+    return false
+  end
+  local seat = it.controller
+  local tgt
+  for _, e in ipairs(it.preTargets or {}) do
+    if e.kind == "card" then
+      tgt = getObjectFromGUID(e.guid)
+      break
+    end
+  end
+  if tgt == nil or tgt.isDestroyed() or not Effects.fieldSeat(tgt) then
+    printToAll("MTG > " .. it.name .. ": its target is gone.", INFO)
+    return true
+  end
+  local mv = 0
+  pcall(function() mv = tonumber(CardData.get(tgt).cmc) or 0 end)
+  local function kill()
+    if Effects.hasKeyword and Effects.hasKeyword(tgt, "indestructible") then
+      printToAll("MTG > " .. tgt.getName() .. " is indestructible and stays.", INFO)
+      return
+    end
+    Combat.removeCard(tgt, "graveyard")
+    printToAll("MTG > " .. it.name .. ": destroyed " .. tgt.getName() .. " (mana value " .. mv .. ").", GOOD)
+  end
+  if mv <= 2 then
+    kill()
+  elseif mv <= 4 and low:find("revolt", 1, true) then
+    ask(seat, it.name .. ": revolt?", tgt.getName() .. " has mana value " .. mv .. ". Did a permanent leave the battlefield under your control this turn?",
+      { { label = "YES: DESTROY IT", value = true }, { label = "NO", value = false } }, function(yes)
+        if yes then
+          kill()
+        else
+          printToAll("MTG > " .. it.name .. ": no revolt, so " .. tgt.getName() .. " (mana value " .. mv .. ") stays.", INFO)
+        end
+      end)
+  else
+    printToAll("MTG > " .. it.name .. ": " .. tgt.getName() .. " has mana value " .. mv .. ", too high: it stays.", INFO)
+  end
+  return true
+end
+
+-- Sword of War and Peace: "deals damage to that player equal to the number of cards in their hand and you
+-- gain 1 life for each card in your hand."
+CARD_FX.warPeace = function(it, low)
+  if not low:find("deals damage to that player equal to the number of cards in their hand and you gain 1 life for each card in your hand", 1, true) then
+    return false
+  end
+  local seat, who = it.controller, it.that
+  local function handN(c)
+    local ok, h = pcall(function() return Player[c].getHandObjects() end)
+    return ok and h and #h or 0
+  end
+  if who and TableSetup.isActive(who) then
+    local n = handN(who)
+    if n > 0 then
+      watched("damage", who, n, seat, it.name, function(v)
+        if v > 0 then
+          Trackers.changeLife(who, -v, it.name)
+        end
+      end)
+    end
+    printToAll("MTG > " .. it.name .. ": " .. n .. " damage to " .. who .. " (cards in their hand).", GOOD)
+  else
+    broadcastToColor(it.name .. ": couldn't tell which player was hit - deal the damage by hand.", seat, INFO)
+  end
+  local mine = handN(seat)
+  if mine > 0 then
+    Trackers.changeLife(seat, mine, it.name)
+  end
+  printToAll("MTG > " .. it.name .. ": " .. seat .. " gains " .. mine .. " life (cards in their hand).", GOOD)
+  return true
+end
+
+-- Tymna the Weaver: "you may pay X life, where X is the number of opponents that were dealt combat damage
+-- this turn. If you do, draw X cards."
+CARD_FX.tymna = function(it, low)
+  if not low:find("you may pay x life, where x is the number of opponents that were dealt combat damage this turn", 1, true) then
+    return false
+  end
+  local seat = it.controller
+  local hit = GameState.data.turn and GameState.data.turn.combatHit or nil
+  local n = 0
+  if type(hit) == "table" then
+    for c in pairs(hit) do
+      if TableSetup.isOpponent(c, seat) then
+        n = n + 1
+      end
+    end
+  end
+  local ch = { { label = "NO, DON'T PAY", value = 0 } }
+  local opps = 0
+  for _, c in ipairs(players()) do
+    if TableSetup.isOpponent(c, seat) then
+      opps = opps + 1
+    end
+  end
+  for k = 1, opps do
+    table.insert(ch, { label = "PAY " .. k .. ", DRAW " .. k .. (k == n and " (table's count)" or ""), value = k })
+  end
+  ask(seat, it.name .. ": pay life?", "How many opponents were dealt combat damage this turn? Pay that much life to draw that many cards.", ch, function(k)
+    k = tonumber(k) or 0
+    if k <= 0 then
+      printToAll("MTG > " .. it.name .. ": " .. seat .. " doesn't pay.", INFO)
+      return
+    end
+    Trackers.changeLife(seat, -k, it.name)
+    Library.draw(seat, k)
+    printToAll("MTG > " .. it.name .. ": " .. seat .. " pays " .. k .. " life and draws " .. k .. ".", GOOD)
+  end)
+  return true
+end
+
+local CARD_FX_ORDER = { "fatalPush", "warPeace", "tymna", "cutDeal", "stagger", "moltenNote", "consult", "mindbreak", "endReturn", "firionCopy", "acererak", "throne", "oubliette", "eachUnless", "drawCastFree", "exileTopPlay", "untilNextTurn", "controlCountered", "graveExile", "peekTop", "drawToCopy", "lookSplit", "namedAnywhere", "phaseOut", "castFromYard", "manaPerType", "giveAway",
   "tokensPerCounter", "countersOnLegends", "oppToken", "ringCopy", "ringWatch", "jewel" }
 
 -- Does cardFx take this text? (Its own prompts pick the targets, so nothing is asked as it goes on the stack.)
@@ -9244,7 +9486,7 @@ function Effects.resolve(it)
   end
   local plan, why = Effects.parseBest(it.text, it.name, it)
   if plan == nil then
-    printToAll("MTG > " .. it.name .. ": resolve it by hand (" .. tostring(why) .. ").", INFO)
+    printToAll("MTG > " .. it.name .. ": resolve it by hand" .. (why and (" (" .. tostring(why) .. ")") or " (the table can't read it)") .. ".", INFO)
     return
   end
   local seat = it.controller
