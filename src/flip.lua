@@ -158,7 +158,7 @@ local FLIES = { Card = true, Deck = true, Dice = true, Tile = true, Token = true
 local runChaos   -- defined below
 
 -- Seconds everything lies scattered on the cathedral floor before it all glides home.
-local LAND = 8
+local LAND = 10   -- seconds everything stays thrown before it glides home
 
 -- A parting shot painted on the underside of the table, a different one each flip: you see it as the
 -- table rears up and tumbles.
@@ -467,13 +467,26 @@ end
 -- out of place with no flip of ours running (TTS's own "Flip Table", a physics accident), the pieces that
 -- moved go back from here, not just the table.
 local snap = nil
+local NOT_PHYSICAL = { Scripting = true, Hand = true, Fog = true, Layout = true, Randomize = true, Snap = true, Trigger = true }
 function Flip.snapshot()
-  if Flip.chaosOn or tableDrift() then
+  if Flip.chaosOn or (Flip.knocked and Flip.knocked()) then
     return
   end
   local list = {}
+  local inHand = {}
+  for _, c in ipairs(TableSetup.activeSeats()) do
+    pcall(function()
+      for _, h in ipairs(Player[c].getHandObjects() or {}) do
+        inHand[h.getGUID()] = true
+      end
+    end)
+  end
   for _, o in ipairs(getObjects()) do
-    local ok, take = pcall(Flip.flies, o)
+    -- Everything physical, the room and its building pieces included (TTS's own Flip Table throws those
+    -- too, locked or not); not zones, not cards in hands or being held.
+    local ok, take = pcall(function()
+      return not (NOT_PHYSICAL[o.type] or o.held_by_color ~= nil or inHand[o.getGUID()])
+    end)
     if ok and take then
       local okv, resting = pcall(function()
         local v = o.getVelocity()
@@ -522,24 +535,76 @@ end
 -- Everything back to normal: an unfinished flip undone, the table and frame in place, the hand zones on
 -- the table edges. look = true also points seated players' cameras back at their seats.
 local lastReset, lastResetAt
-function Flip.reset(look, quiet)
+local driftSince = nil
+local DOWN_FOR = 10
+-- Really knocked over (TTS's own Flip Table, a physics accident): the surface or the stone frame well out of
+-- place or tipped. Small differences (a measuring wobble) don't count, so nothing is moved while people play.
+local function knocked()
+  local st = GameState.data and GameState.data.table or {}
+  for _, g in ipairs({ st.surface, st.frame }) do
+    local o = g and getObjectFromGUID(g)
+    if o and not o.isDestroyed() then
+      local p, r = o.getPosition(), o.getRotation()
+      local function tilt(a)
+        a = (a or 0) % 360
+        return math.min(a, 360 - a)
+      end
+      if math.abs(p.x) > 1 or math.abs(p.z) > 1 or tilt(r.x) > 10 or tilt(r.z) > 10 then
+        return true
+      end
+      if g == st.frame and math.abs(p.y) > 1 then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+Flip.knocked = knocked
+local lastRebuild = 0
+
+-- now = true (load, !fixtable): square everything up straight away, hand zones included.
+-- now = false (the watchdog): act only on a table that is really knocked over, after it has been down
+-- DOWN_FOR seconds, and at most once a minute; it never touches the hand zones (moving one while cards are
+-- being dealt into it drops them on the floor).
+function Flip.reset(look, quiet, now)
   if Flip.chaosOn then
     return false
   end
   local back = Flip.recover()
+  local fullFix = now or back > 0
+  local isDown = knocked()
+  if not fullFix then
+    if not isDown then
+      driftSince = nil
+      return false
+    end
+    driftSince = driftSince or os.time()
+    if os.time() - driftSince < DOWN_FOR or os.time() - lastRebuild < 60 then
+      return false
+    end
+  end
+  driftSince = nil
   local drift = tableDrift()
-  pcall(Flip.fixTable)
-  if drift and back == 0 then
-    -- Knocked over with no flip of ours on record: put the thrown pieces back too (after the table is in place).
+  if drift then
+    pcall(Flip.fixTable)
+  end
+  if isDown and back == 0 then
+    -- Thrown pieces back from the last snapshot, then the room rebuilt like a layout switch.
     local okr, n = pcall(restoreSnapshot)
     if okr and n and n > 0 then
       back = n
     end
+    lastRebuild = os.time()
+    Wait.time(function() pcall(Flip.rebuildRoom) end, 0.3)
+    flipLog("table found knocked over: room rebuilt")
   end
   local hands = {}
-  pcall(function() hands = TableSetup.handsOff() end)
-  if #hands > 0 then
-    pcall(TableSetup.fixHands, hands)
+  if fullFix then
+    pcall(function() hands = TableSetup.handsOff() end)
+    if #hands > 0 then
+      pcall(TableSetup.fixHands, hands)
+    end
   end
   if look then
     pcall(TableSetup.lookAtAll, 0.5)
@@ -548,7 +613,7 @@ function Flip.reset(look, quiet)
   if did and not quiet then
     local bits = {}
     if back > 0 then
-      table.insert(bits, back .. " piece" .. (back == 1 and "" or "s") .. " from an unfinished flip put back")
+      table.insert(bits, back .. " piece" .. (back == 1 and "" or "s") .. " put back")
     end
     if drift then
       table.insert(bits, "the table put back in place")
@@ -556,7 +621,6 @@ function Flip.reset(look, quiet)
     if #hands > 0 then
       table.insert(bits, "hand zones fixed (" .. table.concat(hands, ", ") .. ")")
     end
-    -- The same fix over and over (something TTS keeps undoing) is only reported every 5 minutes.
     local msg = "MTG > Table reset: " .. table.concat(bits, "; ") .. "."
     if msg ~= lastReset or os.time() - (lastResetAt or 0) > 300 then
       print(msg)
@@ -568,7 +632,7 @@ end
 
 -- On load (and Save and Play): undo any unfinished flip, square the table up, then point everyone at
 -- their seat once it's all back (main.lua points them again at 8 s for slow loaders).
-Wait.time(function() pcall(Flip.reset, false, false) end, 2.5)
+Wait.time(function() pcall(Flip.reset, false, false, true) end, 2.5)
 Wait.time(function() pcall(Flip.fixTable) end, 3)
 Wait.time(function() pcall(TableSetup.lookAtAll, 0.1) end, 4)
 Wait.time(function() pcall(TableSetup.lookAtAll, 0.1) end, 15)
@@ -605,16 +669,23 @@ end
 
 -- !fixtable: put the table and every table tile (trackers, action tiles, console strips, turn strips,
 -- mana tiles, the stack mat, importers) back where they belong, e.g. after something got knocked off.
-function Flip.repair(color)
-  pcall(Flip.reset, false, false)
+-- Put the whole room back the way a layout switch does: the table, frame, floor, walls, roof, glass,
+-- torches, fireplaces, rulebook, the planechase chest, hand zones, mats, and every table tile.
+function Flip.rebuildRoom()
   pcall(Flip.fixTable)
   pcall(TableSetup.ensure)
+  pcall(function() TableSetup.setLayout(TableSetup.layout()) end)
   for _, f in ipairs({ "Trackers.ensureTableDisplay", "Actions.ensure", "Turns.ensureStrips", "ManaChips.ensure",
     "Stack.ensure", "ImportCards.ensure", "Planechase.placeChest", "TableSetup.placeTorches", "Fires.place" }) do
     local mod, fn = f:match("^(%w+)%.(%w+)$")
     pcall(function() _G[mod][fn]() end)
   end
   pcall(function() TableSetup.fixHands() end)
+end
+
+function Flip.repair(color)
+  pcall(Flip.reset, false, false, true)
+  Flip.rebuildRoom()
   if color and TableSetup.isActive(color) then
     Wait.time(function() pcall(TableSetup.lookAtSeat, color) end, 1)
   end

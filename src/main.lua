@@ -138,7 +138,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.89 (commander tax from the mana pool, Zzz above P/T, knocked-over table brings the pieces back)"
+SCRIPT_VERSION = "2.92 (watchdog no longer moves hand zones or nudges the table; knocked-over table rebuilt; commander tax; Zzz)"
 
 function onLoad(saved)
   GameLog.setup()
