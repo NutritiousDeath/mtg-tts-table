@@ -498,9 +498,10 @@ renderInto = function(obj)
       function_owner = Global,
       label = "Zzz",
       tooltip = "Summoning sick: can't attack or use {T} abilities until its controller's next turn starts (unless it has haste).",
-      position = { 0.55, 0.3, 1.25 },
+      -- Just above the printed power/toughness box, so the P/T stays readable.
+      position = { 0.6, 0.3, 0.97 },
       rotation = { 0, 0, 0 },
-      width = 520, height = 260, font_size = 190,
+      width = 400, height = 200, font_size = 150,
       font_color = { 0.75, 0.9, 1 },
       color = { 0.1, 0.18, 0.4, 0.88 },
     })

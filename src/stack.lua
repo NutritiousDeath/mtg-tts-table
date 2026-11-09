@@ -242,7 +242,20 @@ function Stack.pushCard(obj, controller, from)
   else
     Stack.offer()
   end
-  Events.emit("spellCast", { card = obj, controller = controller })
+  -- The commander tax due on this cast (before it goes up), so mana.lua takes it from the pool too.
+  local taxDue = 0
+  if from and from.region == "command" then
+    for _, color in ipairs(TableSetup.activeSeats()) do
+      local p = GameState.player(color)
+      for slot, g in pairs(p and p.commanders or {}) do
+        if g == obj.getGUID() then
+          local t = p.commanderTax or {}
+          taxDue = tonumber(t[math.min(slot, 2)]) or 0
+        end
+      end
+    end
+  end
+  Events.emit("spellCast", { card = obj, controller = controller, from = from and from.region, tax = taxDue })
   -- A commander cast from its command zone: its tax goes up by 2.
   if from and from.region == "command" then
     for _, color in ipairs(TableSetup.activeSeats()) do

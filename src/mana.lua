@@ -869,6 +869,11 @@ Events.on("spellCast", function(d)
         cost = ManaChips.adjustGeneric(cost, -n)
       end
     end
+    -- Commander tax: {2} more for each earlier cast from the command zone.
+    if (tonumber(d.tax) or 0) > 0 then
+      cost = ManaChips.adjustGeneric(cost, tonumber(d.tax))
+      printToAll("MTG > " .. d.card.getName() .. ": commander tax {" .. d.tax .. "} added to what's taken from the pool.", INFO)
+    end
     if cost == "" then
       return
     end

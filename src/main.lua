@@ -138,7 +138,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.88 (2-player bug reports: Yggdrasil, Frantic Search, Brainstorm, Ancient Tomb, Talismans, Sword of War and Peace, Tymna, Fatal Push)"
+SCRIPT_VERSION = "2.89 (commander tax from the mana pool, Zzz above P/T, knocked-over table brings the pieces back)"
 
 function onLoad(saved)
   GameLog.setup()

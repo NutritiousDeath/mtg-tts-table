@@ -214,6 +214,34 @@ function Flip.chaos(color)
   Wait.time(function() pcall(Flip.fixTable); pcall(function() Zones.drawIcons() end) end, 16)
 end
 
+-- Does o go flying in a flip (and so get put back after one)? inHand / skip: GUID sets to leave alone.
+function Flip.flies(o, inHand, skip)
+  if not FLIES[o.type] or (skip and skip[o.getGUID()]) or o.held_by_color ~= nil or (inHand and inHand[o.getGUID()])
+      or o.hasTag("TableFloor") or o.hasTag("TableHearth") or o.hasTag("HearthFire") or o.hasTag("FireCrackle") or o.hasTag("FireSfx") or o.hasTag("StackFire") or o.hasTag("DiceTower") or o.hasTag("RulesBook") or o.hasTag("TableRoom") or o.hasTag("TableRoof") or o.hasTag("TableGlass") then
+    return false
+  end
+  if o.type == "Card" and o.is_face_down then
+    return false   -- face-down cards stay hidden
+  end
+  if o.type == "Deck" then
+    local r = Zones and Zones.regionAt(o.getPosition()).region
+    if r == "library" or o.is_face_down then
+      return false   -- libraries keep their order and stay hidden
+    end
+  end
+  return true
+end
+
+local function plain(v)
+  return { x = v.x or v[1] or 0, y = v.y or v[2] or 0, z = v.z or v[3] or 0 }
+end
+
+local function flipLog(msg)
+  if GameLog and GameLog.add then
+    pcall(GameLog.add, "FLIP", msg)
+  end
+end
+
 runChaos = function(color)
   local inHand = {}
   for _, c in ipairs(TableSetup.activeSeats()) do
@@ -228,22 +256,7 @@ runChaos = function(color)
   end
   local list = {}
   for _, o in ipairs(getObjects()) do
-    local ok, take = pcall(function()
-      if not FLIES[o.type] or skip[o.getGUID()] or o.held_by_color ~= nil or inHand[o.getGUID()]
-          or o.hasTag("TableFloor") or o.hasTag("TableHearth") or o.hasTag("HearthFire") or o.hasTag("FireCrackle") or o.hasTag("FireSfx") or o.hasTag("StackFire") or o.hasTag("DiceTower") or o.hasTag("RulesBook") or o.hasTag("TableRoom") or o.hasTag("TableRoof") or o.hasTag("TableGlass") then
-        return false
-      end
-      if o.type == "Card" and o.is_face_down then
-        return false   -- face-down cards stay hidden
-      end
-      if o.type == "Deck" then
-        local r = Zones and Zones.regionAt(o.getPosition()).region
-        if r == "library" or o.is_face_down then
-          return false   -- libraries keep their order and stay hidden
-        end
-      end
-      return true
-    end)
+    local ok, take = pcall(Flip.flies, o, inHand, skip)
     if ok and take then
       table.insert(list, { obj = o, pos = o.getPosition(), rot = o.getRotation(), locked = o.getLock() })
     end
@@ -253,14 +266,15 @@ runChaos = function(color)
   -- air would otherwise keep the table and the pieces wherever they landed (Flip.recover puts them back).
   local home = { pieces = {}, table = {}, at = os.time() }
   for _, e in ipairs(list) do
-    table.insert(home.pieces, { g = e.obj.getGUID(), p = e.pos, r = e.rot, l = e.locked == true })
+    table.insert(home.pieces, { g = e.obj.getGUID(), p = plain(e.pos), r = plain(e.rot), l = e.locked == true })
   end
   for _, e in ipairs(pieces) do
-    table.insert(home.table, { g = e.obj.getGUID(), p = e.pos, r = e.rot })
+    table.insert(home.table, { g = e.obj.getGUID(), p = plain(e.pos), r = plain(e.rot) })
   end
   if GameState.data then
     GameState.data.flipHome = home
   end
+  flipLog((color or "someone") .. " flipped the table: " .. #list .. " pieces recorded")
   local unpaint
   for _, e in ipairs(pieces) do
     if e.obj.hasTag("PlaySurface") then
@@ -338,6 +352,7 @@ runChaos = function(color)
       if GameState.data then
         GameState.data.flipHome = nil
       end
+      flipLog("flip finished: " .. #list .. " pieces put back")
       Wait.time(function()
         Flip.chaosOn = false
       end, 0.5)
@@ -401,6 +416,7 @@ function Flip.recover()
     end
   end
   GameState.data.flipHome = nil
+  flipLog("unfinished flip found on load: " .. n .. " pieces put back")
   -- A farewell painted under the surface by the unfinished flip goes too.
   local st = GameState.data.table or {}
   local surf = st.surface and getObjectFromGUID(st.surface)
@@ -447,6 +463,62 @@ local function tableDrift()
   return false
 end
 
+-- Where the pieces were the last time the table stood still (every 15 s). If the table is found knocked
+-- out of place with no flip of ours running (TTS's own "Flip Table", a physics accident), the pieces that
+-- moved go back from here, not just the table.
+local snap = nil
+function Flip.snapshot()
+  if Flip.chaosOn or tableDrift() then
+    return
+  end
+  local list = {}
+  for _, o in ipairs(getObjects()) do
+    local ok, take = pcall(Flip.flies, o)
+    if ok and take then
+      local okv, resting = pcall(function()
+        local v = o.getVelocity()
+        return math.abs(v.x) + math.abs(v.y) + math.abs(v.z) < 0.5
+      end)
+      if okv and resting then
+        list[o.getGUID()] = { p = plain(o.getPosition()), r = plain(o.getRotation()), l = o.getLock() }
+      end
+    end
+  end
+  snap = { at = os.time(), pieces = list }
+end
+
+local function restoreSnapshot()
+  if snap == nil then
+    return 0
+  end
+  local moved = {}
+  for g, e in pairs(snap.pieces) do
+    local o = getObjectFromGUID(g)
+    if o and not o.isDestroyed() and o.held_by_color == nil then
+      local p = o.getPosition()
+      local d = math.abs(p.x - e.p.x) + math.abs(p.y - e.p.y) + math.abs(p.z - e.p.z)
+      if d > 3 then
+        table.insert(moved, { o = o, e = e })
+      end
+    end
+  end
+  -- One or two moved pieces are players' own moves; a flip throws everything.
+  if #moved < 5 then
+    return 0
+  end
+  for _, m in ipairs(moved) do
+    pcall(function()
+      m.o.setVelocity({ 0, 0, 0 })
+      m.o.setAngularVelocity({ 0, 0, 0 })
+      m.o.setPosition(m.e.p)
+      m.o.setRotation(m.e.r)
+      m.o.setLock(m.e.l == true)
+    end)
+  end
+  flipLog("table found knocked over: " .. #moved .. " pieces put back from " .. (os.time() - snap.at) .. " s ago")
+  return #moved
+end
+
 -- Everything back to normal: an unfinished flip undone, the table and frame in place, the hand zones on
 -- the table edges. look = true also points seated players' cameras back at their seats.
 local lastReset, lastResetAt
@@ -457,6 +529,13 @@ function Flip.reset(look, quiet)
   local back = Flip.recover()
   local drift = tableDrift()
   pcall(Flip.fixTable)
+  if drift and back == 0 then
+    -- Knocked over with no flip of ours on record: put the thrown pieces back too (after the table is in place).
+    local okr, n = pcall(restoreSnapshot)
+    if okr and n and n > 0 then
+      back = n
+    end
+  end
   local hands = {}
   pcall(function() hands = TableSetup.handsOff() end)
   if #hands > 0 then
@@ -494,17 +573,22 @@ Wait.time(function() pcall(Flip.fixTable) end, 3)
 Wait.time(function() pcall(TableSetup.lookAtAll, 0.1) end, 4)
 Wait.time(function() pcall(TableSetup.lookAtAll, 0.1) end, 15)
 
--- The watchdog: every 30 seconds, if no flip is running, check the table, the frame and the hand
+-- The watchdog: every 5 seconds, if no flip is running, check the table, the frame and the hand
 -- zones, and put back whatever is off. Quiet unless it had to fix something.
+local beat = 0
 local function watchdog()
+  beat = beat + 1
   pcall(function()
     if not Flip.chaosOn then
       Flip.reset(false, false)
+      if beat % 3 == 0 then
+        Flip.snapshot()
+      end
     end
   end)
-  Wait.time(watchdog, 30)
+  Wait.time(watchdog, 5)
 end
-Wait.time(watchdog, 30)
+Wait.time(watchdog, 6)
 
 function Flip.flip(color)
   pcall(Flip.fixTable)
