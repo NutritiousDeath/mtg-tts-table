@@ -588,6 +588,29 @@ function ManaChips.onTap(obj, seat)
     ManaChips.offer(seat, obj.getName(), options)
     return
   end
+  -- Signets: "{1}, {T}: Add {W}{B}." The {1} comes out of the mana pool, then the two mana go in.
+  do
+    local fee, rest = text:match("{(%d+)}, {t}: add ([^%.\n]+)")
+    local plain = text:find("\n{t}: add", 1, true) or text:find("^{t}: add")
+    if fee and not plain and not rest:find(" or ", 1, true) and not rest:find("any", 1, true) then
+      local nm = obj.getName()
+      local syms = {}
+      for sym in rest:gmatch("{(%a)}") do
+        table.insert(syms, sym:upper())
+      end
+      if #syms > 0 then
+        local paid = ManaChips.pay(seat, "{" .. fee .. "}", nm)
+        if paid == nil then
+          broadcastToColor(nm .. ": nothing in your mana pool for the {" .. fee .. "}: pay it yourself.", seat, { 1, 0.6, 0.2 })
+        end
+        for _, k in ipairs(syms) do
+          ManaChips.add(seat, k, 1)
+        end
+        printToAll("MTG > " .. nm .. ": " .. seat .. " adds " .. table.concat(syms, "") .. ".", { 0.55, 0.9, 0.6 })
+        return
+      end
+    end
+  end
   -- Filter lands (Cascade Bluffs, Fetid Heath...): "{T}: Add {C}." or "{W/B}, {T}: Add {W}{W}, {W}{B}, or {B}{B}."
   -- First: plain or FILTER. Filter: which pair (WW / WB / BB), then the {W/B} cost comes out of the mana pool
   -- (asks which color to pay with when both are there).
@@ -770,7 +793,7 @@ function ManaChips.pay(seat, cost, name, card)
   if card and GameState.data.noCounter then
     GameState.data.noCounter[card.getGUID()] = nil
   end
-  local colored, hybrids, generic = {}, {}, 0
+  local colored, hybrids, generic, phyrexian = {}, {}, 0, {}
   for sym in cost:gmatch("{([^}]*)}") do
     local s = sym:upper()
     if s:match("^%d+$") then
@@ -780,7 +803,7 @@ function ManaChips.pay(seat, cost, name, card)
     elseif s:match("^%a/%a$") then
       local a, b = s:sub(1, 1), s:sub(3, 3)
       if b == "P" then
-        colored[a] = (colored[a] or 0) + 1       -- Phyrexian: the mana if there is any
+        table.insert(phyrexian, a)               -- Phyrexian: the mana if there is any, 2 life if not
       elseif BY_KEY[a] and BY_KEY[b] then
         table.insert(hybrids, { a, b })
       end
@@ -813,6 +836,18 @@ function ManaChips.pay(seat, cost, name, card)
   for _, h in ipairs(hybrids) do
     local k = (p[h[1]] or 0) >= (p[h[2]] or 0) and h[1] or h[2]
     short = short + take(k, 1)
+  end
+  -- Phyrexian mana ({B/P}): after the colored mana, so it never takes what a colored symbol needs. Not in the
+  -- pool: 2 life instead (Dismember with one black mana: {1}{B/P}{B/P} = 1 + B + 2 life).
+  local lifePaid = 0
+  for _, k in ipairs(phyrexian) do
+    if take(k, 1) > 0 then
+      lifePaid = lifePaid + 2
+    end
+  end
+  if lifePaid > 0 and Trackers and Trackers.changeLife then
+    Trackers.changeLife(seat, -lifePaid, tostring(name or "Phyrexian mana"))
+    printToAll("MTG > " .. seat .. " pays " .. lifePaid .. " life for Phyrexian mana (" .. tostring(name or "the cost") .. ").", INFO)
   end
   -- Generic: colorless first, then the color there is most of.
   while generic > 0 do

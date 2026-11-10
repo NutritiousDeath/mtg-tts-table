@@ -71,6 +71,18 @@ local function perms()
       end
     end
   end
+  -- Mycosynth Lattice: "All permanents are artifacts in addition to their other types." (Darksteel Forge then
+  -- makes everything its controller has indestructible.)
+  for _, e in ipairs(list) do
+    if e.oracle:find("all permanents are artifacts in addition to their other types", 1, true) then
+      for _, x in ipairs(list) do
+        if not x.tl:find("artifact", 1, true) then
+          x.tl = "artifact " .. x.tl
+        end
+      end
+      break
+    end
+  end
   -- The plane in play counts as a source of always-on abilities ("All creatures get +2/+2", "All creatures
   -- have vigilance"): not a permanent, so nothing is counted on it and it gets nothing itself.
   local pobj, ptext, pseat = planeNow()
@@ -1159,8 +1171,19 @@ function Statics.grants(obj)
       end
     end
   end
+  -- A Saga's own chapters: "This Saga gains "{T}: Add {C}."" (Urza's Saga) once that chapter is reached.
+  if Saga and Saga.grantedLines then
+    local oks, gl = pcall(Saga.grantedLines, obj)
+    for _, l in ipairs(oks and gl or {}) do
+      table.insert(out.lines, l)
+      table.insert(out.from, obj.getName())
+    end
+  end
   local d = dataOf(obj)
   local q = { obj = obj, seat = loc.seat, tl = tostring(d.typeLine or ""):lower(), token = obj.hasTag("Token") }
+  if not q.tl:find("artifact", 1, true) and Statics.allArtifacts() then
+    q.tl = "artifact " .. q.tl     -- Mycosynth Lattice
+  end
   local seenK = {}
   -- Planes (planefx.lua): Two Streams Facility's haste, Bant's divinity counters.
   if PlaneFx and PlaneFx.keywords then
@@ -1288,6 +1311,30 @@ function Statics.refreshGrantLabels()
       grantLabelSig[g] = nil
     end
   end
+end
+
+-- Mycosynth Lattice on the battlefield (anyone's): every permanent is an artifact too. Cached per board change.
+local latticeCache = { epoch = -1, up = false }
+function Statics.allArtifacts()
+  local ep = Events and Events.epoch or 0
+  if latticeCache.epoch == ep then
+    return latticeCache.up
+  end
+  local up = false
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" and not obj.isDestroyed() and obj.held_by_color == nil then
+      local d = dataOf(obj)
+      if tostring(d.oracle or ""):lower():find("all permanents are artifacts in addition to their other types", 1, true) then
+        local loc = Zones.regionAt(obj.getPosition())
+        if loc.seat and IN[loc.region] then
+          up = true
+          break
+        end
+      end
+    end
+  end
+  latticeCache.epoch, latticeCache.up = ep, up
+  return up
 end
 
 function Statics.hasGrantedKeyword(obj, kw)

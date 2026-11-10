@@ -257,6 +257,10 @@ function LibSearch.run(color)
     if ok and f and f.nonLegendary and tostring(gmField(e.gm_notes, "typeLine") or ""):lower():find("legendary", 1, true) then
       ok = false
     end
+    -- "a noncreature artifact card" (Arcum Dagsson): a type it must NOT have.
+    if ok and f and f.notType and tostring(gmField(e.gm_notes, "typeLine") or ""):lower():find(f.notType, 1, true) then
+      ok = false
+    end
     -- Jared Carthalion: "multicolored card" (two or more colors in its data).
     if ok and f and f.minColors then
       local notes = tostring(e.gm_notes or "")

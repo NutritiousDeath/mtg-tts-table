@@ -40,18 +40,19 @@ function Saga.chapters(obj)
   local oracle = oracleOf(obj)
   local out, last = {}, 0
   for line in (oracle .. "\n"):gmatch("([^\n]*)\n") do
-    local dash = line:find("—", 1, true)
-    local headLen = 3
+    -- Where the dash ends comes from find() itself: TTS's Lua counts "—" as one character, standard Lua
+    -- as three bytes (a fixed 3 cut the first two letters of the chapter: "his Saga gains", "earch your library").
+    local dash, dashEnd = line:find("—", 1, true)
     if not dash then
-      dash = line:find(" %- ")
-      headLen = 1
+      dash, dashEnd = line:find(" %- ")
       if dash then
         dash = dash + 1
+        dashEnd = dash
       end
     end
     if dash and dash < 22 then
       local head = line:sub(1, dash - 1):lower()
-      local body = line:sub(dash + headLen):gsub("%s*%b()", ""):gsub("^%s+", ""):gsub("%s+$", "")
+      local body = line:sub(dashEnd + 1):gsub("%s*%b()", ""):gsub("^%s+", ""):gsub("%s+$", "")
       local nums, okHead = {}, true
       for w in head:gmatch("[^,%s]+") do
         if ROMAN[w] then
@@ -71,6 +72,37 @@ function Saga.chapters(obj)
     end
   end
   return out, last
+end
+
+-- "I — This Saga gains "{T}: Add {C}."" (Urza's Saga): abilities the Saga has from the chapters it has reached
+-- (lore counters), lowercased like the other granted lines (statics.lua Statics.grants).
+function Saga.grantGains(body)
+  local low = tostring(body or ""):lower():gsub("’", "'")
+  local q = low:match('^this saga gains "(.+)"%.?$') or low:match('^~ gains "(.+)"%.?$')
+  if q == nil then
+    return nil
+  end
+  if q:sub(-1) == "'" then
+    return q
+  end
+  q = q:gsub("%.$", "")
+  return q .. "."
+end
+
+function Saga.grantedLines(obj)
+  local out = {}
+  if obj == nil or obj.isDestroyed() or not Saga.isSaga(obj) then
+    return out
+  end
+  local chapters = Saga.chapters(obj)
+  local lore = Saga.lore(obj)
+  for n = 1, lore do
+    local g = chapters[n] and Saga.grantGains(chapters[n])
+    if g then
+      table.insert(out, g)
+    end
+  end
+  return out
 end
 
 function Saga.lore(obj)

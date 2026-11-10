@@ -415,11 +415,19 @@ local function sendCard(obj, it, destination)
     local region = types.Land and "lands" or "battlefield"
     obj.setRotationSmooth({ 0, s.yaw, Faces.isFaceDown(obj) and 180 or 0 }, false, true)
     obj.setPositionSmooth(TableSetup.slot(color, region, 1.5), false, true)
-    Wait.time(function()
-      if not obj.isDestroyed() then
-        Zones.refresh(obj)
-      end
-    end, 1)
+    -- The smooth move can still be under way at 1 s (a long trip, a busy table): look again until the
+    -- card has landed, so it's counted on the battlefield and gets its right-click abilities (Citanul
+    -- Flute, Orzhov Signet and Mox Opal once landed with no menu at all).
+    for _, t in ipairs({ 1, 2.5, 4.5 }) do
+      Wait.time(function()
+        if not obj.isDestroyed() then
+          Zones.refresh(obj)
+          if t > 1 and Counters and Counters.setup then
+            pcall(Counters.setup, obj)
+          end
+        end
+      end, t)
+    end
   end
 end
 

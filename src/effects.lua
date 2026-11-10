@@ -1578,6 +1578,13 @@ function Effects.parse(text, sourceName)
     end
     local mvMin = tonumber(rest:match("mana value (%d+) or greater") or "")
     local mvMax = tonumber(rest:match("mana value (%d+) or less") or "")
+    -- Urza's Saga: "an artifact card with mana cost {0} or {1}" (as a mana value: 0 or 1).
+    if mvMax == nil then
+      local c1, c2 = rest:match("with mana cost {(%d+)} or {(%d+)}")
+      if c1 then
+        mvMin, mvMax = math.min(tonumber(c1), tonumber(c2)), math.max(tonumber(c1), tonumber(c2))
+      end
+    end
     table.insert(actions, { what = "search", who = "you", n = 1, query = q, where = where, mvMin = mvMin, mvMax = mvMax,
       tapped = rest:find("battlefield tapped", 1, true) ~= nil, phrase = phrase, anyOf = anyOf,
       discardRandom = t:find("discard a card at random", 1, true) ~= nil,
@@ -7301,7 +7308,156 @@ CARD_FX.tymna = function(it, low)
   return true
 end
 
-local CARD_FX_ORDER = { "fatalPush", "warPeace", "tymna", "cutDeal", "stagger", "moltenNote", "consult", "mindbreak", "endReturn", "firionCopy", "acererak", "throne", "oubliette", "eachUnless", "drawCastFree", "exileTopPlay", "untilNextTurn", "controlCountered", "graveExile", "peekTop", "drawToCopy", "lookSplit", "namedAnywhere", "phaseOut", "castFromYard", "manaPerType", "giveAway",
+-- A Saga chapter that gives the Saga an ability (Urza's Saga I and II: 'This Saga gains "{T}: Add {C}."'): nothing
+-- happens now. The ability is the Saga's from here on (saga.lua Saga.grantedLines, read by statics.lua).
+CARD_FX.sagaGains = function(it, low)
+  if not (low:find('^%s*this saga gains "') or low:find('^%s*~ gains "')) then
+    return false
+  end
+  local q = low:match('gains "(.+)"') or ""
+  printToAll("MTG > " .. tostring(it.name) .. " now has: " .. q .. " (right-click it" .. (q:find("add {", 1, true) and ", or tap it for mana" or "") .. ").", GOOD)
+  return true
+end
+
+local function firstCardTarget(it)
+  for _, e in ipairs(it.preTargets or {}) do
+    if e.kind == "card" then
+      local o = getObjectFromGUID(e.guid)
+      if o and not o.isDestroyed() then
+        return o
+      end
+    end
+  end
+  return nil
+end
+
+-- Mother of Runes / Giver of Runes: "Target creature you control gains protection from the color of your choice
+-- until end of turn." The color is picked as it resolves.
+CARD_FX.protectionChoice = function(it, low)
+  if not low:find("gains protection from the color of your choice until end of turn", 1, true)
+      and not low:find("gains protection from colorless or from the color of your choice until end of turn", 1, true) then
+    return false
+  end
+  local seat = it.controller
+  local tgt = firstCardTarget(it)
+  if tgt == nil or not Effects.fieldSeat(tgt) then
+    printToAll("MTG > " .. tostring(it.name) .. ": its target is gone.", INFO)
+    return true
+  end
+  local ch = {}
+  if low:find("protection from colorless or", 1, true) then
+    table.insert(ch, { label = "COLORLESS", value = "colorless" })
+  end
+  for _, c in ipairs({ "white", "blue", "black", "red", "green" }) do
+    table.insert(ch, { label = c:upper(), value = c })
+  end
+  ask(seat, tostring(it.name) .. ": protection from?", tgt.getName() .. " gains protection from the color you pick until end of turn.", ch, function(c)
+    if not c or tgt.isDestroyed() then
+      return
+    end
+    Counters.addTempKeyword(tgt, "protection from " .. c)
+    printToAll("MTG > " .. tostring(it.name) .. ": " .. tgt.getName() .. " gains protection from " .. c .. " until end of turn.", GOOD)
+  end)
+  return true
+end
+
+-- Arcum Dagsson: "Target artifact creature's controller sacrifices it. That player may search their library for a
+-- noncreature artifact card, put it onto the battlefield, then shuffle."
+CARD_FX.arcum = function(it, low)
+  if not low:find("target artifact creature's controller sacrifices it", 1, true) then
+    return false
+  end
+  local tgt = firstCardTarget(it)
+  local who = tgt and Effects.fieldSeat(tgt)
+  if tgt == nil or who == nil then
+    printToAll("MTG > " .. tostring(it.name) .. ": its target is gone.", INFO)
+    return true
+  end
+  local nm = tgt.getName()
+  printToAll("MTG > " .. tostring(it.name) .. ": " .. who .. " sacrifices " .. nm .. ".", INFO)
+  Combat.sacrifice(tgt)
+  if not low:find("search their library for a noncreature artifact card", 1, true) then
+    return true
+  end
+  Wait.time(function()
+    ask(who, tostring(it.name) .. ": search?", "You may search your library for a noncreature artifact card and put it onto the battlefield.",
+      { { label = "SEARCH", value = true }, { label = "DON'T", value = false } }, function(yes)
+        if yes then
+          LibSearch.open(who, "artifact", tostring(it.name) .. ": click a noncreature artifact card to put it onto the battlefield, then CLOSE + SHUFFLE.",
+            "battlefield", false, { typeOnly = true, notType = "creature", limit = 1 })
+        else
+          printToAll("MTG > " .. who .. " doesn't search (" .. tostring(it.name) .. ").", INFO)
+        end
+      end)
+  end, 0.8)
+  return true
+end
+
+-- Sword of the Meek: "you may return this Equipment from your graveyard to the battlefield, then attach it to that
+-- creature" (triggers.lua finds it in the graveyard; it.source is the card, it.thatCard the 1/1 that entered).
+CARD_FX.yardReturnAttach = function(it, low)
+  if not (low:find("from your graveyard to the battlefield, then attach it to that creature", 1, true)) then
+    return false
+  end
+  local seat = it.controller
+  local guid = it.source
+  local host = it.thatCard and getObjectFromGUID(it.thatCard)
+  local function land(card)
+    card.setRotation({ 0, TableSetup.seat(seat).yaw, 0 })
+    local base = TableSetup.slot(seat, "battlefield", TableSetup.SURFACE_TOP + 1.5)
+    local spot = base
+    if host and not host.isDestroyed() then
+      local hp = host.getPosition()
+      spot = { x = hp.x, y = hp.y + 1.5, z = hp.z }
+    end
+    card.setPositionSmooth(spot, false, true)
+    for _, t in ipairs({ 1, 2.5 }) do
+      Wait.time(function()
+        if not card.isDestroyed() then
+          Zones.refresh(card)
+          if t > 1 then
+            if host and not host.isDestroyed() and Effects.fieldSeat(host) and Equip and Equip.attach then
+              Equip.attach(card, host, seat)
+            end
+            if Counters and Counters.setup then
+              pcall(Counters.setup, card)
+            end
+          end
+        end
+      end, t)
+    end
+  end
+  local function fetch()
+    local loose = guid and getObjectFromGUID(guid)
+    if loose and loose.type == "Card" then
+      land(loose)
+      return true
+    end
+    for _, e in ipairs(Triggers.yardCards(seat)) do
+      if e.guid == guid and e.pile.type == "Deck" then
+        e.pile.takeObject({ guid = guid, position = TableSetup.slot(seat, "battlefield", TableSetup.SURFACE_TOP + 2),
+          smooth = false, callback_function = function(c) land(c) end })
+        return true
+      end
+    end
+    return false
+  end
+  ask(seat, tostring(it.name) .. ": return it?", "Return " .. tostring(it.name) .. " from your graveyard to the battlefield"
+    .. (host and (", attached to " .. host.getName()) or "") .. "?",
+    { { label = "RETURN IT", value = true }, { label = "NO", value = false } }, function(yes)
+      if not yes then
+        return
+      end
+      if fetch() then
+        printToAll("MTG > " .. seat .. " returns " .. tostring(it.name) .. " from the graveyard" .. (host and (" and attaches it to " .. host.getName()) or "") .. ".", GOOD)
+      else
+        printToAll("MTG > " .. tostring(it.name) .. " isn't in " .. seat .. "'s graveyard any more.", INFO)
+      end
+    end)
+  return true
+end
+
+local CARD_FX_ORDER = { "yardReturnAttach", "sagaGains", "protectionChoice", "arcum", "fatalPush", "warPeace", "tymna", "cutDeal", "stagger", "moltenNote", "consult", "mindbreak", "endReturn", "firionCopy", "acererak", "throne", "oubliette", "eachUnless", "drawCastFree", "exileTopPlay", "untilNextTurn", "controlCountered", "graveExile", "peekTop", "drawToCopy", "lookSplit", "namedAnywhere", "phaseOut", "castFromYard", "manaPerType", "giveAway",
   "tokensPerCounter", "countersOnLegends", "oppToken", "ringCopy", "ringWatch", "jewel" }
 
 -- Does cardFx take this text? (Its own prompts pick the targets, so nothing is asked as it goes on the stack.)
@@ -9757,6 +9913,13 @@ local function cardTypes(obj)
     if PlaneFx and PlaneFx.extraTypes then
       PlaneFx.extraTypes(obj, t)
     end
+    -- Mycosynth Lattice: permanents are artifacts too.
+    if not t.artifact and Statics and Statics.allArtifacts and Statics.allArtifacts() then
+      local loc = Zones.regionAt(obj.getPosition())
+      if loc.seat and (loc.region == "battlefield" or loc.region == "lands") then
+        t.artifact = true
+      end
+    end
   end)
   return t
 end
@@ -10208,8 +10371,13 @@ Events.on("cardMoved", function(d)
     return
   end
   if how == "maybe" then
-    broadcastToColor(card.getName() .. " may enter tapped (" .. clause .. "): tap it if it does.", seat, INFO)
-    return
+    local okc, tapped = pcall(Effects.tappedCondition, clause, seat, card)
+    if okc and tapped == false then
+      return
+    elseif not (okc and tapped == true) then
+      broadcastToColor(card.getName() .. " may enter tapped (" .. clause .. "): tap it if it does.", seat, INFO)
+      return
+    end
   end
   Wait.time(function()
     if card.isDestroyed() then
@@ -10221,6 +10389,76 @@ Events.on("cardMoved", function(d)
     printToAll("MTG > " .. card.getName() .. " enters tapped.", INFO)
   end, 0.8)
 end)
+
+-- "Enters tapped unless ..." the table can check: true = tapped, false = untapped, nil = can't tell.
+function Effects.tappedCondition(clause, seat, card)
+  clause = tostring(clause or ""):lower()
+  if seat == nil then
+    return nil
+  end
+  -- Lands `seat` controls (other than this card), with their type lines.
+  local function lands()
+    local out = {}
+    for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+      if o ~= card and o.type == "Card" and not o.isDestroyed() then
+        local loc = Zones.regionAt(o.getPosition())
+        if loc.seat == seat and (loc.region == "lands" or loc.region == "battlefield") then
+          local d = CardData.get(o) or {}
+          local tl = tostring(d.typeLine or ""):lower()
+          if tl:find("land", 1, true) then
+            table.insert(out, tl)
+          end
+        end
+      end
+    end
+    return out
+  end
+  -- Battlebond lands (Sea of Clouds): "unless you have two or more opponents".
+  if clause:find("unless you have two or more opponents", 1, true) then
+    local n = 0
+    for _, c in ipairs(players()) do
+      if TableSetup.isOpponent(c, seat) then
+        n = n + 1
+      end
+    end
+    return n < 2
+  end
+  -- Fast lands: "unless you control two or fewer other lands".
+  local k = clause:match("unless you control (%a+) or fewer other lands")
+  if k and NUMBERS[k] then
+    return #lands() > NUMBERS[k]
+  end
+  -- Slow lands: "unless you control two or more other lands".
+  k = clause:match("unless you control (%a+) or more other lands")
+  if k and NUMBERS[k] then
+    return #lands() < NUMBERS[k]
+  end
+  -- Check lands: "unless you control a forest or a plains".
+  local types = clause:match("unless you control an? ([%a ,]+)$") or clause:match("unless you control an? ([%a ,]+)%.")
+  if types and not types:find("other", 1, true) and not types:find("legendary", 1, true) then
+    local want = {}
+    for w in types:gmatch("%a+") do
+      if w ~= "or" and w ~= "a" and w ~= "an" then
+        want[w] = true
+      end
+    end
+    local basics = { plains = true, island = true, swamp = true, mountain = true, forest = true }
+    for w in pairs(want) do
+      if not basics[w] then
+        return nil
+      end
+    end
+    for _, tl in ipairs(lands()) do
+      for w in pairs(want) do
+        if tl:find(w, 1, true) then
+          return false
+        end
+      end
+    end
+    return true
+  end
+  return nil
+end
 
 -- Shock land: how much life it asks for ("you may pay 2 life. If you don't,
 -- it enters tapped"), or nil.

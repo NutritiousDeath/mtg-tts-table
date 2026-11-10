@@ -6,12 +6,12 @@
   and the Discord user ID are Cloudflare secrets on the relay, never in this script: the Workshop script is
   readable by anyone). The logs go along as a text file: the MTG Errors and MTG By Hand lists and the end of
   the game log (gamelog.lua), plus the version, layout, format, turn and whose turn it is.
-  One report per player every 2 minutes (the relay limits it too).
+  One report per player every 20 seconds (the relay limits it too).
 --]]
 
 BugReport = {}
 
-local GAP = 120            -- seconds between reports from one player
+local GAP = 20             -- seconds between reports from one player (several in a row are fine)
 local MAX_TEXT = 1500
 local INFO = { 0.75, 0.8, 0.9 }
 local WARN = { 1, 0.6, 0.2 }
@@ -111,7 +111,7 @@ function BugReport.send(player, what, opts)
   end
   local now = os.time()
   if lastSent[c] and now - lastSent[c] < GAP then
-    broadcastToColor("You just sent one: wait " .. (GAP - (now - lastSent[c])) .. " seconds before the next report.", c, WARN)
+    broadcastToColor("You just sent one: wait " .. math.ceil(GAP - (now - lastSent[c])) .. " more seconds, then SEND again (your text is kept).", c, WARN)
     return
   end
   if sending[c] then
@@ -160,7 +160,7 @@ function BugReport.send(player, what, opts)
       return
     end
     if req.response_code == 429 then
-      broadcastToColor("Too many reports right now: wait a couple of minutes and try again.", c, WARN)
+      broadcastToColor("The relay wants a few seconds between reports: wait 20 seconds, then SEND again (your text is kept).", c, WARN)
       return
     end
     if req.response_code == 404 then

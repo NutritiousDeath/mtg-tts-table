@@ -174,6 +174,9 @@ function Actions.othersUntap(active)
                   local words = wd.words
                   if words == "permanents" then
                     ok = true
+                  elseif (words == "artifacts" or words == "lands" or words == "enchantments")
+                      and tl:find(words:sub(1, -2), 1, true) then
+                    ok = true   -- Unwinding Clock: "Untap all artifacts you control during each other player's untap step."
                   elseif words:find("creatures", 1, true) and tl:find("creature", 1, true) then
                     local cols = (Statics and Statics.colorsOf) and Statics.colorsOf(obj, c) or {}
                     local any = false

@@ -138,7 +138,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.92 (watchdog no longer moves hand zones or nudges the table; knocked-over table rebuilt; commander tax; Zzz)"
+SCRIPT_VERSION = "2.94 (fresh table after a flip; Mycosynth Lattice + Darksteel Forge; bug reports every 20 s; plus 2.93 card fixes)"
 
 function onLoad(saved)
   GameLog.setup()

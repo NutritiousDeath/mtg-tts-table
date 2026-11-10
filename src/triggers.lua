@@ -222,6 +222,14 @@ local function parseTrigger(p)
     return { kind = "life", dir = "loss", who = "you" }
   end
   -- "Whenever you put one or more [+1/+1] counters on a Goblin, Orc, or Army you control".
+  -- Fathom Mage: "Whenever a +1/+1 counter is put on ~, you may draw a card." (one or more: same thing here).
+  do
+    local w = p:match("^%s*whenever an? (%S+) counter is put on ~,") or p:match("^%s*whenever one or more (%S+) counters are put on ~,")
+      or p:match("^%s*whenever an? (%S+) counter is put on this creature,") or p:match("^%s*whenever one or more (%S+) counters are put on this creature,")
+    if w then
+      return { kind = "counters", self = true, counterKind = (w == "+1/+1") and "plus" or nil, counterWord = w }
+    end
+  end
   do
     local cAt = p:find("whenever you put one or more ", 1, true)
     if cAt then
@@ -1049,15 +1057,37 @@ function Triggers.unrecognized(obj)
   return out
 end
 
+local IN_PLAY_T = { battlefield = true, lands = true }
 local function typesOf(obj)
   local d = cardData(obj)
   local t = {}
   for _, name in ipairs(d and d.types or {}) do
     t[name:lower()] = true
   end
+  -- The type line too (data without a types list, or one that lost a word).
+  local tl = tostring(d and d.typeLine or ""):lower()
+  local dash = tl:find("—", 1, true) or tl:find("//", 1, true)
+  if dash then
+    tl = tl:sub(1, dash - 1)
+  end
+  for _, w in ipairs({ "creature", "land", "artifact", "enchantment", "planeswalker", "battle", "instant", "sorcery" }) do
+    if tl:find(w, 1, true) then
+      t[w] = true
+    end
+  end
   -- Planes (planefx.lua): Nyx's nontoken creatures are enchantments too (constellation sees them).
   if PlaneFx and PlaneFx.extraTypes then
     pcall(PlaneFx.extraTypes, obj, t)
+  end
+  -- Mycosynth Lattice: permanents are artifacts too.
+  if not t.artifact and Statics and Statics.allArtifacts then
+    local ok, up = pcall(Statics.allArtifacts)
+    if ok and up then
+      local loc = Zones.regionAt(obj.getPosition())
+      if loc.seat and IN_PLAY_T[loc.region] then
+        t.artifact = true
+      end
+    end
   end
   return t
 end
@@ -1784,6 +1814,67 @@ Events.on("cardMoved", function(d)
       end
     end
   end
+  -- Evolve (CR 702.100): "Whenever a creature you control enters, if that creature has greater power or toughness
+  -- than this creature, put a +1/+1 counter on this creature." (Fathom Mage: the counter then draws a card.)
+  if entering and cardController and typesOf(card).creature then
+    pcall(function()
+      pcall(Statics.compute)
+      local st = Counters.stats(card)
+      local np, nt = tonumber(st.power) or 0, tonumber(st.toughness) or 0
+      for _, p in ipairs(permanents()) do
+        if p.obj ~= card and p.controller == cardController and typesOf(p.obj).creature then
+          local d = cardData(p.obj) or {}
+          local has = false
+          for line in (tostring(d.oracle or "") .. "\n"):gmatch("([^\n]*)\n") do
+            if line:lower():find("^%s*evolve") then
+              has = true
+            end
+          end
+          if has then
+            local ps = Counters.stats(p.obj)
+            if np > (tonumber(ps.power) or 0) or nt > (tonumber(ps.toughness) or 0) then
+              table.insert(found, { obj = p.obj, controller = p.controller, text = "Evolve: put a +1/+1 counter on this creature." })
+            end
+          end
+        end
+      end
+    end)
+  end
+  -- From the graveyard: Sword of the Meek ("Whenever a 1/1 creature you control enters, you may return this
+  -- Equipment from your graveyard to the battlefield, then attach it to that creature.").
+  if entering and cardController and typesOf(card).creature then
+    pcall(function()
+      local st = Counters.stats(card)
+      if tonumber(st.power) ~= 1 or tonumber(st.toughness) ~= 1 then
+        return
+      end
+      for _, e in ipairs(Triggers.yardCards(cardController)) do
+        local low = e.oracle:lower()
+        if low:find("whenever a 1/1 creature you control enters", 1, true) and low:find("from your graveyard to the battlefield", 1, true) then
+          local para = e.oracle
+          for line in (e.oracle .. "\n"):gmatch("([^\n]*)\n") do
+            if line:lower():find("whenever a 1/1 creature you control enters", 1, true) then
+              para = line
+            end
+          end
+          table.insert(found, { obj = e.pile, controller = cardController, text = para, name = e.name, guid = e.guid, face = "",
+            thatCard = card.getGUID() })
+        end
+      end
+    end)
+  end
+  -- Trace for bug reports: what watched this card enter (Ajani's Welcome once went quiet on a second creature).
+  if entering and GameLog and GameLog.add then
+    pcall(function()
+      local names, perms = {}, 0
+      for _, f in ipairs(found) do
+        table.insert(names, tostring(f.obj and f.obj.getName and f.obj.getName() or "?"))
+      end
+      perms = #permanents()
+      GameLog.add("TRIG", card.getName() .. " entered (" .. tostring(cardController) .. "): " .. perms
+        .. " permanents looked at, triggers: " .. (#names > 0 and table.concat(names, ", ") or "none"))
+    end)
+  end
   -- Panharmonicon: an artifact or creature entering makes your triggered abilities trigger an additional time.
   if entering and Statics and Statics.panharmonicons then
     local ty = typesOf(card)
@@ -1884,6 +1975,30 @@ end
 
 -- Counters were put on a permanent (counters.lua): "whenever you put one or
 -- more counters on a Goblin you control".
+-- Cards in a seat's graveyard (loose cards and piles): { pile, guid, name, oracle }.
+function Triggers.yardCards(seat)
+  local out = {}
+  for _, obj in ipairs(getObjects()) do
+    if (obj.type == "Deck" or obj.type == "Card") and not obj.isDestroyed() and obj.held_by_color == nil then
+      local loc = Zones.regionAt(obj.getPosition())
+      if loc.seat == seat and loc.region == "graveyard" then
+        if obj.type == "Card" then
+          local d = CardData.get(obj) or {}
+          table.insert(out, { pile = obj, guid = obj.getGUID(), name = obj.getName(), oracle = tostring(d.oracle or "") })
+        else
+          for _, e in ipairs(obj.getObjects()) do
+            local d = {}
+            pcall(function() d = JSON.decode(e.gm_notes) or {} end)
+            table.insert(out, { pile = obj, guid = e.guid, name = (e.name and e.name ~= "") and e.name or tostring(d.name or "?"),
+              oracle = tostring(d.oracle or "") })
+          end
+        end
+      end
+    end
+  end
+  return out
+end
+
 function Triggers.onCounters(obj, kind, amount, byColor)
   if not enabled() or not GameState.data.started or obj == nil or obj.isDestroyed() then
     return
@@ -1896,8 +2011,9 @@ function Triggers.onCounters(obj, kind, amount, byColor)
   for _, p in ipairs(permanents()) do
     for _, a in ipairs(abilitiesOf(p.obj)) do
       local t = a.trig
-      if t.kind == "counters" and matchesSubject(obj, t)
+      if t.kind == "counters" and (t.self and p.obj == obj or (not t.self and matchesSubject(obj, t)))
           and not (t.counterKind == "plus" and kind ~= "plus")
+          and not (t.self and t.counterKind == nil and t.counterWord ~= "+1/+1")
           and not (t.mine and not ours(t, loc.seat, p.controller)) then
         table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, amount = amount })
       end

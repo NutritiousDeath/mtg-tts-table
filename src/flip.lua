@@ -338,6 +338,8 @@ runChaos = function(color)
         unpaint()
       end
       pcall(Flip.fixTable)
+      -- Everything is still locked here: swap in a fresh table, then let the pieces go on it.
+      Flip.freshTable(function()
       pcall(function() Zones.drawIcons() end)
       for _, e in ipairs(list) do
         pcall(function()
@@ -356,6 +358,7 @@ runChaos = function(color)
       Wait.time(function()
         Flip.chaosOn = false
       end, 0.5)
+      end)
     end, 2.2)
   end, LAND)
 end
@@ -379,6 +382,56 @@ function Flip.fixTable()
     frame.setRotation({ 0, 0, 0 })
     frame.setPosition({ 0, 0, 0 })
   end
+end
+
+-- Respawn the play surface and the stone frame from their own data, the way Save and Play does. A table
+-- that went flying was an unlocked physics body in the air; locked again it can keep a collider that cards
+-- fall through (cards dropped to the floor after a flip until the next Save and Play). Cards and other
+-- loose pieces are frozen for the moment it takes, so nothing drops while the table is being swapped.
+function Flip.freshTable(onDone)
+  local st = GameState.data and GameState.data.table
+  if st == nil then
+    if onDone then onDone() end
+    return
+  end
+  local frozen = {}
+  for _, o in ipairs(getObjects()) do
+    if FLIES[o.type] and not o.isDestroyed() and o.held_by_color == nil and not o.getLock() then
+      pcall(function()
+        o.setLock(true)
+        table.insert(frozen, o)
+      end)
+    end
+  end
+  for _, key in ipairs({ "surface", "frame" }) do
+    local o = st[key] and getObjectFromGUID(st[key])
+    if o and not o.isDestroyed() then
+      pcall(function()
+        o.setVelocity({ 0, 0, 0 })
+        o.setAngularVelocity({ 0, 0, 0 })
+        o.setLock(true)
+        local n = o.reload()
+        if n and n.getGUID then
+          st[key] = n.getGUID()
+        end
+      end)
+    end
+  end
+  flipLog("table respawned (fresh collider), " .. #frozen .. " loose pieces held still meanwhile")
+  Wait.time(function()
+    pcall(Flip.fixTable)
+    for _, o in ipairs(frozen) do
+      pcall(function()
+        if not o.isDestroyed() then
+          o.setVelocity({ 0, 0, 0 })
+          o.setLock(false)
+        end
+      end)
+    end
+    if onDone then
+      pcall(onDone)
+    end
+  end, 1.5)
 end
 
 -- A flip that never finished (saved, or Save and Play, while the pieces were in the air): put every
@@ -596,7 +649,9 @@ function Flip.reset(look, quiet, now)
       back = n
     end
     lastRebuild = os.time()
-    Wait.time(function() pcall(Flip.rebuildRoom) end, 0.3)
+    Wait.time(function()
+      Flip.freshTable(function() pcall(Flip.rebuildRoom) end)
+    end, 0.3)
     flipLog("table found knocked over: room rebuilt")
   end
   local hands = {}
@@ -685,7 +740,7 @@ end
 
 function Flip.repair(color)
   pcall(Flip.reset, false, false, true)
-  Flip.rebuildRoom()
+  Flip.freshTable(function() pcall(Flip.rebuildRoom) end)
   if color and TableSetup.isActive(color) then
     Wait.time(function() pcall(TableSetup.lookAtSeat, color) end, 1)
   end

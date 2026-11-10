@@ -671,7 +671,7 @@ function archidektToDecklist(deck) {
 // 6. Bug reports
 // ---------------------------------------------------------------------------
 
-const BUG_GAP_SECONDS = 120;
+const BUG_GAP_SECONDS = 20;
 const BUG_MAX_BYTES = 300000;
 const DISCORD_API = "https://discord.com/api/v10";
 
@@ -711,7 +711,7 @@ async function handleBug(request, env) {
   const cache = caches.default;
   const rlKey = new Request("https://bug-rate.invalid/" + encodeURIComponent(ip) + "/" + seatKey);
   if (await cache.match(rlKey)) {
-    return plain("ERROR\tPlease wait a couple of minutes between reports.", 429);
+    return plain("ERROR\tPlease wait a few seconds between reports.", 429);
   }
   await cache.put(rlKey, new Response("1", { headers: { "Cache-Control": "max-age=" + BUG_GAP_SECONDS } }));
 
