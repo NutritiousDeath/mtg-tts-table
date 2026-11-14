@@ -1047,6 +1047,8 @@ function Triggers.unrecognized(obj)
         or low:sub(1, 21) == "at the beginning of y" or low:sub(1, 21) == "at the beginning of e")
         and not known[para]
         and not low:find("becomes tapped, it deals %d+ damage to you")   -- City of Brass: handled when a player taps it (actions.lua)
+        and not low:find("^%s*whenever %a+ ?%a* taps an? %a* ?land for mana")   -- Burning Earth: Triggers.onLandManaTap
+        and not low:find("^%s*whenever enchanted player is attacked,")   -- Curses: Triggers.onAttack
         and not low:find("is tapped for mana, its controller adds an additional", 1, true)   -- Wild Growth: mana.lua adds it
         and not low:find("when this class becomes level", 1, true)
         and not (CardWatch and CardWatch.handles and CardWatch.handles(low))
@@ -1274,7 +1276,7 @@ end
 local function push(f)
   -- that = "that player" in the effect (the one who drew, cast, whose
   -- creature entered...), for auto-resolve (effects.lua).
-  Stack.pushAbility(f.controller, f.name or "?", f.text, f.face or "", { trigger = true, that = f.that, source = f.guid, thatCard = f.thatCard, amount = f.amount, grantedBy = f.grantedBy })
+  Stack.pushAbility(f.controller, f.name or "?", f.text, f.face or "", { trigger = true, that = f.that, source = f.guid, thatCard = f.thatCard, amount = f.amount, grantedBy = f.grantedBy, attackers = f.attackers })
 end
 
 local function shortText(f)
@@ -2279,6 +2281,39 @@ function Triggers.onTapped(obj, seat)
   cardEvent("tapped", obj, seat)
 end
 
+-- A land was tapped for mana (actions.lua): "Whenever a player taps a nonbasic land for mana, this enchantment
+-- deals 1 damage to that player" (Burning Earth), "Whenever a player taps a land for mana, ~ deals 1 damage to
+-- that player" (Manabarbs), "Whenever an opponent taps a land for mana, ..." The watchers' own paragraph goes
+-- on the stack with "that player" = whoever tapped it.
+function Triggers.onLandManaTap(land, seat)
+  if not enabled() or not GameState.data.started or land == nil then
+    return
+  end
+  local ld = cardData(land) or {}
+  local basic = tostring(ld.typeLine or ""):lower():find("basic", 1, true) ~= nil
+  local found = {}
+  for _, p in ipairs(permanents()) do
+    local d = cardData(p.obj)
+    local oracle = d and type(d.oracle) == "string" and d.oracle or ""
+    for _, line in ipairs(lines(oracle)) do
+      local low = line:lower()
+      local who, kind = low:match("^%s*whenever (%a+ ?%a*) taps an? (%a* ?)land for mana")
+      if who then
+        kind = (kind or ""):gsub("%s+$", "")
+        local whoOk = (who == "a player") or (who == "an opponent" and TableSetup.isOpponent(p.controller, seat))
+          or (who == "you" and p.controller == seat)
+        local kindOk = (kind == "") or (kind == "nonbasic" and not basic) or (kind == "basic" and basic)
+        -- Mana-adding watchers (Mana Flare, Heartbeat of Spring) are mana abilities, not triggers on the stack.
+        local adds = low:find("adds an additional", 1, true) or low:find("add one mana", 1, true) or low:find("adds one", 1, true)
+        if whoOk and kindOk and not adds then
+          table.insert(found, { obj = p.obj, controller = p.controller, text = line })
+        end
+      end
+    end
+  end
+  pushAll(found, seat)
+end
+
 function Triggers.onUntapped(obj, seat)
   cardEvent("untapped", obj, seat)
 end
@@ -2459,12 +2494,14 @@ Events.on("spellCast", function(d)
       end
     end
   end
+  local castTrace = {}
   for _, p in ipairs(sources) do
     for _, a in ipairs(abilitiesOf(p.obj)) do
       local t = a.trig
       -- The spell being cast never sees itself ("whenever you cast a black spell" on K'rrik: casting K'rrik
       -- doesn't count, it isn't on the battlefield yet; "when you cast this spell" is castSelf, above).
       if t.kind == "cast" and p.obj ~= d.card then
+        local n0 = #found
         local mine = ours(t, d.controller, p.controller)
         local oppOf = d.controller
         local firstOk = true
@@ -2507,8 +2544,16 @@ Events.on("spellCast", function(d)
           local that = tostring(a.text):lower():find("that spell", 1, true) and d.card.getGUID() or nil
           table.insert(found, { obj = p.obj, controller = p.controller, text = a.text, thatCard = that })
         end
+        table.insert(castTrace, tostring(p.obj.getName()) .. " (" .. tostring(p.controller) .. ", " .. tostring(t.who)
+          .. (#found > n0 and ": yes" or ": no") .. ")")
       end
     end
+  end
+  -- Trace for bug reports: every "whenever ... casts" watcher looked at, and whether it triggered
+  -- (Rhystic Study once stayed quiet while The Endstone triggered on the same spell).
+  if GameLog and GameLog.add then
+    pcall(GameLog.add, "TRIG", tostring(d.card.getName()) .. " cast (" .. tostring(d.controller) .. "): " .. #sources
+      .. " permanents looked at, cast watchers: " .. (#castTrace > 0 and table.concat(castTrace, ", ") or "none"))
   end
   -- Cascade and Storm trigger from the spell itself when it is cast.
   do
@@ -2678,6 +2723,28 @@ function Triggers.onAttack(list)
         end
         for _ = 1, (t.once and math.min(n, 1) or n) do
           table.insert(found, { obj = p.obj, controller = p.controller, text = a.text })
+        end
+      end
+    end
+  end
+  -- Curses: "Whenever enchanted player is attacked, ..." (once per combat, whoever attacks them).
+  if Effects and Effects.playerAuras then
+    local okp, auras = pcall(Effects.playerAuras)
+    for _, pa in ipairs(okp and auras or {}) do
+      local attackers, seen = {}, {}
+      for _, at in ipairs(list) do
+        if at.target == pa.seat and at.controller and not seen[at.controller] then
+          seen[at.controller] = true
+          table.insert(attackers, at.controller)
+        end
+      end
+      if #attackers > 0 then
+        local d = cardData(pa.obj)
+        for _, line in ipairs(lines(d and d.oracle or "")) do
+          local para = stripReminder(line)
+          if para:lower():find("^%s*whenever enchanted player is attacked,") then
+            table.insert(found, { obj = pa.obj, controller = pa.controller, text = para, that = attackers[1], attackers = attackers })
+          end
         end
       end
     end

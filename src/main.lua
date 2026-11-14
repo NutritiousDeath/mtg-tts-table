@@ -138,7 +138,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.94 (fresh table after a flip; Mycosynth Lattice + Darksteel Forge; bug reports every 20 s; plus 2.93 card fixes)"
+SCRIPT_VERSION = "2.96 (Nov 14 game fixes: tokens get their own spot, Curses, Burning Earth, Winter Orb, Giada, Endstone, Generous Gift, Eldrazi Spawn, typo-proof creature types)"
 
 function onLoad(saved)
   GameLog.setup()
@@ -250,6 +250,10 @@ function onPlayerConnect(player)
   end
   -- A fresh copy of the screen UI for everyone, so the newcomer's panels take clicks.
   TableUI.rebuildSoon(4)
+  -- The stack mat put down again once they've loaded (it could float in a joining player's game).
+  for _, d in ipairs({ 6, 15 }) do
+    Wait.time(function() pcall(Stack.resettle) end, d)
+  end
   -- A returning player lands as a spectator (Grey) and can't touch anything: sit them back down.
   Wait.time(function()
     local ok, color = pcall(function() return player.color end)

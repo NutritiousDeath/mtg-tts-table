@@ -93,12 +93,77 @@ local function neverUntaps(obj)
   return text:find("doesn't untap during your untap step", 1, true) ~= nil
 end
 
+-- Untap-step limits on the table (Winter Orb: "As long as this artifact is untapped, players can't untap more than
+-- one land during their untap steps"; Static Orb: two permanents; Rising Waters, Hokori...). For `color`'s
+-- untap step: { [kind] = { n, src } }, kind = "land" / "permanent" / "artifact" / "creature".
+local NUMW = { one = 1, two = 2, three = 3, four = 4, five = 5 }
+function Actions.untapLimits(color)
+  local out = {}
+  for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
+    if obj.type == "Card" and not obj.isDestroyed() and not obj.is_face_down then
+      local loc = Zones.regionAt(obj.getPosition())
+      if loc.seat and (loc.region == "battlefield" or loc.region == "lands") then
+        local low = tostring(CardData.get(obj).oracle or ""):lower()
+        local w, kind, whose = low:match("can't untap more than (%a+) (%a+) during (%a+) untap steps?")
+        if w == nil then
+          w, kind, whose = low:match("can't untap more than (%a+) (%a+) during (%a+) untap step")
+        end
+        if w and NUMW[w] then
+          kind = kind:gsub("s$", "")
+          local applies = whose == "their" or (whose == "your" and loc.seat == color)
+            or (whose == "each" and true)
+          -- "As long as this artifact is untapped": a tapped Orb doesn't stop anything.
+          if applies and low:find("as long as [%a ~]- is untapped") then
+            local st = TableSetup.seat(loc.seat)
+            local r = obj.getRotation()
+            if math.abs(((r.y - st.yaw + 540) % 360) - 180) > 30 then
+              applies = false
+            end
+          end
+          if applies and (out[kind] == nil or NUMW[w] < out[kind].n) then
+            out[kind] = { n = NUMW[w], src = obj.getName() }
+          end
+        end
+      end
+    end
+  end
+  return out
+end
+
 function Actions.untapAll(color, quiet)
   local s = TableSetup.seat(color)
   local count = 0
   local skip = GameState.data.skipUntap or {}
   local held = {}
   local untappedNow = {}
+  local limits = {}
+  pcall(function() limits = Actions.untapLimits(color) end)
+  local usedKind = {}
+  local function kindsOf(obj)
+    local tl = tostring(CardData.get(obj).typeLine or ""):lower()
+    local k = { permanent = true }
+    for _, w in ipairs({ "land", "artifact", "creature", "enchantment" }) do
+      if tl:find(w, 1, true) then
+        k[w] = true
+      end
+    end
+    if Statics and Statics.allArtifacts then
+      local okA, all = pcall(Statics.allArtifacts)
+      if okA and all then
+        k.artifact = true
+      end
+    end
+    return k
+  end
+  local function limitedBy(obj)
+    local k = kindsOf(obj)
+    for kind, lim in pairs(limits) do
+      if k[kind] and (usedKind[kind] or 0) >= lim.n then
+        return lim.src
+      end
+    end
+    return nil
+  end
   -- Only table cards (not every object on the table: that was slow with big boards).
   for _, obj in ipairs(getObjectsWithTag("MTGCard")) do
     if obj.type == "Card" and obj.held_by_color == nil then
@@ -116,10 +181,17 @@ function Actions.untapAll(color, quiet)
             Counters.render(obj)
           elseif neverUntaps(obj) then
             table.insert(held, obj.getName() .. " (doesn't untap)")
+          elseif limitedBy(obj) then
+            table.insert(held, obj.getName() .. " (" .. limitedBy(obj) .. ")")
           else
             obj.setRotationSmooth({ r.x, s.yaw, r.z }, false, true)
             count = count + 1
             table.insert(untappedNow, obj)
+            for kind in pairs(kindsOf(obj)) do
+              if limits[kind] then
+                usedKind[kind] = (usedKind[kind] or 0) + 1
+              end
+            end
           end
         end
       end
@@ -127,6 +199,10 @@ function Actions.untapAll(color, quiet)
   end
   if #held > 0 then
     log(color .. ": stays tapped: " .. table.concat(held, ", "))
+  end
+  if next(limits) ~= nil and count > 0 then
+    local lim = limits.land or limits.permanent or limits.artifact or limits.creature
+    log(color .. ": " .. lim.src .. " lets only " .. lim.n .. " untap; the rest stay tapped.")
   end
   -- "Whenever ~ becomes untapped" (Key to the City).
   if Triggers and Triggers.onUntapped then
@@ -174,6 +250,8 @@ function Actions.othersUntap(active)
                   local words = wd.words
                   if words == "permanents" then
                     ok = true
+                  elseif words == "artifacts" and Statics and Statics.allArtifacts and Statics.allArtifacts() then
+                    ok = true   -- Mycosynth Lattice: every permanent is an artifact too.
                   elseif (words == "artifacts" or words == "lands" or words == "enchantments")
                       and tl:find(words:sub(1, -2), 1, true) then
                     ok = true   -- Unwinding Clock: "Untap all artifacts you control during each other player's untap step."
@@ -405,6 +483,10 @@ function Actions.onRotate(obj, spin, oldSpin, color)
   end
   if not isLand then
     return
+  end
+  -- "Whenever a player taps a [nonbasic] land for mana" (Burning Earth, Manabarbs, Mana Flare-style watchers).
+  if Triggers and Triggers.onLandManaTap then
+    pcall(Triggers.onLandManaTap, obj, loc.seat)
   end
   for _, other in ipairs(getObjectsWithTag("MTGCard")) do
     if other.type == "Card" and not other.is_face_down and other ~= obj then

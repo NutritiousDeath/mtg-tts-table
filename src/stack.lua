@@ -349,7 +349,7 @@ function Stack.pushAbility(controller, sourceName, text, image, opts)
     text = text, trigger = opts.trigger, that = opts.that, source = opts.source, thatCard = opts.thatCard,
     amount = opts.amount, copyOf = opts.copyOf, ninjutsu = opts.ninjutsu, planar = opts.planar,
     ward = opts.ward, room = opts.room, planeFx = opts.planeFx, owner = opts.owner, cards = opts.cards,
-    dungeon = opts.dungeon, dungeonFinal = opts.dungeonFinal,
+    dungeon = opts.dungeon, dungeonFinal = opts.dungeonFinal, attackers = opts.attackers,
     auto = (opts.trigger or opts.loyalty or opts.activated or opts.copyOf) and true or nil }
   table.insert(items(), item)
   Stack.render()
@@ -570,6 +570,15 @@ function resolveTopNow()
       for _, e in ipairs(it.preTargets or {}) do
         if e.kind == "card" and auraOn == nil then
           auraOn = e.guid
+        end
+      end
+      -- "Enchant player" (Curses): the Aura stays on its controller's battlefield and remembers the player.
+      if auraOn == nil then
+        for _, e in ipairs(it.preTargets or {}) do
+          if e.kind == "player" and e.seat and Effects and Effects.setEnchantedPlayer then
+            pcall(Effects.setEnchantedPlayer, obj, e.seat)
+            break
+          end
         end
       end
     end
@@ -1002,6 +1011,33 @@ function Stack.updateFire(force)
 end
 
 -- The mat itself: one image tile in the middle of the table.
+-- Where the mat rests: on the table top, by its own thickness (0.1). A fixed height, not one read from
+-- the mat's bounds: those are wrong while its picture is still loading, and the mat then hung in the air.
+local function matY()
+  return TableSetup.SURFACE_TOP + 0.06
+end
+
+-- Put the mat down again, nudged so every player's copy of the game gets the new spot. A player whose
+-- game was still loading the mat could keep it floating where it was first spawned.
+function Stack.resettle()
+  local mat = data().mat and getObjectFromGUID(data().mat)
+  if mat == nil or mat.isDestroyed() then
+    return
+  end
+  pcall(function()
+    mat.setLock(true)
+    mat.setRotation({ 0, MAT_YAW, 0 })
+    mat.setPosition({ MAT.x, matY() + 0.01, MAT.z })
+  end)
+  Wait.time(function()
+    pcall(function()
+      if not mat.isDestroyed() then
+        mat.setPosition({ MAT.x, matY(), MAT.z })
+      end
+    end)
+  end, 0.3)
+end
+
 function Stack.ensure()
   ensureCastMats()
   -- The flame ring loads a moment after the rest of the table (see TableSetup.ensure).
@@ -1016,7 +1052,7 @@ function Stack.ensure()
     -- Back in its spot (a table flip or a bump can leave it elsewhere).
     pcall(function()
       mat.setRotation({ 0, MAT_YAW, 0 })
-      mat.setPosition({ MAT.x, TableSetup.SURFACE_TOP + mat.getBoundsNormalized().size.y / 2 + 0.01, MAT.z })
+      mat.setPosition({ MAT.x, matY(), MAT.z })
     end)
   else
     if mat then
@@ -1027,10 +1063,11 @@ function Stack.ensure()
     end
     local o = spawnObject({
       type = "Custom_Token",
-      position = { MAT.x, TableSetup.SURFACE_TOP + 0.5, MAT.z },
+      position = { MAT.x, matY(), MAT.z },
       rotation = { 0, MAT_YAW, 0 },
       sound = false,
       callback_function = function(obj)
+        obj.setLock(true)
         obj.setName("The Stack")
         obj.setDescription("Drop a spell here to cast it.")
         obj.addTag("StackMat")
@@ -1042,8 +1079,10 @@ function Stack.ensure()
             local k = MAT.w / (w / obj.getScale().x)
             obj.setScale({ k, 1, k })
           end
-          obj.setPosition({ MAT.x, TableSetup.SURFACE_TOP + obj.getBoundsNormalized().size.y / 2 + 0.01, MAT.z })
           obj.setLock(true)
+          obj.setPosition({ MAT.x, matY(), MAT.z })
+          -- Once more a few seconds on, for players still loading the picture.
+          Wait.time(function() pcall(Stack.resettle) end, 5)
         end, function() return obj.isDestroyed() or not obj.loading_custom end, 10)
       end,
     })
@@ -1883,8 +1922,18 @@ function Stack.addCardMenu(obj, full)
       Stack.cycle(obj, playerColor)
     end)
   end
-  for _, ab in ipairs(Stack.activatedAbilities(obj)) do
+  local abilities = Stack.activatedAbilities(obj)
+  local costCount = {}
+  for _, ab in ipairs(abilities) do
+    costCount[ab.cost] = (costCount[ab.cost] or 0) + 1
+  end
+  for _, ab in ipairs(abilities) do
     local label = "Activate: " .. ab.cost
+    -- Two abilities with the same cost (Freed from the Real: "{U}: Tap..." and "{U}: Untap..."): show what each does.
+    if costCount[ab.cost] > 1 then
+      local eff = tostring(ab.effect or ""):gsub("\n.*", ""):gsub("%.$", "")
+      label = ab.cost .. ": " .. eff
+    end
     if #label > 38 then
       label = label:sub(1, 36) .. ".."
     end

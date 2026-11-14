@@ -277,6 +277,75 @@ function Tokens.search(color, query)
 end
 
 -- Put n copies of a token onto the seat's battlefield, face up, in a row.
+-- Where a new token goes: the first open spot on the seat's battlefield, from the middle outward. Spots
+-- handed out in the last few seconds count as taken (a token is still loading there). Two token batches made
+-- at once (Squirrel Girl's Squirrel plus Chatterfang's) used to spawn on the same spot, inside each other and
+-- inside the earlier tokens, and the physics kept shoving them apart.
+local reserved = {}   -- [seat] = { { side, depth, at } }
+local SPOT_W, SPOT_D = 2.7, 3.8
+function Tokens.freeSpot(color)
+  local s = TableSetup.seat(color)
+  local r = TableSetup.region(color, "battlefield")
+  if s == nil or r == nil then
+    return nil
+  end
+  local now = os.clock()
+  local res = {}
+  for _, e in ipairs(reserved[color] or {}) do
+    if now - e.at < 4 then
+      table.insert(res, e)
+    end
+  end
+  reserved[color] = res
+  -- Cards already on this battlefield, in the area's own side/depth measure.
+  local taken = {}
+  for _, obj in ipairs(getObjects()) do
+    if (obj.type == "Card" or obj.type == "Deck") and not obj.isDestroyed() and obj.held_by_color == nil then
+      local p = obj.getPosition()
+      local dx, dz = p.x - r.center.x, p.z - r.center.z
+      local side = dx * s.right.x + dz * s.right.z
+      local depth = dx * s.inward.x + dz * s.inward.z
+      if math.abs(side) <= r.w / 2 + 1.5 and math.abs(depth) <= r.d / 2 + 2 then
+        table.insert(taken, { side = side, depth = depth })
+      end
+    end
+  end
+  for _, e in ipairs(res) do
+    table.insert(taken, e)
+  end
+  local maxS = math.floor((r.w / 2 - SPOT_W / 2) / SPOT_W)
+  local rows = { 0, -SPOT_D, SPOT_D }
+  local function open(side, depth)
+    for _, t in ipairs(taken) do
+      if math.abs(t.side - side) < SPOT_W * 0.8 and math.abs(t.depth - depth) < SPOT_D * 0.8 then
+        return false
+      end
+    end
+    return true
+  end
+  local pick
+  for _, depth in ipairs(rows) do
+    for k = 0, maxS do
+      for _, side in ipairs(k == 0 and { 0 } or { k * SPOT_W, -k * SPOT_W }) do
+        if pick == nil and open(side, depth) then
+          pick = { side = side, depth = depth }
+        end
+      end
+    end
+  end
+  -- A full battlefield: stagger on top of the middle rather than exactly inside another card.
+  if pick == nil then
+    local k = #res
+    pick = { side = ((k % 7) - 3) * 0.6, depth = 0 }
+  end
+  table.insert(reserved[color], { side = pick.side, depth = pick.depth, at = now })
+  return {
+    x = r.center.x + s.right.x * pick.side + s.inward.x * pick.depth,
+    y = TableSetup.SURFACE_TOP + 1.5,
+    z = r.center.z + s.right.z * pick.side + s.inward.z * pick.depth,
+  }
+end
+
 function Tokens.spawn(color, r, n, opts)
   if r.tpl == nil and r.entry then
     r.tpl = buildTpl(r)
@@ -299,9 +368,16 @@ function Tokens.spawn(color, r, n, opts)
     local id1, id2 = Importer.nextDeckId(), Importer.nextDeckId()
     local json = Importer.fillTemplate(r.tpl, id1, id2)
     json = Importer.replacePlain(json, '"Tags":["MTGCard"]', '"Tags":["MTGCard","Token"]')
-    -- Spread copies sideways so they don't stack.
-    local off = piled and pileOff or (k - (n + 1) / 2) * 2.6
-    local pos = { x = base.x + s.right.x * off, y = base.y + 0.5, z = base.z + s.right.z * off }
+    -- Each token on its own open spot (piles keep their own spread).
+    local pos
+    if not piled then
+      local okf, spot = pcall(Tokens.freeSpot, color)
+      pos = okf and spot or nil
+    end
+    if pos == nil then
+      local off = piled and pileOff or (k - (n + 1) / 2) * 2.6
+      pos = { x = base.x + s.right.x * off, y = base.y + 0.5, z = base.z + s.right.z * off }
+    end
     spawnObjectJSON({
       json = json,
       position = pos,

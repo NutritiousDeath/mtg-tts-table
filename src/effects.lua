@@ -244,6 +244,18 @@ function Effects.parse(text, sourceName)
     if tt == "you draw a card and lose 1 life. then if your library has no cards in it, you win the game." then
       return only({ { what = "draw", who = "you", n = 1 }, { what = "lose", who = "you", n = 1 }, { what = "winIfEmpty", who = "you", n = 1 } })
     end
+    -- Curses (Opulence, Verbosity-style token Curses): "create a Gold token. Each opponent attacking that player
+    -- does the same." The attackers come with the trigger (it.attackers).
+    do
+      local tok = tt:match("^create an? ([%a%d/ ]-) token%. each opponent attacking that player does the same%.$")
+      if tok then
+        return only({ { what = "curseTokens", who = "you", n = 1, tok = tok } })
+      end
+    end
+    -- The Endstone: "your life total becomes half your starting life total, rounded up."
+    if tt == "your life total becomes half your starting life total, rounded up." then
+      return only({ { what = "halfStartLife", who = "you", n = 1 } })
+    end
     -- Triskaidekaphile (at the beginning of your upkeep).
     if tt == "if you have exactly thirteen cards in your hand, you win the game." then
       return only({ { what = "winIfHand", who = "you", n = 13 } })
@@ -1696,6 +1708,27 @@ function Effects.parse(text, sourceName)
             lifeEqualPower = lifeEqualPower, loseEqualMV = loseEqualMV,
             -- Beast Within: "Its controller creates a 3/3 green Beast creature token."
             beastToken = t:find("its controller creates a 3/3 green beast creature token", 1, true) ~= nil,
+            -- Generous Gift (Elephant), Pongify (Ape), Rapid Hybridization (Lizard): the same, any token.
+            ctrlToken = (function()
+              local pt, col, words = t:match("its controller creates an? (%d+/%d+) (%a+) ([%a ]-) creature token")
+              if pt == nil then
+                return nil
+              end
+              local cmap = { white = "W", blue = "U", black = "B", red = "R", green = "G" }
+              local colors = {}
+              if cmap[col] then
+                colors[cmap[col]] = true
+              elseif col ~= "colorless" then
+                words = col .. " " .. words
+              end
+              local wl = {}
+              for w in words:gmatch("%a+") do
+                if not cmap[w] and w ~= "and" then
+                  table.insert(wl, w)
+                end
+              end
+              return { pt = pt, words = wl, colors = colors }
+            end)(),
             -- Force of Despair: only "creatures that entered the battlefield this turn".
             enteredThisTurn = (phrase:find("entered the battlefield this turn", 1, true) or phrase:find("entered this turn", 1, true)) ~= nil,
             -- Slaughter Pact: "nonblack creature".
@@ -3237,6 +3270,10 @@ local function describe(a, target, controller)
     return "lose 1 life for each burden counter"
   elseif a.what == "handToTop" then
     return "put " .. a.n .. " cards from your hand on top of your library"
+  elseif a.what == "curseTokens" then
+    return "you and each opponent attacking that player create a " .. tostring(a.tok) .. " token"
+  elseif a.what == "halfStartLife" then
+    return "your life total becomes half your starting life total, rounded up"
   elseif a.what == "winIfHand" then
     return "you win with exactly " .. a.n .. " cards in hand"
   elseif a.what == "rhystic" then
@@ -3746,6 +3783,39 @@ local function apply(it, plan, target)
             Wait.time(function() Actions.forceDiscard(seat, a.n, it.name, nil, "top") end, 1.8)
           else
             Actions.forceDiscard(seat, a.n, it.name, nil, "top")
+          end
+        elseif a.what == "curseTokens" then
+          local words = {}
+          local pt = a.tok:match("(%d+/%d+)")
+          for w in a.tok:gsub("%d+/%d+", ""):gmatch("%a+") do
+            if w ~= "creature" then
+              table.insert(words, w)
+            end
+          end
+          local spec = { pt = pt, words = words, colors = {} }
+          local seats = { seat }
+          for _, atk in ipairs(it.attackers or {}) do
+            if atk ~= seat and TableSetup.isOpponent(seat, atk) then
+              table.insert(seats, atk)
+            end
+          end
+          for _, s2 in ipairs(seats) do
+            Tokens.create(s2, spec, 1, it.name)
+          end
+        elseif a.what == "halfStartLife" then
+          -- Life "becomes" a number: the difference is gained or lost (CR 119.5).
+          local f = GameState.format and GameState.format() or {}
+          local start = tonumber(f.startingLife) or 40
+          local target = math.ceil(start / 2)
+          local p = GameState.player(seat)
+          local now = p and tonumber(p.life) or nil
+          if now == nil then
+            broadcastToColor(it.name .. ": set your life to " .. target .. " by hand.", seat, INFO)
+          elseif now ~= target then
+            Trackers.changeLife(seat, target - now)
+            printToAll("MTG > " .. it.name .. ": " .. seat .. "'s life total becomes " .. target .. " (half of " .. start .. ", rounded up).", INFO)
+          else
+            printToAll("MTG > " .. it.name .. ": " .. seat .. "'s life total is already " .. target .. ".", INFO)
           end
         elseif a.what == "winIfHand" then
           local okh, hand = pcall(function() return Player[seat].getHandObjects() end)
@@ -8304,6 +8374,129 @@ end)
 
 -- "As ~ enters, choose a creature type" (Cavern of Souls, Roaming Throne, Coat of Arms...):
 -- the controller types it in; it is remembered for the card (Statics.chosenType).
+-- Creature types, for checking a typed choice ("Squirel" for Vanquisher's Banner matched nothing, so its anthem
+-- never applied). The types on the table's cards are added as well, so newer types still work.
+local KNOWN_TYPES = [[Advisor Aetherborn Alien Ally Angel Antelope Ape Archer Archon Armadillo Army Artificer Assassin Assembly-Worker
+Astartes Atog Aurochs Avatar Azra Badger Balloon Barbarian Bard Basilisk Bat Bear Beast Beaver Beeble Beholder Berserker Bird Blinkmoth
+Boar Bringer Brushwagg Camarid Camel Capybara Caribou Carrier Cat Centaur Child Chimera Citizen Cleric Clown Cockatrice Construct Coward
+Coyote Crab Crocodile Ctan Custodes Cyberman Cyclops Dalek Dauthi Demigod Demon Deserter Detective Devil Dinosaur Djinn Doctor Dog Dragon
+Drake Dreadnought Drone Druid Dryad Dwarf Efreet Egg Elder Eldrazi Elemental Elephant Elf Elk Employee Eye Faerie Ferret Fish Flagbearer
+Fox Fractal Frog Fungus Gamer Gargoyle Germ Giant Gith Glimmer Gnoll Gnome Goat Goblin God Golem Gorgon Graveborn Gremlin Griffin Guest
+Hag Halfling Hamster Harpy Hellion Hero Hippo Hippogriff Homarid Homunculus Horror Horse Human Hydra Hyena Illusion Imp Incarnation
+Inkling Inquisitor Insect Jackal Jellyfish Juggernaut Kavu Kirin Kithkin Knight Kobold Kor Kraken Llama Lamia Lammasu Leech Lemur Leviathan
+Lhurgoyf Licid Lizard Manticore Masticore Mercenary Merfolk Metathran Minion Minotaur Mite Mole Monger Mongoose Monk Monkey Moonfolk Mount
+Mouse Mutant Myr Mystic Nautilus Necron Nephilim Nightmare Nightstalker Ninja Noble Noggle Nomad Nymph Octopus Ogre Ooze Orb Orc Orgg
+Otter Ouphe Ox Oyster Pangolin Peasant Pegasus Pentavite Performer Pest Phelddagrif Phoenix Phyrexian Pilot Pincher Pirate Plant Porcupine
+Possum Praetor Primarch Prism Processor Rabbit Raccoon Ranger Rat Rebel Reflection Rhino Rigger Robot Rogue Sable Salamander Samurai Sand
+Saproling Satyr Scarecrow Scientist Scion Scorpion Scout Sculpture Serf Serpent Servo Shade Shaman Shapeshifter Shark Sheep Siren Skeleton
+Skunk Slith Sliver Sloth Slug Snail Snake Soldier Soltari Spawn Specter Spellshaper Sphinx Spider Spike Spirit Splinter Sponge Squid
+Squirrel Starfish Surrakar Survivor Synth Tentacle Tetravite Thalakos Thopter Thrull Tiefling Toy Treefolk Trilobite Triskelavite Troll
+Turtle Tyranid Unicorn Vampire Varmint Vedalken Volver Wall Walrus Warlock Warrior Weasel Weird Werewolf Whale Wizard Wolf Wolverine
+Wombat Worm Wraith Wurm Yeti Zombie Zubera]]
+
+local function editDistance(a, b)
+  local la, lb = #a, #b
+  if math.abs(la - lb) > 2 then
+    return 99
+  end
+  local prev = {}
+  for j = 0, lb do
+    prev[j] = j
+  end
+  for i = 1, la do
+    local cur = { [0] = i }
+    for j = 1, lb do
+      local cost = (a:sub(i, i) == b:sub(j, j)) and 0 or 1
+      cur[j] = math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+    end
+    prev = cur
+  end
+  return prev[lb]
+end
+
+-- A typed creature type, put right: "squirel" -> "Squirrel", "elves" -> "Elf", "GOBLINS" -> "Goblin".
+-- Returns the type and, when it was changed or isn't a known type, a note to show.
+function Effects.normalizeCreatureType(t)
+  local raw = tostring(t or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  local low = raw:lower()
+  local known = {}
+  for w in KNOWN_TYPES:gmatch("%S+") do
+    known[w:lower()] = w
+  end
+  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+    pcall(function()
+      local d = CardData.get(o) or {}
+      local tl = tostring(d.typeLine or "")
+      local dash = tl:find("—", 1, true)
+      if dash and tl:lower():find("creature", 1, true) then
+        for w in tl:sub(dash + 3):gmatch("[%a%-']+") do
+          known[w:lower()] = known[w:lower()] or w
+        end
+      end
+    end)
+  end
+  if known[low] then
+    return known[low], nil
+  end
+  local irregular = { elves = "elf", dwarves = "dwarf", wolves = "wolf", mice = "mouse", geese = "goose", fungi = "fungus",
+    pegasi = "pegasus", sphinxes = "sphinx", foxes = "fox", oozes = "ooze", allies = "ally", faeries = "faerie" }
+  local sing = irregular[low] or (low:sub(-1) == "s" and low:sub(1, -2)) or nil
+  if sing and known[sing] then
+    return known[sing], nil
+  end
+  local bestW, bestD = nil, 3
+  for k, w in pairs(known) do
+    local d = editDistance(low, k)
+    if d < bestD then
+      bestW, bestD = w, d
+    end
+  end
+  if bestW then
+    return bestW, "\"" .. raw .. "\" read as " .. bestW
+  end
+  local ty = raw:sub(1, 1):upper() .. raw:sub(2):lower()
+  return ty, "\"" .. ty .. "\" isn't a creature type the table knows: check the spelling"
+end
+
+-- Auras that enchant a player (Curses): GameState.data.enchPlayer[guid] = the enchanted seat.
+function Effects.setEnchantedPlayer(obj, seat)
+  if obj == nil or seat == nil then
+    return
+  end
+  GameState.data.enchPlayer = GameState.data.enchPlayer or {}
+  GameState.data.enchPlayer[obj.getGUID()] = seat
+  printToAll("MTG > " .. obj.getName() .. " enchants " .. seat .. ".", { 0.55, 0.9, 0.6 })
+  if Counters and Counters.setup then
+    Wait.time(function()
+      if not obj.isDestroyed() then
+        pcall(Counters.setup, obj)
+      end
+    end, 2)
+  end
+end
+
+function Effects.enchantedPlayer(obj)
+  local m = GameState.data and GameState.data.enchPlayer
+  local ok, g = pcall(function() return obj.getGUID() end)
+  return ok and m and m[g] or nil
+end
+
+-- "Enchant player" Auras on the battlefield: { { obj, controller, seat = enchanted player } }.
+function Effects.playerAuras()
+  local out = {}
+  local m = GameState.data and GameState.data.enchPlayer or {}
+  for g, seat in pairs(m) do
+    local obj = getObjectFromGUID(g)
+    if obj and not obj.isDestroyed() then
+      local loc = Zones.regionAt(obj.getPosition())
+      if loc.seat and (loc.region == "battlefield" or loc.region == "lands") then
+        table.insert(out, { obj = obj, controller = loc.seat, seat = seat })
+      end
+    end
+  end
+  return out
+end
+
 function Effects.chooseType(obj, seat)
   if obj == nil or obj.isDestroyed() then
     return
@@ -8313,9 +8506,12 @@ function Effects.chooseType(obj, seat)
     if obj.isDestroyed() then
       return
     end
-    local ty = t:sub(1, 1):upper() .. t:sub(2):lower()
+    local ty, note = Effects.normalizeCreatureType(t)
     Statics.setChosen(obj, ty)
-    printToAll("MTG > " .. seat .. " chooses " .. ty .. " for " .. nm .. ".", { 0.55, 0.9, 0.6 })
+    printToAll("MTG > " .. seat .. " chooses " .. ty .. " for " .. nm .. "." .. (note and (" (" .. note .. ")") or ""), { 0.55, 0.9, 0.6 })
+    if note then
+      broadcastToColor(nm .. ": " .. note .. ". If that's wrong, right-click it > Choose creature type again.", seat, { 1, 0.8, 0.3 })
+    end
   end)
 end
 
@@ -10897,6 +11093,8 @@ function Effects.pickRemove(seat, a, sourceName, sourceGuid)
           printToAll("MTG > " .. sourceName .. ": " .. (a.verb == "exile" and "exiled " or "destroyed ") .. name .. ".", GOOD)
           if a.beastToken and owner and Tokens and Tokens.create then
             Tokens.create(owner, { pt = "3/3", words = { "beast" }, colors = { G = true } }, 1, sourceName)
+          elseif a.ctrlToken and owner and Tokens and Tokens.create then
+            Tokens.create(owner, a.ctrlToken, 1, sourceName)
           end
           if a.basicForController and owner then
             LibSearch.open(owner, "basic land", sourceName .. ": you MAY search for a basic land card; it goes onto the battlefield. Then CLOSE + SHUFFLE (or just CLOSE).",
@@ -10955,6 +11153,93 @@ function Effects.amass(seat, kind, n, sourceName)
     end
   end, 3)
 end
+
+-- Another permanent's "Each other [Angel / creature] you control enters with an additional +1/+1 counter on it
+-- [for each Angel you already control]" (Giada, Font of Hope; Grumgully; Metallic Mimic-style "of the chosen type").
+local function hasSubtype(obj, word)
+  local d = CardData.get(obj) or {}
+  local tl = tostring(d.typeLine or ""):lower()
+  word = word:lower():gsub("s$", "")
+  if word == "creature" or word == "permanent" then
+    return word == "permanent" or tl:find("creature", 1, true) ~= nil
+  end
+  for _, k in ipairs(type(d.keywords) == "table" and d.keywords or {}) do
+    if tostring(k):lower() == "changeling" and tl:find("creature", 1, true) then
+      return true
+    end
+  end
+  local dash = tl:find("—", 1, true)
+  return dash ~= nil and tl:sub(dash):find(word, 1, true) ~= nil
+end
+
+Events.on("cardMoved", function(d)
+  if not enabled() or not GameState.data.started or d.card == nil or d.to == nil or d.to.seat == nil then
+    return
+  end
+  if not ON_FIELD[d.to.region] or (d.from and ON_FIELD[d.from.region]) or d.pileExtra then
+    return
+  end
+  local card = d.card
+  if card.isDestroyed() or card.is_face_down then
+    return
+  end
+  local seat = d.to.seat
+  local mine = {}
+  for _, o in ipairs(getObjectsWithTag("MTGCard")) do
+    if o ~= card and o.type == "Card" and not o.isDestroyed() and not o.is_face_down and o.held_by_color == nil then
+      local loc = Zones.regionAt(o.getPosition())
+      if loc.seat == seat and ON_FIELD[loc.region] then
+        table.insert(mine, o)
+      end
+    end
+  end
+  local total, from = 0, {}
+  for _, src in ipairs(mine) do
+    local od = CardData.get(src) or {}
+    local low = tostring(od.oracle or ""):lower()
+    if Triggers and Triggers.stripReminder then
+      low = Triggers.stripReminder(low)
+    end
+    for line in (low .. "\n"):gmatch("([^\n]*)\n") do
+      local who, kind, rest = line:match("each other ([%a ]-) you control enters with an additional ([%+%-%d/]+) counter on it(.*)$")
+      if who and kind == "+1/+1" then
+        local okType
+        local chosen = who:match("^creature of the chosen type$") or who:match("^creature you control of the chosen type$")
+        if chosen then
+          local ty = Statics and Statics.chosenType and Statics.chosenType(src)
+          okType = ty ~= nil and hasSubtype(card, ty) and hasSubtype(card, "creature")
+        else
+          okType = hasSubtype(card, who)
+        end
+        if okType then
+          local per = 1
+          local each = rest:match("^ for each ([%a ]-) you already control")
+          if each then
+            per = 0
+            for _, o in ipairs(mine) do
+              if hasSubtype(o, each) then
+                per = per + 1
+              end
+            end
+          end
+          if per > 0 then
+            total = total + per
+            table.insert(from, src.getName() .. " +" .. per)
+          end
+        end
+      end
+    end
+  end
+  if total > 0 then
+    Wait.time(function()
+      if not card.isDestroyed() then
+        local placed = Counters.place(card, "plus", total, seat)
+        printToAll("MTG > " .. card.getName() .. " enters with " .. placed .. " additional +1/+1 counter" .. (placed == 1 and "" or "s")
+          .. " (" .. table.concat(from, ", ") .. ").", INFO)
+      end
+    end, 0.7)
+  end
+end)
 
 -- "Spike Feeder enters with two +1/+1 counters on it."
 Events.on("cardMoved", function(d)

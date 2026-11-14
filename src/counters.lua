@@ -476,6 +476,13 @@ renderInto = function(obj)
   if Actions and Actions.skipsUntap and Actions.skipsUntap(obj) then
     table.insert(info, "DOESN'T UNTAP NEXT")
   end
+  -- A Curse: the player it enchants.
+  if Effects and Effects.enchantedPlayer then
+    local ep = Effects.enchantedPlayer(obj)
+    if ep then
+      table.insert(info, "ENCHANTS " .. tostring(ep):upper())
+    end
+  end
   if Counters.goadedBy(obj) then
     -- GOADED badge across the top of the card.
     obj.createButton({

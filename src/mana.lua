@@ -192,6 +192,20 @@ local function oracleOf(obj)
   if nm ~= "" then
     text = text:gsub(nm:gsub("([%%%-%.%+%*%?%[%]%^%$%(%)])", "%%%1"), "~")
   end
+  -- "Sacrifice this token: Add {C}." (Eldrazi Spawn / Scion) is a mana ability with no {T}: read it like a
+  -- Treasure's, so it gets "Sacrifice for mana" (no stack) and the token really goes.
+  do
+    local out = {}
+    for raw in (text .. "\n"):gmatch("([^\n]*)\n") do
+      local line = raw
+      local what = line:match("^%s*%(?sacrifice (%S+ ?%S*): add ")
+      if what and (what == "~" or what:find("^this ")) then
+        line = "{t}, " .. line:gsub("^%s*%(?", "")
+      end
+      table.insert(out, line)
+    end
+    text = table.concat(out, "\n")
+  end
   -- Chrome Mox ("Add one mana of any of the exiled card's colors"): the colors of the card it imprinted
   -- (effects.lua Effects.imprint); nothing imprinted, no mana.
   if text:find("of the exiled card's colors", 1, true) then
@@ -684,7 +698,11 @@ function ManaChips.onTap(obj, seat)
         local ty = Statics.chosenType(obj)
         if ty == nil then
           Effects.askText(seat, obj.getName() .. ": creature type", "No creature type is chosen for " .. obj.getName() .. " yet. Type it (for example Elf).", function(t)
-            ty = t:sub(1, 1):upper() .. t:sub(2):lower()
+            if Effects.normalizeCreatureType then
+              ty = Effects.normalizeCreatureType(t)
+            else
+              ty = t:sub(1, 1):upper() .. t:sub(2):lower()
+            end
             Statics.setChosen(obj, ty)
             printToAll("MTG > " .. seat .. " chooses " .. ty .. " for " .. obj.getName() .. ".", { 0.55, 0.9, 0.6 })
             go(ty)
