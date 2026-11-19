@@ -956,6 +956,31 @@ function ui_discardSkip(player, color)
   finishDiscard(color)
 end
 
+-- Something waiting for this player's scry to finish (Preordain's draw). Runs once the cards are
+-- arranged, or when the viewer is cancelled; right away if no scry is open.
+local scryThen = {}
+function Actions.afterScry(color, fn)
+  scryThen[color] = scryThen[color] or {}
+  table.insert(scryThen[color], fn)
+  -- The scry viewer may still be opening (it joins the library first): check a moment later.
+  Wait.time(function()
+    if scry[color] == nil and scryThen[color] and #scryThen[color] > 0 then
+      local list = scryThen[color]
+      scryThen[color] = nil
+      for _, f in ipairs(list) do
+        pcall(f)
+      end
+    end
+  end, 2)
+end
+local function runAfterScry(color)
+  local list = scryThen[color]
+  scryThen[color] = nil
+  for _, f in ipairs(list or {}) do
+    pcall(f)
+  end
+end
+
 local function closeScry(color)
   scry[color] = nil
   UI.setAttribute("scry_" .. color, "active", "false")
@@ -1048,6 +1073,7 @@ local function resolveScry(color)
     if counts.bottom > 0 then table.insert(bits, counts.bottom .. " on the bottom") end
     if counts.grave > 0 then table.insert(bits, counts.grave .. " into the graveyard") end
     log(color .. " looked at " .. #choices .. " card" .. (#choices == 1 and "" or "s") .. ": " .. table.concat(bits, ", "))
+    Wait.time(function() runAfterScry(color) end, 0.8)
   end)
 end
 
@@ -1059,6 +1085,7 @@ function ui_scry(player, arg)
   end
   if choice == "cancel" then
     closeScry(color)
+    runAfterScry(color)
     return
   end
   local st = scry[color]

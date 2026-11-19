@@ -138,7 +138,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.98 (Gitaxian Probe shows the hand, Phyrexian life auto-paid, Isochron Scepter, Cyclonic Rift overload, Finale of Devastation)"
+SCRIPT_VERSION = "2.99 (Skybreen labels the top cards instead of pulling them out, Preordain scries first, Furnace Layer picks at random, Ancient Copper Dragon)"
 
 function onLoad(saved)
   GameLog.setup()

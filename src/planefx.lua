@@ -3428,19 +3428,7 @@ function PlaneFx.arrived(name)
   s.arrived = s.arrived or {}
   s.arrived[name] = turnNo()
   if name == "Skybreen" or name == "Windriddle Palaces" then
-    Wait.time(function()
-      for _, c in ipairs(players()) do
-        pcall(function()
-          if not (Library.revealedCard and Library.revealedCard(c)) then
-            Library.revealTop(c, function(card)
-              if card and Library.holdRevealed then
-                Library.holdRevealed(c, card)
-              end
-            end)
-          end
-        end)
-      end
-    end, 2)
+    Wait.time(function() pcall(PlaneFx.showTops) end, 2)
   end
 end
 
@@ -3508,9 +3496,10 @@ function PlaneFx.cantBeAttacked(seat)
 end
 
 ---------------------------------------------------------------------------
--- Skybreen / Windriddle Palaces: everyone plays with the top card of their library revealed. The top card is
--- held face up beside each library (Library.holdRevealed; drawing takes it first) and the next one is turned up
--- after each draw. When the plane leaves, they go back on top.
+-- Skybreen / Windriddle Palaces: everyone plays with the top card of their library revealed. The cards stay
+-- in the library: a label beside each library names its top card, kept up to date while the plane is up.
+-- (It used to pull the top card out and hold it beside the library; cards kept coming out, two at a time,
+-- and everyone had to click PUT ON TOP over and over.)
 ---------------------------------------------------------------------------
 
 local function revealsTops()
@@ -3518,21 +3507,52 @@ local function revealsTops()
   return up["Skybreen"] or up["Windriddle Palaces"]
 end
 
-local revealing = {}
+local topLabels = {}      -- [seat] = 3D text object
+local topShown = {}       -- [seat] = name shown
+
+local function labelFor(c)
+  local o = topLabels[c]
+  if o and not o.isDestroyed() then
+    return o
+  end
+  local spot = Library.revealSpot and Library.revealSpot(c)
+  local seat = TableSetup.seat(c)
+  if spot == nil or seat == nil then
+    return nil
+  end
+  o = spawnObject({ type = "3DText", position = { spot.x, TableSetup.SURFACE_TOP + 0.2, spot.z },
+    rotation = { 90, seat.yaw, 0 }, sound = false })
+  pcall(function()
+    o.TextTool.setFontSize(56)
+    o.TextTool.setFontColor({ 0.55, 0.9, 1 })
+  end)
+  pcall(function() o.setLock(true) end)
+  pcall(function() o.interactable = false end)
+  topLabels[c] = o
+  topShown[c] = nil
+  return o
+end
+
 local function revealFor(c)
-  if revealing[c] or not GameState.data.started then
+  if not GameState.data.started then
     return
   end
-  if Library.revealedCard and Library.revealedCard(c) then
-    return
-  end
-  revealing[c] = true
-  Library.revealTop(c, function(card)
-    revealing[c] = nil
-    if card and Library.holdRevealed then
-      Library.holdRevealed(c, card)
+  -- The top card's name without copying the whole deck's data (this runs every few seconds).
+  local name = "(empty)"
+  pcall(function()
+    local lib = Library.find(c)
+    if lib and lib.type == "Deck" then
+      local first = lib.getObjects()[1]
+      name = first and first.name ~= "" and first.name or name
+    elseif lib then
+      name = lib.getName()
     end
   end)
+  local o = labelFor(c)
+  if o and topShown[c] ~= name then
+    topShown[c] = name
+    pcall(function() o.TextTool.setValue("TOP OF LIBRARY:\n" .. name) end)
+  end
 end
 
 local function revealAll()
@@ -3540,11 +3560,22 @@ local function revealAll()
     return
   end
   for _, c in ipairs(players()) do
-    revealFor(c)
+    pcall(revealFor, c)
   end
 end
 
+function PlaneFx.showTops()
+  revealAll()
+end
+
 function PlaneFx.revealTopsOff()
+  for c, o in pairs(topLabels) do
+    if o and not o.isDestroyed() then
+      pcall(function() o.destruct() end)
+    end
+    topLabels[c], topShown[c] = nil, nil
+  end
+  -- A card still held out the old way (a save from before 2.99) goes back on top.
   for _, c in ipairs(players()) do
     if Library.revealedCard and Library.revealedCard(c) then
       pcall(Library.putRevealedOnTop, c)
@@ -3552,21 +3583,33 @@ function PlaneFx.revealTopsOff()
   end
 end
 
+-- Keep the labels current: anything into or out of a library, each step, and every few seconds (shuffles).
 Events.on("cardMoved", function(d)
-  if d == nil or d.from == nil or d.to == nil or not GameState.data.started then
+  if d == nil or d.from == nil or d.to == nil or not GameState.data.started or not revealsTops() then
     return
   end
-  if d.from.region == "library" and d.to.region == "hand" and d.to.seat and revealsTops() then
-    local c = d.to.seat
-    Wait.time(function() revealFor(c) end, 1.2)
+  for _, side in ipairs({ d.from, d.to }) do
+    if side.region == "library" and side.seat then
+      local c = side.seat
+      Wait.time(function() pcall(revealFor, c) end, 1)
+    end
   end
 end)
 
 Events.on("stepStarted", function(d)
-  if d and (d.step == "upkeep" or d.step == "main1") then
-    Wait.time(revealAll, 0.5)
-  end
+  Wait.time(revealAll, 0.5)
 end)
+
+local function tick()
+  if revealsTops() then
+    pcall(revealAll)
+  elseif next(topLabels) then
+    pcall(PlaneFx.revealTopsOff)
+  end
+  Wait.time(tick, 4)
+end
+Wait.time(tick, 6)
+
 
 ---------------------------------------------------------------------------
 -- Buttons on the plane card for what a plane lets players do (each player clicks for themselves):

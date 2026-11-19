@@ -2332,6 +2332,26 @@ function Effects.parse(text, sourceName)
       end
     end
   end
+  -- Preordain "Scry 2. Then draw a card.", Opt, Consider: when the text scries (or surveils) BEFORE it draws,
+  -- the scry goes first. (The reader lists the draw first; Brainstorm-style "draw, then ..." stays as it is.)
+  do
+    local sAt = t:find("scry %d") or t:find("surveil %d")
+    local dAt = t:find("draws? [%a%d]+ cards?") or t:find("draw a card")
+    if sAt and dAt and sAt < dAt then
+      local di, si
+      for i2, ac in ipairs(r.actions) do
+        if ac.what == "draw" and ac.who == "you" and di == nil then
+          di = i2
+        elseif ac.what == "scry" and si == nil then
+          si = i2
+        end
+      end
+      if di and si and di < si then
+        local sc = table.remove(r.actions, si)
+        table.insert(r.actions, di, sc)
+      end
+    end
+  end
   return r
 end
 
@@ -3488,11 +3508,19 @@ local function apply(it, plan, target)
           end
         elseif a.what == "draw" then
           drewEarlier = true
-          watched("draw", seat, a.n, controller, it.name, function(v)
-            if v > 0 then
-              Actions.draw(seat, v, it.name)
-            end
-          end)
+          local function doDraw()
+            watched("draw", seat, a.n, controller, it.name, function(v)
+              if v > 0 then
+                Actions.draw(seat, v, it.name)
+              end
+            end)
+          end
+          -- Preordain: "Scry 2. Then draw a card." waits until the scry is done (actions.lua Actions.afterScry).
+          if a.afterScry and Actions.afterScry then
+            Actions.afterScry(seat, doDraw)
+          else
+            doDraw()
+          end
         elseif a.what == "search" then
           local how
           if a.where == "both" then
@@ -3738,6 +3766,16 @@ local function apply(it, plan, target)
           if afterDraw then
             Wait.time(doScry, 1.5)
           else
+            -- A draw after it (Preordain, Opt) waits for the scry to be finished.
+            local seen = false
+            for _, b in ipairs(plan.actions) do
+              if b == a then
+                seen = true
+              elseif seen and b.what == "draw" and b.who == a.who then
+                b.afterScry = true
+                break
+              end
+            end
             doScry()
           end
         elseif a.what == "mill" then
@@ -7591,7 +7629,20 @@ CARD_FX.imprintCopy = function(it, low)
   return true
 end
 
-local CARD_FX_ORDER = { "imprintCopy", "yardReturnAttach", "sagaGains", "protectionChoice", "arcum", "fatalPush", "warPeace", "tymna", "cutDeal", "stagger", "moltenNote", "consult", "mindbreak", "endReturn", "firionCopy", "acererak", "throne", "oubliette", "eachUnless", "drawCastFree", "exileTopPlay", "untilNextTurn", "controlCountered", "graveExile", "peekTop", "drawToCopy", "lookSplit", "namedAnywhere", "phaseOut", "castFromYard", "manaPerType", "giveAway",
+-- Ancient Copper Dragon: "roll a d20. You create a number of Treasure tokens equal to the result."
+CARD_FX.rollTokens = function(it, low)
+  local sides, word = low:match("roll an? d(%d+)%. you create a number of (%a+) tokens equal to the result")
+  if not sides then
+    return false
+  end
+  local seat = it.controller
+  local r = math.random(tonumber(sides))
+  printToAll("MTG > " .. tostring(it.name) .. ": " .. seat .. " rolls a d" .. sides .. ": " .. r .. ".", GOOD)
+  Tokens.create(seat, { words = { word }, colors = {} }, r, it.name)
+  return true
+end
+
+local CARD_FX_ORDER = { "rollTokens", "imprintCopy", "yardReturnAttach", "sagaGains", "protectionChoice", "arcum", "fatalPush", "warPeace", "tymna", "cutDeal", "stagger", "moltenNote", "consult", "mindbreak", "endReturn", "firionCopy", "acererak", "throne", "oubliette", "eachUnless", "drawCastFree", "exileTopPlay", "untilNextTurn", "controlCountered", "graveExile", "peekTop", "drawToCopy", "lookSplit", "namedAnywhere", "phaseOut", "castFromYard", "manaPerType", "giveAway",
   "tokensPerCounter", "countersOnLegends", "oppToken", "ringCopy", "ringWatch", "jewel" }
 
 -- Does cardFx take this text? (Its own prompts pick the targets, so nothing is asked as it goes on the stack.)
@@ -13104,6 +13155,22 @@ function pickAll(it, text, specs, done)
       end
       if sp.kind == "any" then
         table.insert(choices, { label = sp.pwOnly and "PLANESWALKER" or "CREATURE / PW", value = "card" })
+      end
+      -- "Select target player at random" (Furnace Layer): the table picks, nobody chooses.
+      local lowT = tostring(text or ""):lower()
+      if (lowT:find("target player at random", 1, true) or lowT:find("target opponent at random", 1, true)) and sp.kind ~= "any" then
+        local pool = {}
+        for _, ch in ipairs(choices) do
+          if type(ch.value) == "string" and ch.value ~= "card" then
+            table.insert(pool, ch.value)
+          end
+        end
+        if #pool > 0 then
+          local v = pool[math.random(#pool)]
+          printToAll("MTG > " .. it.name .. ": the player is picked at random: " .. v .. ".", INFO)
+          table.insert(it.preTargets, { kind = "player", seat = v })
+          return one()
+        end
       end
       table.insert(choices, { label = (sp.upTo or k > 1) and "DONE" or "SKIP", value = false })
       ask(seat, it.name .. ": target " .. (sp.kind == "opponent" and "opponent" or (sp.kind == "any" and "(any target)" or "player")),
