@@ -138,7 +138,7 @@ Sideboard
 ]]
 
 -- Bump this whenever the scripts change, so it's obvious which version TTS runs.
-SCRIPT_VERSION = "2.96 (Nov 14 game fixes: tokens get their own spot, Curses, Burning Earth, Winter Orb, Giada, Endstone, Generous Gift, Eldrazi Spawn, typo-proof creature types)"
+SCRIPT_VERSION = "2.98 (Gitaxian Probe shows the hand, Phyrexian life auto-paid, Isochron Scepter, Cyclonic Rift overload, Finale of Devastation)"
 
 function onLoad(saved)
   GameLog.setup()

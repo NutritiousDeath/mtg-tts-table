@@ -831,6 +831,15 @@ function ManaChips.pay(seat, cost, name, card)
   end
   local p = pool(seat)
   if next(p) == nil then
+    -- Nothing in the pool. A cost that's only Phyrexian mana (Gitaxian Probe {U/P}, Mutagenic Growth): 2 life
+    -- each, so the player doesn't have to do it by hand. (Float the mana first to pay it with mana instead.)
+    if #phyrexian > 0 and generic == 0 and next(colored) == nil and #hybrids == 0 and Trackers and Trackers.changeLife then
+      local life = 2 * #phyrexian
+      Trackers.changeLife(seat, -life, tostring(name or "Phyrexian mana"))
+      printToAll("MTG > " .. seat .. " pays " .. life .. " life for " .. tostring(name or "the cost")
+        .. " (Phyrexian mana; nothing in the mana pool).", INFO)
+      return nil, true
+    end
     return nil
   end
   local taken, short = {}, 0
@@ -908,6 +917,11 @@ Events.on("spellCast", function(d)
     return
   end
   local cost = CardData.get(d.card).manaCost
+  -- Cast with overload: that cost instead (Cyclonic Rift {6}{U}).
+  local ov = GameState.data.overload and GameState.data.overload[d.card.getGUID()]
+  if ov then
+    cost = ov
+  end
   local fc = GameState.data.freeCast
   if fc and fc[d.card.getGUID()] then
     fc[d.card.getGUID()] = nil      -- cast without paying its mana cost (suspend, rebound)

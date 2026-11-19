@@ -1450,8 +1450,19 @@ function Effects.parse(text, sourceName)
   end
   -- Finale of Devastation: "Search your library and/or graveyard for a creature card with mana value X or less".
   do
-    local phrase, mv = t:match("search your library and/or graveyard for (.-) cards? with mana value (%d+) or less")
-    if phrase then
+    -- (plain finds: a lazy (.-) pattern over the whole card text is what TTS's Lua chokes on)
+    local phrase, mv
+    local key = "search your library and/or graveyard for "
+    local a = t:find(key, 1, true)
+    if a then
+      local rest = t:sub(a + #key)
+      local w = rest:find(" with mana value ", 1, true)
+      if w then
+        mv = rest:sub(w):match("^ with mana value (%d+) or less")
+        phrase = rest:sub(1, w - 1):gsub(" cards?$", "")
+      end
+    end
+    if phrase and mv then
       local q = phrase:gsub("^an? ", "")
       table.insert(actions, { what = "searchLibOrYard", who = "you", n = 1, query = q, mvMax = tonumber(mv),
         where = t:find("onto the battlefield", 1, true) and "battlefield" or "hand",
@@ -3527,11 +3538,20 @@ local function apply(it, plan, target)
           end
         elseif a.what == "bounce" then
           -- Cyclonic Rift: "Overload {6}{U}": each, not one.
-          local srcCard = (it.guid and getObjectFromGUID(it.guid)) or (it.source and getObjectFromGUID(it.source))
+          local srcCard = (it.card and getObjectFromGUID(it.card)) or (it.guid and getObjectFromGUID(it.guid))
+            or (it.source and getObjectFromGUID(it.source))
           local srcText = srcCard and tostring(CardData.get(srcCard).oracle or ""):lower() or ""
-          if srcText:find("\noverload {", 1, true) or srcText:sub(1, 10) == "overload {" then
-            Effects.askChoice(seat, it.name .. ": overloaded?", "Did you cast it for its OVERLOAD cost? Then it returns EACH one instead of one target.",
-              { { label = "OVERLOAD", value = true }, { label = "ONE TARGET", value = false } }, function(over)
+          if it.overloaded or srcText:find("\noverload {", 1, true) or srcText:sub(1, 10) == "overload {" then
+            local function decide(cb)
+              if it.overloaded then
+                cb(true)       -- cast with "Cast: overload" (paid the overload cost)
+              else
+                Effects.askChoice(seat, it.name .. ": overloaded?", "Did you cast it for its OVERLOAD cost? Then it returns EACH one instead of one target."
+                  .. " (Next time right-click it in your hand > Cast: overload.)",
+                  { { label = "OVERLOAD", value = true }, { label = "ONE TARGET", value = false } }, cb)
+              end
+            end
+            decide(function(over)
                 if over then
                   local n = 0
                   for _, o in ipairs(getObjectsWithTag("MTGCard")) do
@@ -5651,10 +5671,11 @@ function Effects.lookHand(caster, target, it)
   if caster == nil or target == nil or Player[target] == nil then
     return
   end
-  local names = {}
+  local names, cards = {}, {}
   for _, o in ipairs(Player[target].getHandObjects() or {}) do
     if o.type == "Card" and not o.isDestroyed() then
       table.insert(names, o.getName())
+      table.insert(cards, o)
     elseif o.type == "Deck" then
       for _, e in ipairs(o.getObjects() or {}) do
         table.insert(names, e.name or e.nickname or "?")
@@ -5669,6 +5690,15 @@ function Effects.lookHand(caster, target, it)
   end
   printToColor("MTG > " .. target .. "'s hand: " .. table.concat(names, ", "), caster, { 1, 0.85, 0.3 })
   broadcastToColor(target .. "'s hand: " .. table.concat(names, ", ") .. "  (only you see this; it's in your chat too)", caster, { 1, 0.85, 0.3 })
+  -- The cards themselves, in a panel only the caster sees (hover one to see it big).
+  if LibSearch and LibSearch.view and #cards > 0 then
+    table.sort(cards, function(a, b) return a.getName() < b.getName() end)
+    local okv, errv = pcall(LibSearch.view, caster, string.upper(target) .. "'S HAND (" .. #cards .. ")", cards,
+      it.name .. ": " .. target .. "'s hand. Only you see this. Hover a card to see it big; CLOSE when you're done.")
+    if not okv then
+      print("lookHand: could not show the cards: " .. tostring(errv))
+    end
+  end
 end
 
 -- Windfall: everyone discards their hand, then draws as many cards as the most anyone discarded.
@@ -7527,7 +7557,41 @@ CARD_FX.yardReturnAttach = function(it, low)
   return true
 end
 
-local CARD_FX_ORDER = { "yardReturnAttach", "sagaGains", "protectionChoice", "arcum", "fatalPush", "warPeace", "tymna", "cutDeal", "stagger", "moltenNote", "consult", "mindbreak", "endReturn", "firionCopy", "acererak", "throne", "oubliette", "eachUnless", "drawCastFree", "exileTopPlay", "untilNextTurn", "controlCountered", "graveExile", "peekTop", "drawToCopy", "lookSplit", "namedAnywhere", "phaseOut", "castFromYard", "manaPerType", "giveAway",
+-- Isochron Scepter: "{2}, {T}: You may copy the exiled card. If you do, you may cast the copy without paying
+-- its mana cost." The imprinted card (Effects.imprint) is looked up and a copy goes on the stack.
+CARD_FX.imprintCopy = function(it, low)
+  if not low:find("you may copy the exiled card", 1, true) then
+    return false
+  end
+  local seat = it.controller
+  local imp = GameState.data.imprint and it.source and GameState.data.imprint[it.source]
+  local card = imp and getObjectFromGUID(imp.guid)
+  if card == nil or card.isDestroyed() then
+    printToAll("MTG > " .. tostring(it.name) .. ": nothing is imprinted on it (or the card left exile): nothing to copy.", INFO)
+    return true
+  end
+  ask(seat, tostring(it.name) .. ": cast the copy?", "Cast a copy of " .. card.getName() .. " without paying its mana cost?",
+    { { label = "CAST THE COPY", value = true }, { label = "NO", value = false } }, function(yes)
+      if not yes then
+        printToAll("MTG > " .. seat .. " doesn't cast the copy (" .. tostring(it.name) .. ").", INFO)
+        return
+      end
+      local d = CardData.get(card) or {}
+      local image = ""
+      pcall(function()
+        for _, cd in pairs(card.getData().CustomDeck or {}) do
+          image = cd.FaceURL or ""
+          break
+        end
+      end)
+      Stack.pushAbility(seat, card.getName(), tostring(d.oracle or card.getDescription() or ""), image, { copyOf = card.getGUID() })
+      printToAll("MTG > " .. tostring(it.name) .. ": " .. seat .. " casts a copy of " .. card.getName()
+        .. " without paying its mana cost. It's on the stack.", GOOD)
+    end)
+  return true
+end
+
+local CARD_FX_ORDER = { "imprintCopy", "yardReturnAttach", "sagaGains", "protectionChoice", "arcum", "fatalPush", "warPeace", "tymna", "cutDeal", "stagger", "moltenNote", "consult", "mindbreak", "endReturn", "firionCopy", "acererak", "throne", "oubliette", "eachUnless", "drawCastFree", "exileTopPlay", "untilNextTurn", "controlCountered", "graveExile", "peekTop", "drawToCopy", "lookSplit", "namedAnywhere", "phaseOut", "castFromYard", "manaPerType", "giveAway",
   "tokensPerCounter", "countersOnLegends", "oppToken", "ringCopy", "ringWatch", "jewel" }
 
 -- Does cardFx take this text? (Its own prompts pick the targets, so nothing is asked as it goes on the stack.)
@@ -9232,6 +9296,27 @@ Events.on("stepStarted", function(d)
   end
 end)
 
+-- Hand an answer to the question's code. If that code breaks, the pop-up still closes (it used to stay up
+-- with nothing left to click: Finale of Devastation after typing X) and the card goes to the by-hand list.
+local function answer(q, v)
+  local ok, err = pcall(q.onPick, v)
+  if not ok then
+    local nm = tostring(q.title or "?"):match("^(.-):") or tostring(q.title or "?")
+    printToAll("MTG > " .. nm .. ": the table hit a problem reading it. Finish it by hand.", { 1, 0.6, 0.2 })
+    if GameLog and GameLog.error then
+      pcall(GameLog.error, tostring(q.title) .. ": " .. tostring(err))
+    end
+    if GameLog and GameLog.byHand then
+      pcall(GameLog.byHand, "MTG > " .. nm .. ": resolve it by hand (the table hit a problem after the answer).")
+    end
+  end
+  if current == nil then
+    nextQuestion()
+  else
+    render()
+  end
+end
+
 function ui_effPick(player, arg)
   local seat, i = tostring(arg):match("^(%a+)_(%d+)$")
   local q = current
@@ -9247,12 +9332,7 @@ function ui_effPick(player, arg)
   end
   current = nil
   UI.setAttribute("effAsk_" .. seat, "visibility", seat)
-  q.onPick(ch.value)
-  -- The answer may have asked a new question already (a mode that needs a
-  -- target, "unless" then "you may"): don't skip past it.
-  if current == nil then
-    nextQuestion()
-  end
+  answer(q, ch.value)
 end
 
 function ui_effNumText(player, value)
@@ -9274,10 +9354,7 @@ function ui_effNumOk(player, seat)
       return
     end
     current = nil
-    q.onPick(t)
-    if current == nil then
-      nextQuestion()
-    end
+    answer(q, t)
     return
   end
   local n = tonumber(numTyped[player.color] or numTyped[seat] or "")
@@ -9286,10 +9363,7 @@ function ui_effNumOk(player, seat)
     return
   end
   current = nil
-  q.onPick(math.floor(n))
-  if current == nil then
-    nextQuestion()
-  end
+  answer(q, math.floor(n))
 end
 
 function Effects.xml()
@@ -9418,8 +9492,16 @@ function Effects.resolve(it)
   do
     local lowI = tostring(it.text or ""):lower()
     local what = lowI:match("you may exile an? ([%a%s,%-]-) card from your hand")
+    -- Isochron Scepter: "an instant card with mana value 2 or less from your hand".
+    local mvMax
+    if what == nil then
+      local w2, mv2 = lowI:match("you may exile an? ([%a%s,%-]-) card with mana value (%d+) or less from your hand")
+      if w2 then
+        what, mvMax = w2, tonumber(mv2)
+      end
+    end
     if what and it.source and Effects.imprint then
-      Effects.imprint(it, what)
+      Effects.imprint(it, what, mvMax)
       return
     end
   end
@@ -10017,8 +10099,19 @@ function Effects.resolveSpell(obj, controller)
   if text == "" then
     return false
   end
+  -- Cast with overload (stack.lua Stack.castOverload): "target" becomes "each". A "return target ..." spell
+  -- keeps its words; the bounce step returns each one when it sees `overloaded`.
+  local overloaded = GameState.data.overload and GameState.data.overload[obj.getGUID()]
+  if overloaded then
+    GameState.data.overload[obj.getGUID()] = nil
+    text = ("\n" .. text):gsub("\n[Oo]verload[^\n]*", ""):gsub("^\n", "")
+    if not text:lower():find("^return target") then
+      text = text:gsub("([Tt])argets? ", function(t) return t == "T" and "Each " or "each " end)
+    end
+    printToAll("MTG > " .. obj.getName() .. " was cast with overload: EACH one, not one target.", INFO)
+  end
   Effects.resolve({ name = obj.getName(), controller = controller, text = text, auto = true, manaCost = cost,
-    card = obj.getGUID(), modesChosen = Effects.pendingModes })
+    card = obj.getGUID(), modesChosen = Effects.pendingModes, overloaded = overloaded and true or nil })
   Effects.pendingModes = nil
   -- Rebound: exiled as it resolves; its owner may cast it free at their next upkeep.
   local low = text:lower()
@@ -11451,6 +11544,23 @@ end
 
 -- true / false for the conditions it knows, nil for the rest (asked as YES / NO).
 function Effects.condValue(cond, seat, name)
+  -- "If you search your library this way, shuffle." The search window shuffles when it closes (CLOSE + SHUFFLE),
+  -- so there is nothing left to ask.
+  if cond == "you search your library this way" then
+    return false
+  end
+  -- X already filled in: "If 5 is 10 or more" (Finale of Devastation), "if 3 is 5 or greater".
+  do
+    local a, b, how = tostring(cond):match("^(%d+) is (%d+) or (%a+)$")
+    if a then
+      a, b = tonumber(a), tonumber(b)
+      if how == "more" or how == "greater" then
+        return a >= b
+      elseif how == "less" or how == "fewer" then
+        return a <= b
+      end
+    end
+  end
   do
     -- Dungeons: "you've completed a dungeon", "you haven't completed Tomb of Annihilation".
     local c2 = cond:gsub("’", "'")
@@ -13704,7 +13814,7 @@ end)
 -- (GameState.data.imprint[source] = { guid, name, colors }), so "the exiled card's colors" works (mana.lua).
 ---------------------------------------------------------------------------
 
-function Effects.imprint(it, what)
+function Effects.imprint(it, what, mvMax)
   local seat = it.controller
   local words = {}
   for w in tostring(what):gmatch("[%a%-]+") do
@@ -13724,6 +13834,9 @@ function Effects.imprint(it, what)
             ok = ok and tl:find(w, 1, true) ~= nil
           end
         end
+        if ok and mvMax and (tonumber(d.cmc) or 0) > mvMax then
+          ok = false
+        end
         if ok then
           table.insert(list, h)
         end
@@ -13731,7 +13844,7 @@ function Effects.imprint(it, what)
     end
   end)
   if #list == 0 then
-    printToAll("MTG > " .. it.name .. ": " .. seat .. " has no " .. what .. " card in hand to exile.", INFO)
+    printToAll("MTG > " .. it.name .. ": " .. seat .. " has no " .. what .. " card" .. (mvMax and (" with mana value " .. mvMax .. " or less") or "") .. " in hand to exile.", INFO)
     return
   end
   local page = 0
@@ -13748,7 +13861,8 @@ function Effects.imprint(it, what)
       table.insert(choices, { label = "BACK", value = "first" })
     end
     table.insert(choices, { label = "NONE", value = false })
-    ask(seat, it.name .. ": exile a card from your hand?", "You may exile a " .. what .. " card from your hand.\n"
+    ask(seat, it.name .. ": exile a card from your hand?", "You may exile " .. (tostring(what):match("^[aeiou]") and "an " or "a ") .. what .. " card"
+      .. (mvMax and (" with mana value " .. mvMax .. " or less") or "") .. " from your hand.\n"
       .. table.concat(lines, "\n"), choices, function(v)
         if v == "more" then
           page = page + 1
@@ -13779,8 +13893,10 @@ function Effects.imprint(it, what)
             Zones.refresh(card)
           end
         end, 1)
+        local srcObj = getObjectFromGUID(it.source)
+        local makesMana = srcObj and tostring(CardData.get(srcObj).oracle or ""):lower():find("exiled card's color", 1, true)
         printToAll("MTG > " .. it.name .. ": " .. seat .. " exiles " .. card.getName()
-          .. (#cols > 0 and (" (taps for " .. table.concat(cols, " or ") .. ")") or " (colorless: it makes no mana)") .. ".", GOOD)
+          .. (makesMana and (#cols > 0 and (" (taps for " .. table.concat(cols, " or ") .. ")") or " (colorless: it makes no mana)") or "") .. ".", GOOD)
       end)
   end
   show()

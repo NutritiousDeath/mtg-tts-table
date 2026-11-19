@@ -37,6 +37,8 @@ local look = {}
 local big = {}
 -- "Up to N cards" (Collective Voyage): the panel closes by itself after N.
 local limit = {}
+-- Look-only panel (LibSearch.view: Gitaxian Probe shows the hand it looks at).
+local viewOnly = {}   -- [color] = true while the panel only shows cards
 
 -- The pile being searched: the library, or the graveyard.
 local function pileFor(color)
@@ -165,6 +167,9 @@ local function render(color, guids, faces, total, matched)
 end
 
 function LibSearch.run(color)
+  if viewOnly[color] then
+    return
+  end
   local lib = pileFor(color)
   if lib == nil then
     status(color, "Your library is empty.")
@@ -339,6 +344,9 @@ function ui_libDest(player, c)
   if c ~= player.color and not GameState.solo() then
     return
   end
+  if viewOnly[c] then
+    return
+  end
   local d = dest[c] or { where = "hand" }
   if d.where == "top" or d.fixed then
     return   -- fixed by the card ("put that card on top", Entomb, Beamtown Bullies)
@@ -409,6 +417,52 @@ function LibSearch.open(color, preset, note, where, tapped, opts)
   end
 end
 
+-- Look-only: show some cards' pictures in this panel (Gitaxian Probe: the target's hand). Clicking takes
+-- nothing, typing searches nothing, CLOSE shuffles nothing. cards = list of card objects.
+function LibSearch.view(color, title, cards, note)
+  if not TableSetup.isActive(color) then
+    return
+  end
+  if open[color] then
+    pcall(LibSearch.close, color, true)
+  end
+  open[color] = true
+  searched[color] = false
+  viewOnly[color] = true
+  look[color], limit[color], filters[color] = nil, nil, nil
+  LibSearch.onCloseCb = LibSearch.onCloseCb or {}
+  LibSearch.onCloseCb[color] = nil
+  local faces, keys, bigs = {}, {}, {}
+  for i, o in ipairs(cards) do
+    if i > MAX_SHOWN then
+      break
+    end
+    local face = ""
+    pcall(function()
+      for _, d in pairs(o.getData().CustomDeck or {}) do
+        face = d.FaceURL or ""
+        break
+      end
+      if face == "" then
+        local co = o.getCustomObject() or {}
+        face = co.face or ""
+      end
+    end)
+    local key = tostring(i)
+    table.insert(keys, key)
+    faces[key] = face:gsub("/large/", "/small/", 1)
+    faces[key .. "|name"] = o.getName()
+    bigs[key] = face
+  end
+  big[color] = bigs
+  shown[color] = keys
+  UI.setValue("lsTitle_" .. color, title)
+  UI.setValue("lsDest_" .. color, "LOOK ONLY")
+  UI.setAttribute("libsearch_" .. color, "active", "true")
+  render(color, keys, faces, #keys, #keys)
+  status(color, note or "Look only: hover a card to see it big. CLOSE when you're done.")
+end
+
 -- !unstick: close every open search panel (no shuffle message, errors ignored).
 function LibSearch.unstick()
   local n = 0
@@ -436,6 +490,13 @@ function LibSearch.close(color, quiet)
   open[color] = false
   shown[color] = nil
   big[color] = nil
+  if viewOnly[color] then
+    viewOnly[color] = nil
+    UI.setAttribute("libsearch_" .. color, "active", "false")
+    UI.setAttribute("lsPrevL_" .. color, "active", "false")
+    UI.setAttribute("lsPrevR_" .. color, "active", "false")
+    return
+  end
   UI.setAttribute("libsearch_" .. color, "active", "false")
   UI.setAttribute("lsPrevL_" .. color, "active", "false")
   UI.setAttribute("lsPrevR_" .. color, "active", "false")
@@ -728,6 +789,9 @@ function ui_libPick(player, arg)
   local c, i = tostring(arg):match("^(%a+)_(%d+)$")
   if c ~= player.color and not GameState.solo() then
     return
+  end
+  if viewOnly[c] then
+    return   -- looking only (Gitaxian Probe)
   end
   local d = dest[c] or { where = "hand" }
   take(c, tonumber(i), d.where == "battlefield", d.tapped, d.where == "top", d.where == "graveyard")

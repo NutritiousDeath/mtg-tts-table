@@ -226,6 +226,9 @@ function Stack.pushCard(obj, controller, from)
         Stack.offer()
       end
     end, 0.3)
+  elseif GameState.data.overload and GameState.data.overload[obj.getGUID()] then
+    item.overloaded = true      -- overload: no targets ("each" instead)
+    Stack.offer()
   elseif (ty.Instant or ty.Sorcery) and not (ty.Creature or ty.Enchantment or ty.Artifact or ty.Planeswalker or ty.Battle or ty.Land)
       and Effects and Effects.chooseTargets then
     item.targetText = tostring(cd.oracle or "")
@@ -1832,6 +1835,30 @@ function Stack.altCostOf(obj)
   return alt
 end
 
+-- Overload (Cyclonic Rift "Overload {6}{U}"): the overload cost, or nil.
+function Stack.overloadOf(obj)
+  local low = "\n" .. string.lower(tostring(oracleOf(obj) or ""))
+  return low:match("\noverload%s*(%b{}[{}%w/]*)")
+end
+
+-- Cast it for its overload cost: that cost comes out of the pool, no target is chosen, and as it resolves
+-- "target" means "each" (effects.lua Effects.resolveSpell / the bounce step).
+function Stack.castOverload(obj, playerColor)
+  local cost = Stack.overloadOf(obj)
+  if cost == nil or obj.isDestroyed() then
+    return
+  end
+  local seat = (Zones.handOwner and Zones.handOwner(obj)) or playerColor
+  if not TableSetup.isActive(seat) or (seat ~= playerColor and not GameState.solo()) then
+    broadcastToColor("That card is in " .. tostring(seat) .. "'s hand.", playerColor, WARN)
+    return
+  end
+  GameState.data.overload = GameState.data.overload or {}
+  GameState.data.overload[obj.getGUID()] = cost:upper()
+  printToAll("MTG > " .. seat .. " casts " .. obj.getName() .. " with OVERLOAD (" .. cost:upper() .. ").", INFO)
+  Stack.pushCard(obj, seat, { seat = seat, region = "hand" })
+end
+
 local function cardColors(o)
   local set = {}
   pcall(function()
@@ -1913,6 +1940,13 @@ function Stack.addCardMenu(obj, full)
   if not full and okAlt and hasAlt then
     obj.addContextMenuItem("Cast: alternative cost", function(playerColor)
       Stack.castAlt(obj, playerColor)
+    end)
+  end
+  -- Overload (Cyclonic Rift), from the hand.
+  local okOv, ov = pcall(function() return Zones.handOwner(obj) ~= nil and Stack.overloadOf(obj) or nil end)
+  if not full and okOv and ov then
+    obj.addContextMenuItem("Cast: overload " .. ov:upper(), function(playerColor)
+      Stack.castOverload(obj, playerColor)
     end)
   end
   -- Cycling, from the hand.
